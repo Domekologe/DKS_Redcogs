@@ -75,28 +75,23 @@ class GuildTools(commands.Cog):
 
         # CSV in Memory bauen
         buf = io.StringIO()
-        writer = csv.writer(buf, delimiter="|", lineterminator="\n")
+        writer = csv.writer(buf, delimiter=";", lineterminator="\n")  # <— Spaltentrenner jetzt ';'
 
-        # Header exakt wie gewünscht
+        # Header exakt wie gewünscht (mit ';' getrennt)
         writer.writerow(["UserID", "Username", "Name_Auf_Server", "Rolle(n)", "Mitglied_Seit", "Zuletzt_Online"])
 
         # Zeilen
         for m in members:
             user_id = str(m.id)
-            username = m.name  # globaler Username
-            name_auf_server = m.display_name  # Nickname/Servername
-            rollen = ", ".join([r.name for r in m.roles if r.name != "@everyone"]) or ""
-            # Mitglied_Seit
-            if m.joined_at:
-                joined = m.joined_at.astimezone(timezone.utc).isoformat()
-            else:
-                joined = ""
-            # Zuletzt_Online aus Tracking oder unbekannt
+            username = m.name
+            name_auf_server = m.display_name
+            rollen = ", ".join([r.name for r in m.roles if r.name != "@everyone"]) or ""  # <— Mehrere Rollen mit Komma
+            joined = m.joined_at.astimezone(timezone.utc).isoformat() if m.joined_at else ""
             zuletzt_online = last_seen_map.get(user_id, "unbekannt")
 
             writer.writerow([user_id, username, name_auf_server, rollen, joined, zuletzt_online])
 
-        # Datei vorbereiten
+        # Datei schreiben (BOM für Excel)
         buf.seek(0)
         filename = f"user_export_{guild.id}.csv"
         file = discord.File(fp=io.BytesIO(buf.getvalue().encode("utf-8-sig")), filename=filename)
