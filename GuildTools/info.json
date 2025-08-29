@@ -1,0 +1,10 @@
+{
+  "author": ["Domekologe"],
+  "install_msg": "GuildTools Installed.",
+  "name": "GuildTools",
+  "short": "Slash/Hybrid Tools for Guilds",
+  "description": "Spezielle Dinge die wir brauchen.",
+  "end_user_data_statement": "Dieses Cog speichert keine personenbezogenen Daten.",
+  "tags": ["guild","tools"],
+  "min_bot_version": "3.5.0"
+}
