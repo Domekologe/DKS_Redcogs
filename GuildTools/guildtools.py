@@ -49,7 +49,7 @@ class GuildTools(commands.Cog):
         await self.config.guild(after.guild).last_seen.set(guild_data)
 
     # ------- Slash-Command: /export-userlist -------
-    @app_commands.command(name="export-userlist", description="Exportiert alle User in eine CSV (UserID|Username|Name_Auf_Server|Rolle(n)|Mitglied_Seit|Zuletzt_Online).")
+    @app_commands.command(name="export-userlist", description="Exportiert alle User in eine CSV.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def export_userlist(self, interaction: discord.Interaction):
