@@ -16,7 +16,7 @@ class GuildTools(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0xD0ME20250829, force_registration=True)
+        self.config = Config.get_conf(self, identifier=0xD0DE2025, force_registration=True)
         # Struktur: {guild_id: {member_id: iso_timestamp}}
         self.config.register_guild(last_seen={})
 
