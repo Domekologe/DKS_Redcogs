@@ -1,11 +1,10 @@
 import discord
-
 from redbot.core import commands, app_commands
 
 class Misc(commands.Cog):
-    def __init__(self.bot):
-        self.bot=bot
+    def __init__(self, bot):
+        self.bot = bot
 
-    @app_commands.command()
+    @app_commands.command(name="ping")
     async def ping(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Pong!", ephermal=True)
+        await interaction.response.send_message("Pong!", ephemeral=True)
