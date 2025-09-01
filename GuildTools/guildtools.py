@@ -159,10 +159,9 @@ class GuildTools(commands.Cog):
             await asyncio.to_thread(_write)
 
         await interaction.response.send_message(
-            f"✅ Abwesenheit gespeichert für **{interaction.user.mention}**\n"
+            f"✅ Neue Abwesenheit gespeichert für **{interaction.user.mention}**\n"
             f"• Von: **{_out_date(start)}**\n"
             f"• Bis: **{_out_date(end)}**",
-            ephemeral=True,
         )
 
     @app_commands.command(name="list-absence", description="Zeigt deine Abwesenheiten (ephemeral).")
