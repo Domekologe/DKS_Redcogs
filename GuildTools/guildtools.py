@@ -320,7 +320,7 @@ class GuildTools(commands.Cog):
         realm_slug = _slugify_realm(realm)
         char_slug = _slugify_char(charname)
         base = f"https://{region}.api.blizzard.com"
-        ns = f"profile-{region}"
+        ns = f"profile-classic-{region}"
         headers = {"Authorization": f"Bearer {token}"}
         async with aiohttp.ClientSession(headers=headers) as sess:
             params = {"namespace": ns, "locale": locale}
