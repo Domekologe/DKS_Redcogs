@@ -2,23 +2,43 @@ import discord
 from discord import app_commands
 from redbot.core import commands, Config
 from redbot.core.bot import Red
+from redbot.core.data_manager import cog_data_path
 from datetime import datetime, timezone
 import io
 import csv
+import asyncio
+import re
+import os
 
 ONLINE_STATES = {discord.Status.online, discord.Status.idle, discord.Status.dnd}
+DATE_FORMATS = ["%d-%m-%Y", "%d.%m.%Y", "%d/%m/%Y"]
+
+def _parse_date(s: str) -> datetime | None:
+    s = s.strip()
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+def _out_date(dt: datetime) -> str:
+    # Einheitliches Ausgabeformat in Datei/CSV
+    return dt.strftime("%d.%m.%Y")
 
 class GuildTools(commands.Cog):
-    """Cog: Tools für WoW-Gilden – Export der Userliste als CSV."""
+    """Cog: Tools für WoW-Gilden – Export & Abwesenheiten."""
 
     __author__ = "Domekologe"
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=0xD0DE2025, force_registration=True)
         # Struktur: {guild_id: {member_id: iso_timestamp}}
         self.config.register_guild(last_seen={})
+        # File-Lock für Abwesenheits-Datei-IO
+        self._abs_lock = asyncio.Lock()
 
     # ------- Presence-Tracking für "Zuletzt_Online" -------
     @commands.Cog.listener()
@@ -34,9 +54,7 @@ class GuildTools(commands.Cog):
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Logik:
-        # - Wechsel in einen Online-Zustand: setze last_seen = jetzt
-        # - Wechsel auf offline: setze last_seen = jetzt (Zeitpunkt des Offline-Gangs)
+        # Wechsel-Logik
         became_online = after.status in ONLINE_STATES and before.status != after.status
         became_offline = after.status is discord.Status.offline and before.status != after.status
 
@@ -75,9 +93,9 @@ class GuildTools(commands.Cog):
 
         # CSV in Memory bauen
         buf = io.StringIO()
-        writer = csv.writer(buf, delimiter=";", lineterminator="\n")  # <— Spaltentrenner jetzt ';'
+        writer = csv.writer(buf, delimiter=";", lineterminator="\n")  # Spaltentrenner ';'
 
-        # Header exakt wie gewünscht (mit ';' getrennt)
+        # Header
         writer.writerow(["UserID", "Username", "Name_Auf_Server", "Rolle(n)", "Mitglied_Seit", "Zuletzt_Online"])
 
         # Zeilen
@@ -85,7 +103,7 @@ class GuildTools(commands.Cog):
             user_id = str(m.id)
             username = m.name
             name_auf_server = m.display_name
-            rollen = ", ".join([r.name for r in m.roles if r.name != "@everyone"]) or ""  # <— Mehrere Rollen mit Komma
+            rollen = ", ".join([r.name for r in m.roles if r.name != "@everyone"]) or ""
             joined = m.joined_at.astimezone(timezone.utc).isoformat() if m.joined_at else ""
             zuletzt_online = last_seen_map.get(user_id, "unbekannt")
 
@@ -98,6 +116,119 @@ class GuildTools(commands.Cog):
 
         await interaction.followup.send(
             content="Hier ist dein Export (nur für dich sichtbar).",
+            file=file,
+            ephemeral=True,
+        )
+
+    # ------- Slash-Command: /add-absence -------
+    @app_commands.command(
+        name="add-absence",
+        description="Trage eine Abwesenheit ein (Format: Tag-Monat-Jahr; z. B. 01-09-2025 / 01.09.2025 / 01/09/2025)."
+    )
+    @app_commands.describe(
+        von="Startdatum deiner Abwesenheit (z. B. 01-09-2025 oder 01.09.2025)",
+        bis="Enddatum deiner Abwesenheit (z. B. 05-09-2025 oder 05.09.2025)",
+    )
+    @app_commands.guild_only()
+    async def add_absence(self, interaction: discord.Interaction, von: str, bis: str):
+        start = _parse_date(von)
+        end = _parse_date(bis)
+
+        if not start:
+            return await interaction.response.send_message(
+                "❌ Ungültiges **von**-Datum. Erlaubt sind `DD-MM-YYYY`, `DD.MM.YYYY`, `DD/MM/YYYY`.",
+                ephemeral=True,
+            )
+        if not end:
+            return await interaction.response.send_message(
+                "❌ Ungültiges **bis**-Datum. Erlaubt sind `DD-MM-YEEE`, `DD.MM.YYYY`, `DD/MM/YYYY`.",
+                ephemeral=True,
+            )
+        if end < start:
+            return await interaction.response.send_message(
+                "❌ **bis** darf nicht vor **von** liegen.",
+                ephemeral=True,
+            )
+        if (end - start).days > 365:
+            return await interaction.response.send_message(
+                "❌ Abwesenheiten dürfen max. 365 Tage umfassen.",
+                ephemeral=True,
+            )
+
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+
+        # Datei: absences_<guildid>.txt im Cog-Datenordner
+        data_dir = cog_data_path(raw_name=self.__class__.__name__)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        path = data_dir / f"absences_{guild.id}.txt"
+
+        # Zeile vorbereiten
+        row = [
+            str(interaction.user.id),
+            interaction.user.name,
+            interaction.user.display_name,
+            _out_date(start),
+            _out_date(end),
+        ]
+        line = ";".join(row) + "\n"
+
+        # Thread-sicher schreiben
+        async with self._abs_lock:
+            # Datei anlegen, falls nicht vorhanden, mit Header
+            new_file = not path.exists()
+            # Schreiben in Thread (Datei-IO blockiert)
+            def _write():
+                with open(path, "a", encoding="utf-8") as f:
+                    if new_file:
+                        f.write("UserID;Username;Name auf Server;Von;Bis\n")
+                    f.write(line)
+            await asyncio.to_thread(_write)
+
+        # Ephemeral Bestätigung
+        await interaction.response.send_message(
+            f"✅ Abwesenheit gespeichert für **{interaction.user.mention}**\n"
+            f"• Von: **{_out_date(start)}**\n"
+            f"• Bis: **{_out_date(end)}**\n"
+            f"(Eintrag liegt in der Gilden-Abwesenheitsdatei.)",
+            ephemeral=True,
+        )
+
+    # ------- Slash-Command: /get-absence (nur Mods) -------
+    @app_commands.command(
+        name="get-absence",
+        description="Erstellt eine CSV mit allen Abwesenheiten (Delimiter ';')."
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def get_absence(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.followup.send("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+
+        data_dir = cog_data_path(raw_name=self.__class__.__name__)
+        path = data_dir / f"absences_{guild.id}.txt"
+
+        if not path.exists():
+            return await interaction.followup.send("Keine Abwesenheiten gefunden.", ephemeral=True)
+
+        # Datei lesen & als CSV (mit BOM) zurückgeben
+        async with self._abs_lock:
+            def _read_all() -> str:
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            content = await asyncio.to_thread(_read_all)
+
+        # Wir liefern als CSV-Datei aus (gleiches Format/Delimiter, aber mit UTF-8-BOM für Excel)
+        out_bytes = ("\ufeff" + content).encode("utf-8")  # BOM hinzufügen
+        filename = f"absences_{guild.id}.csv"
+        file = discord.File(io.BytesIO(out_bytes), filename=filename)
+
+        await interaction.followup.send(
+            content="Hier ist die Abwesenheitsliste (nur für dich sichtbar).",
             file=file,
             ephemeral=True,
         )
