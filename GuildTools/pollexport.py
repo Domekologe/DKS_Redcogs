@@ -113,29 +113,63 @@ class GuildToolsPollExport(commands.Cog):
 
     @export_poll.autocomplete("poll")
     async def poll_autocomplete(self, interaction: discord.Interaction, current: str):
-        channel = interaction.channel
-        if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
-            return [app_commands.Choice(name="Nur in Textchannels/Threads nutzbar", value="0")]
-
-        # Wir scannen kurz die letzten ~200 Nachrichten nach nativen Polls (neuste zuerst)
-        items: List[discord.Message] = []
-        async for m in channel.history(limit=200, oldest_first=False):
-            if m.poll:
-                items.append(m)
-            if len(items) >= 25:  # Autocomplete-Limit
-                break
-
-        out = []
         cur = (current or "").lower()
-        for m in items:
-            q = getattr(m.poll.question, "text", str(m.poll.question))
-            label = f"{q[:80]}  •  ID:{m.id}"
-            if not cur or cur in q.lower() or cur in str(m.id):
-                out.append(app_commands.Choice(name=label, value=str(m.id)))
+        choices = []
 
-        if not out:
-            out = [app_commands.Choice(name="Keine Polls im Verlauf gefunden", value="0")]
-        return out
+        async def add_choice_from_message(m: discord.Message):
+            if getattr(m, "poll", None):
+                q = getattr(m.poll.question, "text", str(m.poll.question))
+                label = f"{q[:80]}  •  ID:{m.id}"
+                if not cur or cur in q.lower() or cur in str(m.id):
+                    choices.append(app_commands.Choice(name=label, value=str(m.id)))
+
+        channel = interaction.channel
+
+        # 1) TextChannel
+        if isinstance(channel, discord.TextChannel):
+            async for m in channel.history(limit=400, oldest_first=False):
+                await add_choice_from_message(m)
+                if len(choices) >= 25:
+                    break
+
+        # 2) Thread
+        elif isinstance(channel, discord.Thread):
+            async for m in channel.history(limit=400, oldest_first=False):
+                await add_choice_from_message(m)
+                if len(choices) >= 25:
+                    break
+
+        # 3) ForumChannel: Threads (aktiv + archiviert) prüfen
+        elif isinstance(channel, discord.ForumChannel):
+            threads = list(channel.threads)  # aktuell offene
+            # auch archivierte Threads nachladen (nur die letzten N, sonst zu teuer)
+            archived = []
+            async for th in channel.archived_threads(limit=100, private=False):
+                archived.append(th)
+                if len(archived) >= 100:
+                    break
+            for th in (threads + archived)[::-1]:  # neueste zuerst
+                try:
+                    sm = th.starter_message or await th.fetch_message(th.id)
+                except Exception:
+                    continue
+                await add_choice_from_message(sm)
+                if len(choices) >= 25:
+                    break
+
+    # 4) Nichts gefunden ➜ kleine Hilfestellung + Fallback für direkte Eingabe
+    if not choices:
+        # Wenn der User eine ID oder einen Link eingetippt hat, erlauben wir das als direkte Auswahl
+        # (Wichtig: Der eigentliche fetch und die Prüfung passieren dann in export_poll)
+        typed = current.strip() if current else ""
+        if typed:
+            # Erlaube Message-ID oder -Link
+            choices = [app_commands.Choice(name=f"Direkte Eingabe verwenden: {typed[:90]}", value=typed)]
+        else:
+            choices = [app_commands.Choice(name="Keine Umfragen gefunden – gib ID/Link ein", value="0")]
+
+    return choices[:25]
+
 
     # ---- CSV-Erzeugung ----
     def _build_csv(
