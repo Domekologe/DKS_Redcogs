@@ -12,7 +12,6 @@ from redbot.core import commands
 async def fetch_answer_voters(
     client: discord.Client, channel_id: int, message_id: int, answer_id: int, limit: int = 1000
 ) -> List[int]:
-    """Liefert User-IDs, die für 'answer_id' gestimmt haben. Handhabt Pagination via 'after'."""
     user_ids: List[int] = []
     after: Optional[int] = None
     fetched = 0
@@ -59,20 +58,7 @@ class GuildToolsPollExport(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.describe(
-        poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel, alternativ ID/Link einfügen)",
-        type="Export-Ansicht",
-    )
-    @app_commands.choices(
-        type=[
-            app_commands.Choice(name="Key-Oriented", value="key"),
-            app_commands.Choice(name="Value-Oriented", value="value"),
-        ]
-    )
-    @app_commands.command(
-        name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
-    )
-
+    # ---------- Helper innerhalb der Klasse ----------
     def _ans_id(self, ans) -> int:
         # verschiedene discord.py-Versionen: mal .id, mal .answer_id
         val = getattr(ans, "answer_id", None)
@@ -90,8 +76,29 @@ class GuildToolsPollExport(commands.Cog):
             txt = getattr(pm, "text", None) if pm else None
         return txt if txt else str(ans)
 
+    @staticmethod
+    def parse_message_ref(text: str, fallback_channel_id: int) -> Tuple[int, int]:
+        """Parst Nachricht-ID oder -Link. Gibt (channel_id, message_id) zurück."""
+        m = re.search(r"/channels/\d+/(\d+)/(\d+)", text or "")
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        return fallback_channel_id, int(text)
 
-    async def export_poll(self, interaction: discord.Interaction, poll: str, type: app_commands.Choice[str]):
+    # ---------- Slash-Command ----------
+    @app_commands.describe(
+        poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel, alternativ ID/Link einfügen)",
+        mode="Export-Ansicht",
+    )
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Key-Oriented", value="key"),
+            app_commands.Choice(name="Value-Oriented", value="value"),
+        ]
+    )
+    @app_commands.command(
+        name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
+    )
+    async def export_poll(self, interaction: discord.Interaction, poll: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True)
 
         # ID oder Link parsen
@@ -136,15 +143,13 @@ class GuildToolsPollExport(commands.Cog):
 
         # --- CSV bauen ---
         question_text = getattr(poll_obj.question, "text", str(poll_obj.question))
-        answers_list: List[Tuple[int, str]] = []
-        for a in answers:
-            answers_list.append((self._ans_id(a), self._ans_text(a)))
+        answers_list: List[Tuple[int, str]] = [(self._ans_id(a), self._ans_text(a)) for a in answers]
 
         csv_bytes, filename = self._build_csv(
             question=question_text,
             answers=answers_list,
             answer_to_voters=answer_to_voters,
-            mode=type.value,
+            mode=mode.value,
         )
 
         file = discord.File(fp=io.BytesIO(csv_bytes), filename=filename)
@@ -158,7 +163,7 @@ class GuildToolsPollExport(commands.Cog):
             if not q:
                 q = f"Umfrage {mid}"
             label = f"{q}  •  ID:{mid}"
-            return label[:100]  # Discord-Constraint
+            return label[:100]
 
         cur = (current or "").lower()
         channel = interaction.channel
@@ -200,15 +205,6 @@ class GuildToolsPollExport(commands.Cog):
 
         return choices[:25]
 
-    @staticmethod
-    def parse_message_ref(text: str, fallback_channel_id: int) -> Tuple[int, int]:
-        """Parst Nachricht-ID oder -Link. Gibt (channel_id, message_id) zurück."""
-        m = re.search(r"/channels/\d+/(\d+)/(\d+)", text or "")
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        # reine ID -> im aktuellen Channel
-        return fallback_channel_id, int(text)
-
     # ---- CSV-Erzeugung ----
     def _build_csv(
         self,
@@ -231,8 +227,8 @@ class GuildToolsPollExport(commands.Cog):
         lines: List[str] = []
         if mode == "key":
             lines.append("Wahlmöglichkeit;Wähler (Komma getrennt)")
-            for ans_id, ans_text in answers:
-                voters = answer_to_voters.get(ans_id, [])
+            for _, ans_text in answers:
+                voters = [uid for uid in answer_to_voters.get(self._find_answer_id(answers, ans_text), [])]
                 voters_mentions = ", ".join(f"<@{uid}>" for uid in voters)
                 lines.append(f"{esc(ans_text)}{sep}{esc(voters_mentions)}")
             filename = "poll_export_key_oriented.csv"
@@ -245,3 +241,9 @@ class GuildToolsPollExport(commands.Cog):
 
         content = "\n".join(lines) + "\n"
         return content.encode("utf-8"), filename
+
+    def _find_answer_id(self, answers: List[Tuple[int, str]], text: str) -> int:
+        for aid, t in answers:
+            if t == text:
+                return aid
+        return -1
