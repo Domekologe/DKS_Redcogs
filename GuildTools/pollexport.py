@@ -255,7 +255,7 @@ class GuildToolsPollExport(commands.Cog):
 
 
         content = "\n".join(lines) + "\n"
-        return content.encode("utf-8"), filename
+        return content.encode("utf-8-sig"), filename
 
     def _find_answer_id(self, answers: List[Tuple[int, str]], text: str) -> int:
         for aid, t in answers:
