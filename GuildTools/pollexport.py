@@ -109,7 +109,7 @@ class GuildToolsPollExport(commands.Cog):
         name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
     )
     async def export_poll(self, interaction: discord.Interaction, poll: str, mode: app_commands.Choice[str]):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         # ID oder Link parsen
         try:
@@ -166,7 +166,7 @@ class GuildToolsPollExport(commands.Cog):
 
         file = discord.File(fp=io.BytesIO(csv_bytes), filename=filename)
         title = f"📤 CSV-Export: **{question_text}**"
-        await interaction.followup.send(content=title, file=file)
+        await interaction.followup.send(content=title, file=file, ephemeral=True)
 
     @export_poll.autocomplete("poll")
     async def poll_autocomplete(self, interaction: discord.Interaction, current: str):
