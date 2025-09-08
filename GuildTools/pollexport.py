@@ -156,11 +156,13 @@ class GuildToolsPollExport(commands.Cog):
         answers_list: List[Tuple[int, str]] = [(self._ans_id(a), self._ans_text(a)) for a in answers]
 
         csv_bytes, filename = self._build_csv(
+            guild=interaction.guild,
             question=question_text,
             answers=answers_list,
             answer_to_voters=answer_to_voters,
             mode=mode.value,
         )
+
 
         file = discord.File(fp=io.BytesIO(csv_bytes), filename=filename)
         title = f"📤 CSV-Export: **{question_text}**"
@@ -218,6 +220,7 @@ class GuildToolsPollExport(commands.Cog):
     # ---- CSV-Erzeugung ----
     def _build_csv(
         self,
+        guild: discord.Guild,
         question: str,
         answers: List[Tuple[int, str]],
         answer_to_voters: Dict[int, List[int]],
@@ -236,17 +239,17 @@ class GuildToolsPollExport(commands.Cog):
 
         lines: List[str] = []
         if mode == "key":
-            lines.append("Wahlmöglichkeit;Wähler")
+            lines.append("Wahlmöglichkeit;Wähler (Komma getrennt)")
             for aid, ans_text in answers:
                 voters = answer_to_voters.get(aid, [])
-                voters_names = ", ".join(self._user_name(interaction.guild, uid) for uid in voters)
+                voters_names = ", ".join(self._user_name(guild, uid) for uid in voters)
                 lines.append(f"{esc(ans_text)}{sep}{esc(voters_names)}")
             filename = "poll_export_key_oriented.csv"
         else:
-            lines.append("Wähler;HatGewählt")
+            lines.append("Wähler;HatGewählt (Komma getrennt)")
             for uid, picks in user_choices.items():
                 picks_str = ", ".join(sorted(picks))
-                voter_name = self._user_name(interaction.guild, uid)
+                voter_name = self._user_name(guild, uid)
                 lines.append(f"{voter_name}{sep}{esc(picks_str)}")
             filename = "poll_export_value_oriented.csv"
 
