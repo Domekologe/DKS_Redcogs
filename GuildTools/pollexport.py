@@ -72,6 +72,25 @@ class GuildToolsPollExport(commands.Cog):
     @app_commands.command(
         name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
     )
+
+    def _ans_id(self, ans) -> int:
+        # verschiedene discord.py-Versionen: mal .id, mal .answer_id
+        val = getattr(ans, "answer_id", None)
+        if val is None:
+            val = getattr(ans, "id", None)
+        if val is None:
+            raise AttributeError("PollAnswer hat weder 'answer_id' noch 'id'.")
+        return int(val)
+
+    def _ans_text(self, ans) -> str:
+        # bevorzugt Klartext; sonst evtl. über poll_media; sonst str(ans)
+        txt = getattr(ans, "text", None)
+        if not txt:
+            pm = getattr(ans, "poll_media", None)
+            txt = getattr(pm, "text", None) if pm else None
+        return txt if txt else str(ans)
+
+
     async def export_poll(self, interaction: discord.Interaction, poll: str, type: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True)
 
@@ -111,17 +130,15 @@ class GuildToolsPollExport(commands.Cog):
         # --- Voter je Antwort sammeln ---
         answer_to_voters: Dict[int, List[int]] = {}
         for ans in answers:
-            voters = await fetch_answer_voters(self.bot, msg.channel.id, msg.id, ans.answer_id)
-            answer_to_voters[ans.answer_id] = voters
+            ans_id = self._ans_id(ans)
+            voters = await fetch_answer_voters(self.bot, msg.channel.id, msg.id, ans_id)
+            answer_to_voters[ans_id] = voters
 
         # --- CSV bauen ---
         question_text = getattr(poll_obj.question, "text", str(poll_obj.question))
         answers_list: List[Tuple[int, str]] = []
         for a in answers:
-            txt = getattr(a, "text", None)
-            if not txt:
-                txt = str(a)
-            answers_list.append((a.answer_id, txt))
+            answers_list.append((self._ans_id(a), self._ans_text(a)))
 
         csv_bytes, filename = self._build_csv(
             question=question_text,
