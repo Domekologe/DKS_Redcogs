@@ -1,43 +1,47 @@
 # guildtools/pollexport.py
 import io
-from typing import Dict, List, Set, Tuple, Optional
+import re
+from typing import Dict, List, Tuple, Optional
 
 import discord
 from discord import app_commands
 from redbot.core import commands
 
+
 # ---- kleine Helper: REST-Call für Voter holen (paged) ----
-async def fetch_answer_voters(client: discord.Client, channel_id: int, message_id: int, answer_id: int, limit: int = 1000) -> List[int]:
+async def fetch_answer_voters(
+    client: discord.Client, channel_id: int, message_id: int, answer_id: int, limit: int = 1000
+) -> List[int]:
     """Liefert User-IDs, die für 'answer_id' gestimmt haben. Handhabt Pagination via 'after'."""
     user_ids: List[int] = []
     after: Optional[int] = None
     fetched = 0
 
     while True:
-        # discord API: GET /channels/{channel_id}/polls/{message_id}/answers/{answer_id}/voters
-        # discord.py stellt das i.d.R. als http.get_poll_answer_voters bereit; wenn nicht, Route selbst bauen.
         try:
-            data = await client.http.get_poll_answer_voters(channel_id, message_id, answer_id, limit=min(100, limit - fetched), after=after)
-        except AttributeError:
-            # Fallback auf generische Route
-            route = discord.http.Route(
-                'GET',
-                '/channels/{channel_id}/polls/{message_id}/answers/{answer_id}/voters',
-                channel_id=channel_id, message_id=message_id, answer_id=answer_id
+            data = await client.http.get_poll_answer_voters(
+                channel_id, message_id, answer_id, limit=min(100, limit - fetched), after=after
             )
-            params = {'limit': min(100, limit - fetched)}
+        except AttributeError:
+            route = discord.http.Route(
+                "GET",
+                "/channels/{channel_id}/polls/{message_id}/answers/{answer_id}/voters",
+                channel_id=channel_id,
+                message_id=message_id,
+                answer_id=answer_id,
+            )
+            params = {"limit": min(100, limit - fetched)}
             if after:
-                params['after'] = after
+                params["after"] = after
             data = await client.http.request(route, params=params)
 
-        users = data.get('users', []) if isinstance(data, dict) else data  # je nach lib-Version
+        users = data.get("users", []) if isinstance(data, dict) else data
         if not users:
             break
 
         ids = []
         for u in users:
-            # kann 'id' (Snowflake) sein oder kompletter User
-            uid = int(u['id'] if isinstance(u, dict) else int(u))
+            uid = int(u["id"] if isinstance(u, dict) else int(u))
             ids.append(uid)
         user_ids.extend(ids)
         fetched += len(ids)
@@ -56,8 +60,8 @@ class GuildToolsPollExport(commands.Cog):
         self.bot = bot
 
     @app_commands.describe(
-        poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel)",
-        type="Export-Ansicht"
+        poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel, alternativ ID/Link einfügen)",
+        type="Export-Ansicht",
     )
     @app_commands.choices(
         type=[
@@ -65,30 +69,41 @@ class GuildToolsPollExport(commands.Cog):
             app_commands.Choice(name="Value-Oriented", value="value"),
         ]
     )
-    @app_commands.command(name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt).")
+    @app_commands.command(
+        name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
+    )
     async def export_poll(self, interaction: discord.Interaction, poll: str, type: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True)
 
-        # Erwartet message_id als String (aus Autocomplete)
+        # ID oder Link parsen
         try:
-            message_id = int(poll)
-        except ValueError:
+            chan_id, message_id = self.parse_message_ref(poll, interaction.channel.id)
+        except Exception:
             return await interaction.followup.send("❌ Ungültige Umfrage-Auswahl.", ephemeral=True)
 
-        channel = interaction.channel
-        if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
+        # Channel holen (kann ein anderer Channel/Thread sein)
+        ch = interaction.guild.get_channel(chan_id)
+        if ch is None:
+            try:
+                ch = await interaction.client.fetch_channel(chan_id)
+            except Exception:
+                return await interaction.followup.send("❌ Ziel-Channel nicht gefunden/zugreifbar.", ephemeral=True)
+
+        if not isinstance(ch, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
             return await interaction.followup.send("❌ Dieser Befehl funktioniert nur in Textchannels/Threads.", ephemeral=True)
 
+        # Nachricht laden
         try:
-            msg = await channel.fetch_message(message_id)
+            msg = await ch.fetch_message(message_id)
         except discord.NotFound:
             return await interaction.followup.send("❌ Nachricht nicht gefunden.", ephemeral=True)
+        except discord.Forbidden:
+            return await interaction.followup.send("❌ Keine Berechtigung, die Nachricht zu lesen.", ephemeral=True)
 
-        if not msg.poll:
+        if not getattr(msg, "poll", None):
             return await interaction.followup.send("❌ Diese Nachricht enthält keine Umfrage.", ephemeral=True)
 
         poll_obj = msg.poll
-        # answers: Liste mit .answer_id und .text / .emoji
         answers = list(poll_obj.answers or [])
         if not answers:
             return await interaction.followup.send("❌ Keine Antworten gefunden.", ephemeral=True)
@@ -96,80 +111,86 @@ class GuildToolsPollExport(commands.Cog):
         # --- Voter je Antwort sammeln ---
         answer_to_voters: Dict[int, List[int]] = {}
         for ans in answers:
-            voters = await fetch_answer_voters(self.bot, channel.id, msg.id, ans.answer_id)
+            voters = await fetch_answer_voters(self.bot, msg.channel.id, msg.id, ans.answer_id)
             answer_to_voters[ans.answer_id] = voters
 
         # --- CSV bauen ---
+        question_text = getattr(poll_obj.question, "text", str(poll_obj.question))
+        answers_list: List[Tuple[int, str]] = []
+        for a in answers:
+            txt = getattr(a, "text", None)
+            if not txt:
+                txt = str(a)
+            answers_list.append((a.answer_id, txt))
+
         csv_bytes, filename = self._build_csv(
-            question = getattr(poll_obj.question, "text", str(poll_obj.question)),
-            answers = [(a.answer_id, a.text if hasattr(a, "text") else str(a)) for a in answers],
-            answer_to_voters = answer_to_voters,
-            mode = type.value
+            question=question_text,
+            answers=answers_list,
+            answer_to_voters=answer_to_voters,
+            mode=type.value,
         )
 
         file = discord.File(fp=io.BytesIO(csv_bytes), filename=filename)
-        title = f"📤 CSV-Export: **{getattr(poll_obj.question, 'text', str(poll_obj.question))}**"
+        title = f"📤 CSV-Export: **{question_text}**"
         await interaction.followup.send(content=title, file=file)
 
     @export_poll.autocomplete("poll")
     async def poll_autocomplete(self, interaction: discord.Interaction, current: str):
+        def safe_label(q: str, mid: int) -> str:
+            q = (q or "").replace("\n", " ").replace("\r", " ").strip()
+            if not q:
+                q = f"Umfrage {mid}"
+            label = f"{q}  •  ID:{mid}"
+            return label[:100]  # Discord-Constraint
+
         cur = (current or "").lower()
-        choices = []
-
-        async def add_choice_from_message(m: discord.Message):
-            if getattr(m, "poll", None):
-                q = getattr(m.poll.question, "text", str(m.poll.question))
-                label = f"{q[:80]}  •  ID:{m.id}"
-                if not cur or cur in q.lower() or cur in str(m.id):
-                    choices.append(app_commands.Choice(name=label, value=str(m.id)))
-
         channel = interaction.channel
+        choices: List[app_commands.Choice[str]] = []
+        seen_ids = set()
 
-        # 1) TextChannel
-        if isinstance(channel, discord.TextChannel):
+        async def try_add_from_message(m: discord.Message):
+            if getattr(m, "poll", None) and m.id not in seen_ids:
+                q = getattr(m.poll.question, "text", str(m.poll.question))
+                label = safe_label(q, m.id)
+                if (not cur) or (cur in (q or "").lower()) or (cur in str(m.id)):
+                    choices.append(app_commands.Choice(name=label, value=str(m.id)))
+                    seen_ids.add(m.id)
+
+        if isinstance(channel, (discord.TextChannel, discord.Thread)):
             async for m in channel.history(limit=400, oldest_first=False):
-                await add_choice_from_message(m)
+                await try_add_from_message(m)
                 if len(choices) >= 25:
                     break
-
-        # 2) Thread
-        elif isinstance(channel, discord.Thread):
-            async for m in channel.history(limit=400, oldest_first=False):
-                await add_choice_from_message(m)
-                if len(choices) >= 25:
-                    break
-
-        # 3) ForumChannel: Threads (aktiv + archiviert) prüfen
         elif isinstance(channel, discord.ForumChannel):
-            threads = list(channel.threads)  # aktuell offene
-            # auch archivierte Threads nachladen (nur die letzten N, sonst zu teuer)
-            archived = []
+            threads = list(channel.threads)
             async for th in channel.archived_threads(limit=100, private=False):
-                archived.append(th)
-                if len(archived) >= 100:
-                    break
-            for th in (threads + archived)[::-1]:  # neueste zuerst
+                threads.append(th)
+            for th in sorted(threads, key=lambda t: t.id, reverse=True):
                 try:
                     sm = th.starter_message or await th.fetch_message(th.id)
                 except Exception:
                     continue
-                await add_choice_from_message(sm)
+                await try_add_from_message(sm)
                 if len(choices) >= 25:
                     break
 
-    # 4) Nichts gefunden ➜ kleine Hilfestellung + Fallback für direkte Eingabe
-    if not choices:
-        # Wenn der User eine ID oder einen Link eingetippt hat, erlauben wir das als direkte Auswahl
-        # (Wichtig: Der eigentliche fetch und die Prüfung passieren dann in export_poll)
-        typed = current.strip() if current else ""
-        if typed:
-            # Erlaube Message-ID oder -Link
-            choices = [app_commands.Choice(name=f"Direkte Eingabe verwenden: {typed[:90]}", value=typed)]
-        else:
-            choices = [app_commands.Choice(name="Keine Umfragen gefunden – gib ID/Link ein", value="0")]
+        if not choices:
+            typed = (current or "").strip()
+            if typed:
+                choices = [app_commands.Choice(name=f"Direkte Eingabe verwenden: {typed[:100]}", value=typed)]
+            else:
+                choices = [app_commands.Choice(name="Keine Umfragen gefunden – gib ID/Link ein", value="0")]
 
-    return choices[:25]
+        return choices[:25]
 
+    @staticmethod
+    def parse_message_ref(text: str, fallback_channel_id: int) -> Tuple[int, int]:
+        """Parst Nachricht-ID oder -Link. Gibt (channel_id, message_id) zurück."""
+        m = re.search(r"/channels/\d+/(\d+)/(\d+)", text or "")
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        # reine ID -> im aktuellen Channel
+        return fallback_channel_id, int(text)
 
     # ---- CSV-Erzeugung ----
     def _build_csv(
@@ -192,18 +213,14 @@ class GuildToolsPollExport(commands.Cog):
 
         lines: List[str] = []
         if mode == "key":
-            # Header
             lines.append("Wahlmöglichkeit;Wähler (Komma getrennt)")
-            # Für jede Option: Sammle Voter
             for ans_id, ans_text in answers:
                 voters = answer_to_voters.get(ans_id, [])
                 voters_mentions = ", ".join(f"<@{uid}>" for uid in voters)
                 lines.append(f"{esc(ans_text)}{sep}{esc(voters_mentions)}")
             filename = "poll_export_key_oriented.csv"
         else:
-            # Header
             lines.append("Wähler;HatGewählt (Komma getrennt)")
-            # Für jeden Wähler: Liste gewählter Antworten
             for uid, picks in user_choices.items():
                 picks_str = ", ".join(sorted(picks))
                 lines.append(f"<@{uid}>{sep}{esc(picks_str)}")
