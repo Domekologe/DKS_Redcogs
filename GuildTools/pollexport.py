@@ -84,6 +84,16 @@ class GuildToolsPollExport(commands.Cog):
             return int(m.group(1)), int(m.group(2))
         return fallback_channel_id, int(text)
 
+
+    def _user_name(self, guild: discord.Guild, user_id: int) -> str:
+        member = guild.get_member(user_id)
+        if member:
+            return member.display_name  # Server-spezifisch
+        user = self.bot.get_user(user_id)
+        if user:
+            return user.name  # globaler Discord-Name
+        return str(user_id)  # Fallback, falls komplett unbekannt
+
     # ---------- Slash-Command ----------
     @app_commands.describe(
         poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel, alternativ ID/Link einfügen)",
@@ -226,18 +236,20 @@ class GuildToolsPollExport(commands.Cog):
 
         lines: List[str] = []
         if mode == "key":
-            lines.append("Wahlmöglichkeit;Wähler (Komma getrennt)")
-            for _, ans_text in answers:
-                voters = [uid for uid in answer_to_voters.get(self._find_answer_id(answers, ans_text), [])]
-                voters_mentions = ", ".join(f"<@{uid}>" for uid in voters)
-                lines.append(f"{esc(ans_text)}{sep}{esc(voters_mentions)}")
+            lines.append("Wahlmöglichkeit;Wähler")
+            for aid, ans_text in answers:
+                voters = answer_to_voters.get(aid, [])
+                voters_names = ", ".join(self._user_name(interaction.guild, uid) for uid in voters)
+                lines.append(f"{esc(ans_text)}{sep}{esc(voters_names)}")
             filename = "poll_export_key_oriented.csv"
         else:
-            lines.append("Wähler;HatGewählt (Komma getrennt)")
+            lines.append("Wähler;HatGewählt")
             for uid, picks in user_choices.items():
                 picks_str = ", ".join(sorted(picks))
-                lines.append(f"<@{uid}>{sep}{esc(picks_str)}")
+                voter_name = self._user_name(interaction.guild, uid)
+                lines.append(f"{voter_name}{sep}{esc(picks_str)}")
             filename = "poll_export_value_oriented.csv"
+
 
         content = "\n".join(lines) + "\n"
         return content.encode("utf-8"), filename
