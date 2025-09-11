@@ -6,7 +6,7 @@ from aiowowapi import RetailApi
 from redbot.core import app_commands
 from redbot.core.i18n import Translator
 
-from .utils import format_to_gold, get_realms
+from WoWTools.utils import format_to_gold, get_realms
 
 _ = Translator("WoWTools", __file__)
 
