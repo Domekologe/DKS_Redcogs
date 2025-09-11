@@ -2,7 +2,7 @@
 import aiohttp
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict
 
 import discord
 from discord import app_commands
@@ -12,7 +12,7 @@ from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_g
 
 _ = Translator("WoWTools", __file__)
 
-# Welche Regionen du anbieten willst
+# Regionen
 VALID_REGIONS = ["eu", "us", "kr"]
 
 # Blizzard Hosts
@@ -24,22 +24,31 @@ _API_HOST = {
 _AUTH_HOST = {
     "eu": "eu.battle.net",
     "us": "us.battle.net",
-    "kr": "apac.battle.net",  # KR/TW auth laufen über APAC
+    "kr": "apac.battle.net",  # KR/TW auth über APAC
 }
 
-def _wowhead_url(item_id: int, game: Literal["classic", "retail"]) -> str:
-    if game == "classic":
-        # MoP Classic Pfad
-        return f"https://wowhead.com/mop-classic/item={item_id}"
-    return f"https://wowhead.com/item={item_id}"
+# Kurzcode -> Locale
+_LANG_CODES = {
+    "de": "de_DE",
+    "en": "en_US",
+    "fr": "fr_FR",
+    "es": "es_ES",
+    "it": "it_IT",
+    "pt": "pt_PT",
+    "ru": "ru_RU",
+}
 
-def _fmt_ilvl(item: dict) -> str:
-    # Profile API: level.value (nicht immer vorhanden)
-    lvl = item.get("level", {}).get("value")
-    return f"ilvl {lvl}" if lvl is not None else "ilvl ?"
+def _resolve_locale(lang_or_locale: str) -> str:
+    if not lang_or_locale:
+        return "en_US"
+    key = lang_or_locale.lower()
+    return _LANG_CODES.get(key, lang_or_locale)  # "de" -> "de_DE", passt volle Locales durch
+
+def _wowhead_url(item_id: int, game: Literal["classic", "retail"]) -> str:
+    # MoP Classic hat eigenen Pfad
+    return f"https://wowhead.com/mop-classic/item={item_id}" if game == "classic" else f"https://wowhead.com/item={item_id}"
 
 def _quality_emoji(quality_type: str) -> str:
-    # EPIC/RARE/UNCOMMON/LEGENDARY/COMMON
     q = (quality_type or "").upper()
     return {
         "LEGENDARY": "🟧",
@@ -49,87 +58,32 @@ def _quality_emoji(quality_type: str) -> str:
         "COMMON": "⬜",
     }.get(q, "🔳")
 
-
-# ---- OAuth-Cache für Gearcheck (lazy) ----
-import aiohttp, asyncio
-from datetime import datetime, timezone, timedelta
-
-_API_HOST = {"eu": "eu.api.blizzard.com", "us": "us.api.blizzard.com", "kr": "kr.api.blizzard.com"}
-_AUTH_HOST = {"eu": "eu.battle.net", "us": "us.battle.net", "kr": "apac.battle.net"}
-
-def _ensure_gear_oauth_state(self):
-    if not hasattr(self, "_gear_lock"):
-        self._gear_lock = asyncio.Lock()
-    if not hasattr(self, "_gear_tok"):
-        self._gear_tok = {}          # region -> token
-    if not hasattr(self, "_gear_exp"):
-        self._gear_exp = {}          # region -> expires_at (datetime)
-
-async def _get_access_token_cached_gear(self, region: str) -> str:
-    _ensure_gear_oauth_state(self)
-    async with self._gear_lock:
-        now = datetime.now(timezone.utc)
-        tok = self._gear_tok.get(region)
-        exp = self._gear_exp.get(region)
-        if tok and exp and now < exp:
-            return tok
-
-        api_tokens = await self.bot.get_shared_api_tokens("blizzard")
-        cid, secret = api_tokens.get("client_id"), api_tokens.get("client_secret")
-        if not cid or not secret:
-            raise RuntimeError(
-                "Blizzard API nicht eingerichtet. Nutze: "
-                "`[p]set api blizzard client_id,<id> client_secret,<secret>`"
-            )
-
-        auth_host = _AUTH_HOST.get(region, "eu.battle.net")
-        url = f"https://{auth_host}/oauth/token"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, data={"grant_type": "client_credentials"},
-                auth=aiohttp.BasicAuth(cid, secret),
-            ) as resp:
-                js = await resp.json()
-                if resp.status != 200:
-                    raise RuntimeError(f"Auth {resp.status}: {js}")
-        token = js["access_token"]
-        expires_in = int(js.get("expires_in", 3600))
-        # kleiner Puffer
-        self._gear_tok[region] = token
-        self._gear_exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
-        return token
-
-async def _fetch_equipment_blizzard(self, *, region: str, realm: str, character: str,
-                                    game: str = "classic", locale: str = "en_US") -> dict:
-    host = _API_HOST.get(region, "eu.api.blizzard.com")
-    token = await _get_access_token_cached_gear(self, region)
-    realm_slug = realm.lower().replace(" ", "-")
-    char_slug = character.lower()
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
-    url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
-    params = {"namespace": namespace, "locale": locale}
-    headers = {"Authorization": f"Bearer {token}"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers) as resp:
-            js = await resp.json()
-            if resp.status != 200:
-                raise RuntimeError(f"{resp.status}: {js}")
-            return js
+def _is_socket_enchant(ench: dict) -> bool:
+    """
+    Heuristik: Edelstein-Sockets haben meist source_item (der Gem) und Slot-IDs 1..4.
+    BONUS_SOCKETS (id: 6) ist nur ein zusätzlicher Sockel, kein Edelstein selbst.
+    """
+    if not ench:
+        return False
+    if ench.get("source_item"):
+        slot = ench.get("enchantment_slot", {}) or {}
+        slot_id = slot.get("id")
+        return slot_id in {1, 2, 3, 4}
+    return False
 
 
 @cog_i18n(_)
 class GearCheck(commands.Cog):
-    """Gearcheck über die Blizzard Profile API (Classic/Retail)."""
+    """Gearcheck über die Blizzard Profile API (Classic/Retail) inkl. iLvl-Detailabruf und 'Socket' Label."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
-        # kleiner OAuth-Cache pro Region
+        # OAuth-Cache pro Region
         self._lock = asyncio.Lock()
-        self._tok: dict[str, str] = {}
-        self._exp: dict[str, datetime] = {}
+        self._tok: Dict[str, str] = {}
+        self._exp: Dict[str, datetime] = {}
 
     # ---------------- OAuth ----------------
-
     async def _get_access_token_cached(self, region: str) -> str:
         async with self._lock:
             now = datetime.now(timezone.utc)
@@ -159,12 +113,12 @@ class GearCheck(commands.Cog):
                         raise RuntimeError(f"Auth {resp.status}: {js}")
             token = js["access_token"]
             expires_in = int(js.get("expires_in", 3600))
+            # kleiner Puffer
             self._tok[region] = token
             self._exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
             return token
 
-    # --------------- Blizzard API ---------------
-
+    # --------------- Blizzard API: Character Equipment ---------------
     async def _fetch_equipment(
         self,
         *,
@@ -179,10 +133,8 @@ class GearCheck(commands.Cog):
         realm_slug = realm.lower().replace(" ", "-")
         char_slug = character.lower()
 
-        # Namespace: profile(-classic)-{region}
         namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
         url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
-
         params = {"namespace": namespace, "locale": locale}
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -190,19 +142,59 @@ class GearCheck(commands.Cog):
             async with session.get(url, params=params, headers=headers) as resp:
                 js = await resp.json()
                 if resp.status != 200:
-                    # Liefere Rückmeldung zur Fehlersuche
                     raise RuntimeError(f"{resp.status}: {js}")
                 return js
 
-    # --------------- Command ---------------
+    # --------------- Blizzard API: Item-Level pro Item-ID ---------------
+    async def _fetch_item_levels(
+        self,
+        *,
+        region: Literal["eu", "us", "kr"],
+        game: Literal["classic", "retail"],
+        locale: str,
+        item_ids: List[int],
+        concurrency: int = 5,
+    ) -> Dict[int, Optional[int]]:
+        """
+        Holt das Itemlevel pro Item-ID aus /data/wow/item/{id}.
+        Gibt Dict {item_id: level or None} zurück.
+        """
+        host = _API_HOST.get(region, "eu.api.blizzard.com")
+        token = await self._get_access_token_cached(region)
+        namespace = f"static-{region}" if game == "retail" else f"static-classic-{region}"
 
+        sem = asyncio.Semaphore(concurrency)
+        results: Dict[int, Optional[int]] = {}
+
+        async def fetch_one(session: aiohttp.ClientSession, iid: int):
+            url = f"https://{host}/data/wow/item/{iid}"
+            params = {"namespace": namespace, "locale": locale}
+            headers = {"Authorization": f"Bearer {token}"}
+            async with sem:
+                async with session.get(url, params=params, headers=headers) as resp:
+                    js = await resp.json()
+                    if resp.status == 200:
+                        results[iid] = js.get("level")
+                    else:
+                        results[iid] = None
+
+        uniq_ids = list({i for i in item_ids if i})
+        if not uniq_ids:
+            return {}
+
+        async with aiohttp.ClientSession() as session:
+            await asyncio.gather(*(fetch_one(session, iid) for iid in uniq_ids))
+
+        return results
+
+    # --------------- Command ---------------
     @commands.hybrid_command(name="gearcheck")
     @app_commands.describe(
         region="Region (eu/us/kr)",
         realm="Realm (mit Bindestrich statt Leerzeichen)",
         character="Charaktername",
         game="Classic (MoP Classic) oder Retail",
-        locale="API-Lokalisierung (z.B. en_US, de_DE)",
+        locale="Locale (z. B. de oder de_DE, en oder en_US)",
     )
     @app_commands.choices(
         game=[
@@ -210,9 +202,16 @@ class GearCheck(commands.Cog):
             app_commands.Choice(name="Retail", value="retail"),
         ]
     )
-    async def gearcheck(self, ctx, region: str, realm: str, character: str,
-                    game: str = "classic", locale: str = "en_US"):
-        """Zeigt das aktuell ausgerüstete Gear eines Charakters (Blizzard Profile API)."""
+    async def gearcheck(
+        self,
+        ctx: commands.Context,
+        region: Literal["eu", "us", "kr"],
+        realm: str,
+        character: str,
+        game: Literal["classic", "retail"] = "classic",
+        locale: str = "en",
+    ):
+        """Zeigt das aktuell ausgerüstete Gear eines Charakters (inkl. iLvl-Fetch & Socket/Enchant-Label)."""
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
@@ -225,57 +224,71 @@ class GearCheck(commands.Cog):
                 ephemeral=True,
             )
 
+        locale = _resolve_locale(locale)
+
         try:
             await ctx.defer()
         except Exception:
             pass
 
+        # 1) Equipment laden
         try:
-            data = await _fetch_equipment_blizzard(
-                self, region=region.lower(), realm=realm, character=character,
-                game=game, locale=locale
+            data = await self._fetch_equipment(
+                region=region, realm=realm, character=character, game=game, locale=locale
             )
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Ausrüstung: {e}", ephemeral=bool(ctx.interaction))
+            ephemeral = getattr(ctx, "interaction", None) is not None
+            return await ctx.send(f"Fehler beim Abrufen der Ausrüstung: {e}", ephemeral=ephemeral)
 
         equipped = data.get("equipped_items") or []
         if not equipped:
             return await ctx.send(_("No gear found."))
 
-        # Ausgabe bauen (auf 2000 Zeichen achten)
+        # 2) Itemlevel je Item nachladen
+        item_ids = [it.get("item", {}).get("id") for it in equipped if it.get("item")]
+        ilvls_by_id = await self._fetch_item_levels(
+            region=region, game=game, locale=locale, item_ids=item_ids
+        )
+
+        # 3) Ausgabe bauen (2000-Char-Limit beachten)
         lines: List[str] = []
         hidden_count = 0
 
         for it in equipped:
             try:
-                slot_name = it["slot"]["name"]  # z.B. Head, Neck, ...
-                quality = it.get("quality", {}).get("type", "COMMON")
-                emoji = _quality_emoji(quality)
+                slot_name = it["slot"]["name"]
+                quality_type = it.get("quality", {}).get("type", "COMMON")
+                emoji = _quality_emoji(quality_type)
                 name = it.get("name", "Unknown")
                 item_id = it.get("item", {}).get("id")
-                ilvl_str = _fmt_ilvl(it)
+                ilvl = ilvls_by_id.get(item_id)
+                ilvl_str = f"ilvl {ilvl}" if ilvl is not None else "ilvl ?"
 
-                # Wowhead-Link
                 link = _wowhead_url(item_id, game) if item_id else None
                 head = (
-                    f"**{slot_name}**: {emoji} "
-                    f"[{name}]({link}) ({ilvl_str})" if link else
-                    f"**{slot_name}**: {emoji} {name} ({ilvl_str})"
+                    f"**{slot_name}**: {emoji} [{name}]({link}) ({ilvl_str})"
+                    if link
+                    else f"**{slot_name}**: {emoji} {name} ({ilvl_str})"
                 )
                 lines.append(head)
 
-                # Enchants
+                # Enchants / Sockets
                 for ench in it.get("enchantments", []) or []:
                     d = ench.get("display_string")
-                    if d:
-                        lines.append(f"`└──` {d}")
+                    if not d:
+                        continue
+                    if _is_socket_enchant(ench):
+                        lines.append(f"`└──` **Socket:** {d}")
+                    else:
+                        lines.append(f"`└──` **Enchant:** {d}")
+
             except Exception:
-                # Falls Blizzard für irgendein Item ein edge-case liefert: nicht den gesamten Output killen
+                # Defensive: Einzelne kaputte Items nicht alles killen
                 continue
 
-            # Soft-Limit, falls es zu lang wird
+            # Soft-Limit, damit wir unter 2000 Zeichen bleiben
             if sum(len(x) + 1 for x in lines) > 1800:
-                hidden_count = len(equipped) - len(lines)
+                hidden_count = max(0, len(equipped) - len(lines))
                 break
 
         if hidden_count > 0:
@@ -287,18 +300,21 @@ class GearCheck(commands.Cog):
             color=await ctx.embed_color(),
         )
 
-        # Zeitpunkt? (nicht immer verfügbar bei Profile API)
-        # Wenn du 'last_login_timestamp' o.ä. irgendwann verwenden willst, könntest du hier Footer setzen.
-
         ephemeral = getattr(ctx, "interaction", None) is not None
         await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # --------- Autocomplete ---------
     @gearcheck.autocomplete("region")
-    async def ac_region(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    async def ac_region(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
         current = (current or "").lower()
         return [
             app_commands.Choice(name=r.upper(), value=r)
             for r in VALID_REGIONS
             if current in r
         ][:25]
+
+
+async def setup(bot: Red):
+    await bot.add_cog(GearCheck(bot))
