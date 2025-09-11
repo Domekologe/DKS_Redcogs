@@ -7,7 +7,7 @@ from discord import app_commands
 from redbot.core import commands
 from redbot.core.i18n import Translator, set_contextual_locales_from_guild
 
-from wowtools.utils import get_realms
+from .utils import get_realms
 
 _ = Translator("WoWTools", __file__)
 

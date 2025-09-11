@@ -9,7 +9,7 @@ from aiohttp import ClientResponseError
 from PIL import Image
 from redbot.core import commands
 
-from wowtools.exceptions import InvalidBlizzardAPI
+from .exceptions import InvalidBlizzardAPI
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 

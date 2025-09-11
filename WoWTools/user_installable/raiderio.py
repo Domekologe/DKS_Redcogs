@@ -6,8 +6,8 @@ from redbot.core import app_commands
 from redbot.core.commands import Context
 from redbot.core.i18n import Translator
 
-from wowtools.raiderio import ProfileMenu, Raiderio
-from wowtools.utils import get_realms
+from .raiderio import ProfileMenu, Raiderio
+from .utils import get_realms
 
 _ = Translator("WoWTools", __file__)
 
