@@ -218,7 +218,7 @@ class WarcraftLogsClassic(commands.Cog):
                 if int(item["itemLevel"]) > 5:
                     item_ilevel += int(item["itemLevel"])
                     item_count += 1
-            item_list.append(f"{rarity} [{item['name']}](https://wowhead.com/item={item['id']})")
+            item_list.append(f"{item['slot']}: {rarity} "f"[{item['name']}](https://wowhead.com/item={item['id']}) "f"({item_ilevel_entry})")
             perm_enchant_id = item.get("permanentEnchant", None)
             temp_enchant_id = item.get("temporaryEnchant", None)
             gem_id = item.get("gems", None)
