@@ -12,18 +12,22 @@ from .utils import format_to_gold
 
 _ = Translator("WoWTools", __file__)
 
-VALID_REGIONS = ["eu", "us", "kr"]
+VALID_REGIONS = ["eu", "us", "kr", "tw", "cn"]
 
 # Mapping für API- und Auth-Hosts
 _API_HOST = {
     "eu": "eu.api.blizzard.com",
     "us": "us.api.blizzard.com",
     "kr": "kr.api.blizzard.com",
+    "tw": "tw.api.blizzard.com",
+    "cn": "gateway.battlenet.com.cn",
 }
 _AUTH_HOST = {
     "eu": "eu.battle.net",
     "us": "us.battle.net",
-    "kr": "apac.battle.net",  # KR/TW laufen über APAC-Auth
+    "kr": "kr.battle.net",  # KR/TW laufen über APAC-Auth
+    "tw": "tw.battle.net",  # KR/TW laufen über APAC-Auth
+    "cn": "gateway.battlenet.com.cn",  # KR/TW laufen über APAC-Auth
 }
 
 
