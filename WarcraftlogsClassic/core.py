@@ -1,7 +1,7 @@
 # Most of the source of this file for the actual API mechanics can be found at:
 # https://github.com/Kowlin/GraphQL-WoWLogs/blob/master/wowlogs/core.py
 
-import io
+import json, pprint, io
 import logging
 import math
 from datetime import datetime, timezone
@@ -198,7 +198,9 @@ class WarcraftLogsClassic(commands.Cog):
             return await ctx.send(
                 _("No gear for {name} found in the last report.").format(name=name)
             )
-        await ctx.send(gear)
+        log.debug("WCL Gear JSON for %s-%s (%s): %s",
+          name, realm, region,
+          json.dumps(gear, ensure_ascii=False, separators=(",", ":")))
         
         item_list = []
         item_ilevel = 0
