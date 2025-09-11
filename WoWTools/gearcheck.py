@@ -188,7 +188,7 @@ class GearCheck(commands.Cog):
         locale: str = "en_US",
     ) -> dict:
         host = _API_HOST.get(region, "eu.api.blizzard.com")
-        token = await self._get_access_token_cached(region)
+        token = await _get_access_token_cached_gear(self, region)
         realm_slug = realm.lower().replace(" ", "-")
         char_slug = character.lower()
 
@@ -219,7 +219,7 @@ class GearCheck(commands.Cog):
         Gibt Dict {item_id: level or None} zurück.
         """
         host = _API_HOST.get(region, "eu.api.blizzard.com")
-        token = await self._get_access_token_cached(region)
+        token = await _get_access_token_cached_gear(self, region)
         namespace = f"static-{region}" if game == "retail" else f"static-classic-{region}"
 
         sem = asyncio.Semaphore(concurrency)
