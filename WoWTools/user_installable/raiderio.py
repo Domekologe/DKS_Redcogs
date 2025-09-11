@@ -15,7 +15,7 @@ _ = Translator("WoWTools", __file__)
 class UserInstallableRaiderio:
     user_install_raiderio = app_commands.Group(
         name="raiderio",
-        description=_("Raider.io commands"),
+        description=_("classic.raider.io commands"),
         allowed_installs=AppInstallationType(guild=True, user=True),
         allowed_contexts=AppCommandContext(guild=True, dm_channel=True, private_channel=True),
     )
@@ -28,7 +28,7 @@ class UserInstallableRaiderio:
     async def user_install_raiderio_profile(
         self, interaction: discord.Interaction, character: str, realm: str
     ) -> None:
-        """Display the raider.io profile of a character.
+        """Display the classic.raider.io profile of a character.
 
         **Example:**
         [p]raiderio profile Karlo Ragnaros
@@ -91,7 +91,7 @@ class UserInstallableRaiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("Raider.io profile"),
+            name=_("classic.raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)
@@ -141,7 +141,7 @@ class UserInstallableRaiderio:
         #         color=char_score_color,
         #     )
         #     embed.set_author(
-        #         name=_("Raider.io profile"),
+        #         name=_("classic.raider.io profile"),
         #         icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         #     )
         #     embed.set_thumbnail(url=char_image)

@@ -197,12 +197,12 @@ msgstr "Dostignuća"
 
 #: wowtools/raiderio.py:29
 #, docstring
-msgid "Commands for interacting with Raider.io"
-msgstr "Komande za interakciju sa Raider.io"
+msgid "Commands for interacting with classic.raider.io"
+msgstr "Komande za interakciju sa classic.raider.io"
 
 #: wowtools/raiderio.py:37
 #, docstring
-msgid "Display the raider.io profile of a character.\n\n"
+msgid "Display the classic.raider.io profile of a character.\n\n"
 "        **Example:**\n"
 "        [p]raiderio profile Karlo Ragnaros\n"
 "        "
@@ -217,8 +217,8 @@ msgid "Character not found."
 msgstr ""
 
 #: wowtools/raiderio.py:127 wowtools/raiderio.py:187
-msgid "Raider.io profile"
-msgstr "Raider.io profil"
+msgid "classic.raider.io profile"
+msgstr "classic.raider.io profil"
 
 #: wowtools/raiderio.py:132
 msgid "__**Mythic+ Score**__"
@@ -258,12 +258,12 @@ msgstr ""
 
 #: wowtools/raiderio.py:205
 #, docstring
-msgid "Display the raider.io profile of a guild.\n\n"
+msgid "Display the classic.raider.io profile of a guild.\n\n"
 "        If the guild or realm name have spaces in them, they need to be enclosed in quotes.\n\n"
 "        Example:\n"
 "        [p]raiderio guild \"Jahaci Rumene Kadulje\" Ragnaros\n"
 "        "
-msgstr "Prikaži raider.io profil ceha.\n\n"
+msgstr "Prikaži classic.raider.io profil ceha.\n\n"
 "        Ako ime ceha ili carstva ima razmake, potrebno ih je staviti u navodnike.\n\n"
 "        Primjer:\n"
 "        [p]Raiderio ceh \"Jahaci Rumene Kadulje\" Ragnaros\n"

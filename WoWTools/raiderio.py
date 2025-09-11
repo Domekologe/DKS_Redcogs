@@ -14,12 +14,12 @@ _ = Translator("WoWTools", __file__)
 
 
 class Raiderio:
-    """Cog for interaction with the raider.io API"""
+    """Cog for interaction with the classic.raider.io API"""
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
     @commands.group(aliases=["rio"])
     async def raiderio(self, ctx: commands.Context):
-        """Commands for interacting with Raider.io"""
+        """Commands for interacting with classic.raider.io"""
         pass
 
     @raiderio.command(name="profile")
@@ -30,7 +30,7 @@ class Raiderio:
         realm="The character's realm",
     )
     async def raiderio_profile(self, ctx, character: str, *, realm: str) -> None:
-        """Display the raider.io profile of a character.
+        """Display the classic.raider.io profile of a character.
 
         **Example:**
         [p]raiderio profile Karlo Ragnaros
@@ -110,7 +110,7 @@ class Raiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("Raider.io profile"),
+            name=_("classic.raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)
@@ -160,7 +160,7 @@ class Raiderio:
         #         color=char_score_color,
         #     )
         #     embed.set_author(
-        #         name=_("Raider.io profile"),
+        #         name=_("classic.raider.io profile"),
         #         icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         #     )
         #     embed.set_thumbnail(url=char_image)
@@ -190,10 +190,10 @@ class Raiderio:
     #
     # @staticmethod
     # def get_all_runs(profile_data: dict) -> dict[str, dict[str, list[str]]]:
-    #     """Extracts info about a player's Mythic+ dungeon runs from their Raider.IO profile data.
+    #     """Extracts info about a player's Mythic+ dungeon runs from their classic.raider.io profile data.
 
     #     Args:
-    #         profile_data (dict): A dictionary containing the player's Raider.IO profile data.
+    #         profile_data (dict): A dictionary containing the player's classic.raider.io profile data.
 
     #     Returns:
     #         dict: A dictionary containing information about the player's runs in each dungeon.
@@ -235,7 +235,7 @@ class Raiderio:
     @commands.bot_has_permissions(embed_links=True)
     @app_commands.describe(guild="The name of the guild", realm="The guild's realm")
     async def raiderio_guild(self, ctx: commands.Context, guild: str, *, realm: str) -> None:
-        """Display the raider.io profile of a guild.
+        """Display the classic.raider.io profile of a guild.
 
         If the guild or realm name have spaces in them, they need to be enclosed in quotes.
 
@@ -432,7 +432,7 @@ class Raiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("Raider.io profile"),
+            name=_("classic.raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)

@@ -111,12 +111,12 @@ msgid "No CVar found with that name."
 msgstr ""
 
 #: wowtools/user_installable/raiderio.py:18
-msgid "Raider.io commands"
+msgid "classic.raider.io commands"
 msgstr ""
 
 #: wowtools/user_installable/raiderio.py:31
 #, docstring
-msgid "Display the raider.io profile of a character.\n\n"
+msgid "Display the classic.raider.io profile of a character.\n\n"
 "        **Example:**\n"
 "        [p]raiderio profile Karlo Ragnaros\n"
 "        "
@@ -127,7 +127,7 @@ msgid "Character not found."
 msgstr ""
 
 #: wowtools/user_installable/raiderio.py:94
-msgid "Raider.io profile"
+msgid "classic.raider.io profile"
 msgstr ""
 
 #: wowtools/user_installable/raiderio.py:99

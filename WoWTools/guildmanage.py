@@ -405,8 +405,8 @@ class GuildManage:
     @staticmethod
     def get_raiderio_url(realm: str, region: str, name: str) -> str:
         return (
-            f"[Raider.io]"
-            f"(https://raider.io/characters/{region.lower()}/{realm.lower()}/{name})"
+            f"[classic.raider.io]"
+            f"(https://classic.classic.raider.io/characters/{region.lower()}/{realm.lower()}/{name})"
         )
 
     @staticmethod

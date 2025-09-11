@@ -254,12 +254,12 @@ msgstr "Достигнућа"
 
 #: wowtools/raiderio.py:22
 #, docstring
-msgid "Commands for interacting with Raider.io"
+msgid "Commands for interacting with classic.raider.io"
 msgstr ""
 
 #: wowtools/raiderio.py:33
 #, docstring
-msgid "Display the raider.io profile of a character.\n\n"
+msgid "Display the classic.raider.io profile of a character.\n\n"
 "        **Example:**\n"
 "        [p]raiderio profile Karlo Ragnaros\n"
 "        "
@@ -275,7 +275,7 @@ msgid "Character not found."
 msgstr ""
 
 #: wowtools/raiderio.py:113 wowtools/raiderio.py:435
-msgid "Raider.io profile"
+msgid "classic.raider.io profile"
 msgstr "Раидер.ио профил"
 
 #: wowtools/raiderio.py:118
@@ -304,7 +304,7 @@ msgstr "Последње ажурирано: {char_last_updated}"
 
 #: wowtools/raiderio.py:238
 #, docstring
-msgid "Display the raider.io profile of a guild.\n\n"
+msgid "Display the classic.raider.io profile of a guild.\n\n"
 "        If the guild or realm name have spaces in them, they need to be enclosed in quotes.\n\n"
 "        Example:\n"
 "        [p]raiderio guild \"Jahaci Rumene Kadulje\" Ragnaros\n"

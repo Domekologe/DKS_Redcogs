@@ -15,7 +15,6 @@ from redbot.core.utils.chat_formatting import humanize_list
 
 from .user_installable.cvardocs import CVar, CVarDocs
 
-from .auctionhouse import AuctionHouse
 from .guildmanage import GuildManage
 from .on_message import OnMessage
 from .pvp import PvP
@@ -24,6 +23,8 @@ from .scoreboard import Scoreboard
 from .token import Token
 from .user_installable.auctionhouse import UserInstallableAuctionHouse
 from .user_installable.raiderio import UserInstallableRaiderio
+
+from .gearcheck import GearCheck
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
@@ -35,10 +36,10 @@ class WoWTools(
     Raiderio,
     Token,
     GuildManage,
-    AuctionHouse,
     Scoreboard,
     OnMessage,
     CVarDocs,
+    GearCheck,
     UserInstallableAuctionHouse,
     UserInstallableRaiderio,
     commands.Cog,
