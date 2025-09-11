@@ -13,7 +13,7 @@ from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
 from redbot.core.utils.chat_formatting import humanize_list
 
-from wowtools.user_installable.cvardocs import CVar, CVarDocs
+from .user_installable.cvardocs import CVar, CVarDocs
 
 from .auctionhouse import AuctionHouse
 from .guildmanage import GuildManage
