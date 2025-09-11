@@ -6,6 +6,7 @@ import logging
 import math
 from datetime import datetime, timezone
 from typing import List, Literal, Mapping, Optional
+from .wclEnums import SLOT_ORDER_MOP
 
 import discord
 from beautifultable import ALIGN_LEFT, BeautifulTable
@@ -198,37 +199,42 @@ class WarcraftLogsClassic(commands.Cog):
             return await ctx.send(
                 _("No gear for {name} found in the last report.").format(name=name)
             )
-        log.debug("WCL Gear JSON for %s-%s (%s): %s",
-          name, realm, region,
-          json.dumps(gear, ensure_ascii=False, separators=(",", ":")))
         
         item_list = []
         item_ilevel = 0
         item_count = 0
-        for item in gear:
-            if item["id"] == 0:
+
+        for idx, item in enumerate(gear):
+            # Slot-Name anhand Index bestimmen
+            slot_name = SLOT_ORDER_MOP[idx] if idx < len(SLOT_ORDER_MOP) else f"Slot {idx}"
+
+            if not item or item.get("id", 0) == 0:
+                # leeres/fehlendes Item (z.B. keine Schultern getragen)
+                item_list.append(f"{slot_name}: <kein Item>")
                 continue
-            # item can be:
-            # {
-            #   'name': 'Unknown Item',
-            #   'quality': 'common',
-            #   'id': None,
-            #   'icon': 'inv_axe_02.jpg'
-            # }
+
             rarity = self._get_rarity(item)
-            item_ilevel_entry = item.get("itemLevel", None)
-            if item_ilevel_entry:
-                if int(item["itemLevel"]) > 5:
-                    item_ilevel += int(item["itemLevel"])
-                    item_count += 1
-            item_list.append(f"{item['slot']}: {rarity} "f"[{item['name']}](https://wowhead.com/mop-classic/item={item['id']}) "f"({item_ilevel_entry})")
-            perm_enchant_id = item.get("permanentEnchant", None)
-            temp_enchant_id = item.get("temporaryEnchant", None)
-            gem_id = item.get("gems", None)
-            gem_id = gem_id[0].get("id", None) if gem_id else None
-            perm_enchant_text = ENCHANT_ID.get(perm_enchant_id, None)
-            temp_enchant_text = ENCHANT_ID.get(temp_enchant_id, None)
-            gem_text = ENCHANT_ID.get(gem_id, None)
+            item_ilevel_entry = item.get("itemLevel")
+            if item_ilevel_entry and int(item_ilevel_entry) > 5:
+                item_ilevel += int(item_ilevel_entry)
+                item_count += 1
+
+            # Item-Zeile
+            item_list.append(
+                f"{slot_name}: {rarity} "
+                f"[{item['name']}](https://wowhead.com/mop-classic/item={item['id']}) "
+                f"({item_ilevel_entry})"
+            )
+
+            # Enchants & Gems
+            perm_enchant_id = item.get("permanentEnchant")
+            temp_enchant_id = item.get("temporaryEnchant")
+            gem_id = item.get("gems")
+            gem_id = gem_id[0].get("id") if gem_id else None
+
+            perm_enchant_text = ENCHANT_ID.get(perm_enchant_id)
+            temp_enchant_text = ENCHANT_ID.get(temp_enchant_id)
+            gem_text = ENCHANT_ID.get(gem_id)
 
             if perm_enchant_id:
                 if temp_enchant_id and temp_enchant_text:
@@ -241,16 +247,14 @@ class WarcraftLogsClassic(commands.Cog):
                     item_list.append(f"`{symbol}──` {perm_enchant_text}")
                 elif gem_text:
                     item_list.append(f"`{symbol}──` {gem_text}")
-            if gem_id:
-                if temp_enchant_id and temp_enchant_text:
-                    symbol = "├"
-                else:
-                    symbol = "└"
-                if gem_text:
-                    item_list.append(f"`{symbol}──` {gem_text}")
-            if temp_enchant_id:
-                if temp_enchant_text:
-                    item_list.append(f"`└──` {temp_enchant_text}")
+
+            if gem_id and gem_text:
+                symbol = "├" if (temp_enchant_id and temp_enchant_text) else "└"
+                item_list.append(f"`{symbol}──` {gem_text}")
+
+            if temp_enchant_id and temp_enchant_text:
+                item_list.append(f"`└──` {temp_enchant_text}")
+
 
         if item_ilevel > 0:
             avg_ilevel = "{:g}".format(item_ilevel / item_count)
