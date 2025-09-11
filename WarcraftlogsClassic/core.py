@@ -198,7 +198,7 @@ class WarcraftLogsClassic(commands.Cog):
             return await ctx.send(
                 _("No gear for {name} found in the last report.").format(name=name)
             )
-        ctx.send(gear)
+        await ctx.send(gear)
         
         item_list = []
         item_ilevel = 0
