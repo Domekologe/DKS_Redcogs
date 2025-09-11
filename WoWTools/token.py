@@ -12,7 +12,10 @@ from .utils import format_to_gold
 
 _ = Translator("WoWTools", __file__)
 
-VALID_REGIONS = ["eu", "us", "kr", "tw", "cn"]
+
+# After I am using this only for my guild, there will be only EU!
+VALID_REGIONS = ["eu", "us", "kr", "tw"]
+#VALID_REGIONS = ["eu"]
 
 # Mapping für API- und Auth-Hosts
 _API_HOST = {
@@ -20,14 +23,12 @@ _API_HOST = {
     "us": "us.api.blizzard.com",
     "kr": "kr.api.blizzard.com",
     "tw": "tw.api.blizzard.com",
-    "cn": "gateway.battlenet.com.cn",
 }
 _AUTH_HOST = {
     "eu": "eu.battle.net",
     "us": "us.battle.net",
-    "kr": "kr.battle.net",  # KR/TW laufen über APAC-Auth
-    "tw": "tw.battle.net",  # KR/TW laufen über APAC-Auth
-    "cn": "gateway.battlenet.com.cn",  # KR/TW laufen über APAC-Auth
+    "kr": "kr.battle.net",  
+    "tw": "tw.battle.net",   
 }
 
 
@@ -95,7 +96,7 @@ async def _fetch_token_price(self, region: str, game: str = "classic", locale: s
 
 class Token:
     @commands.hybrid_command()
-    async def wowtoken(self, ctx: commands.Context, region: str = "all"):
+    async def wowtoken(self, ctx: commands.Context, region: str = "eu"):
         """Check price of WoW token in a region"""
         if ctx.interaction:
             # Workaround für Red-Locale bei Interactions
@@ -111,7 +112,7 @@ class Token:
 
             if region not in VALID_REGIONS:
                 await ctx.send(
-                    _("Invalid region. Valid regions are: `eu`, `us`, `kr` or `all`."),
+                    _("Invalid region. Valid regions are: `eu`, `us`, `kr`, `tw` or `all`."),
                     ephemeral=True,
                 )
                 return
