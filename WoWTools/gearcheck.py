@@ -71,6 +71,65 @@ def _is_socket_enchant(ench: dict) -> bool:
         return slot_id in {1, 2, 3, 4}
     return False
 
+def _ensure_gear_oauth_state(self):
+    if not hasattr(self, "_gear_lock"):
+        self._gear_lock = asyncio.Lock()
+    if not hasattr(self, "_gear_tok"):
+        self._gear_tok = {}          # region -> token
+    if not hasattr(self, "_gear_exp"):
+        self._gear_exp = {}          # region -> expires_at (datetime)
+
+async def _get_access_token_cached_gear(self, region: str) -> str:
+    _ensure_gear_oauth_state(self)
+    async with self._gear_lock:
+        now = datetime.now(timezone.utc)
+        tok = self._gear_tok.get(region)
+        exp = self._gear_exp.get(region)
+        if tok and exp and now < exp:
+            return tok
+
+        api_tokens = await self.bot.get_shared_api_tokens("blizzard")
+        cid, secret = api_tokens.get("client_id"), api_tokens.get("client_secret")
+        if not cid or not secret:
+            raise RuntimeError(
+                "Blizzard API nicht eingerichtet. Nutze: "
+                "`[p]set api blizzard client_id,<id> client_secret,<secret>`"
+            )
+
+        auth_host = _AUTH_HOST.get(region, "eu.battle.net")
+        url = f"https://{auth_host}/oauth/token"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, data={"grant_type": "client_credentials"},
+                auth=aiohttp.BasicAuth(cid, secret),
+            ) as resp:
+                js = await resp.json()
+                if resp.status != 200:
+                    raise RuntimeError(f"Auth {resp.status}: {js}")
+        token = js["access_token"]
+        expires_in = int(js.get("expires_in", 3600))
+        # kleiner Puffer
+        self._gear_tok[region] = token
+        self._gear_exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
+        return token
+
+async def _fetch_equipment_blizzard(self, *, region: str, realm: str, character: str,
+                                    game: str = "classic", locale: str = "en_US") -> dict:
+    host = _API_HOST.get(region, "eu.api.blizzard.com")
+    token = await _get_access_token_cached_gear(self, region)
+    realm_slug = realm.lower().replace(" ", "-")
+    char_slug = character.lower()
+    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
+    params = {"namespace": namespace, "locale": locale}
+    headers = {"Authorization": f"Bearer {token}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=headers) as resp:
+            js = await resp.json()
+            if resp.status != 200:
+                raise RuntimeError(f"{resp.status}: {js}")
+            return js
+
 
 @cog_i18n(_)
 class GearCheck(commands.Cog):
@@ -202,15 +261,8 @@ class GearCheck(commands.Cog):
             app_commands.Choice(name="Retail", value="retail"),
         ]
     )
-    async def gearcheck(
-        self,
-        ctx: commands.Context,
-        region: Literal["eu", "us", "kr"],
-        realm: str,
-        character: str,
-        game: Literal["classic", "retail"] = "classic",
-        locale: str = "en",
-    ):
+    async def gearcheck(self, ctx, region: Literal["eu", "us", "kr"], realm: str, character: str,
+                    game: Literal["classic", "retail"] = "classic", locale: str = "en"):
         """Zeigt das aktuell ausgerüstete Gear eines Charakters (inkl. iLvl-Fetch & Socket/Enchant-Label)."""
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
@@ -233,12 +285,12 @@ class GearCheck(commands.Cog):
 
         # 1) Equipment laden
         try:
-            data = await self._fetch_equipment(
-                region=region, realm=realm, character=character, game=game, locale=locale
+            data = await _fetch_equipment_blizzard(
+                self, region=region.lower(), realm=realm.lower(), character=character.lower(),
+                game=game.lower(), locale=locale
             )
         except Exception as e:
-            ephemeral = getattr(ctx, "interaction", None) is not None
-            return await ctx.send(f"Fehler beim Abrufen der Ausrüstung: {e}", ephemeral=ephemeral)
+            return await ctx.send(f"Fehler beim Abrufen der Ausrüstung: {e}", ephemeral=bool(ctx.interaction))
 
         equipped = data.get("equipped_items") or []
         if not equipped:
