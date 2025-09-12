@@ -63,10 +63,10 @@ REALMS: dict[str, list[str]] = {
 }
 
 REGIONS = [
-    "EU",
-    "US",
-    "KR",
-    "TW",
+    "eu",
+    "us",
+    "kr",
+    "tw",
     # "CN", # RIP
 ]
 
