@@ -9,7 +9,7 @@ from discord import app_commands
 from redbot.core import commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
-from .autocomplete import REALMS as AC_REALMS, REGIONS as VALID_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
+from .autocomplete import REALMS as AC_REALMS, REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
 
 _ = Translator("WoWTools", __file__)
 
@@ -243,10 +243,10 @@ class GearCheck(commands.Cog):
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
         region = region.lower()
-        if region not in VALID_REGIONS:
+        if region not in REGIONS:
             return await ctx.send(
                 _("Invalid region. Valid regions are: {regions}.").format(
-                    regions="`, `".join(VALID_REGIONS)
+                    regions="`, `".join(REGIONS)
                 ),
                 ephemeral=True,
             )
@@ -336,8 +336,8 @@ class GearCheck(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         cur = (current or "").lower()
-        # mappe AC_REGIONS ("EU") -> ("EU","eu")
-        opts = [(r, r.lower()) for r in AC_REGIONS if r.lower() in {"eu","us","kr","tw"}]  # safety
+        # mappe REGIONS ("EU") -> ("EU","eu")
+        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu","us","kr","tw"}]  # safety
         return [
             app_commands.Choice(name=name, value=value)
             for (name, value) in opts
