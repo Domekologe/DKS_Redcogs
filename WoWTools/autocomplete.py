@@ -69,3 +69,26 @@ REGIONS = [
     "TW",
     # "CN", # RIP
 ]
+
+_API_HOST = {
+    "eu": "eu.api.blizzard.com",
+    "us": "us.api.blizzard.com",
+    "kr": "kr.api.blizzard.com",
+    "tw": "kr.api.blizzard.com",
+}
+_AUTH_HOST = {
+    "eu": "eu.battle.net",
+    "us": "us.battle.net",
+    "kr": "apac.battle.net", 
+    "tw": "apac.battle.net", 
+}
+
+_LANG_CODES = {
+    "de": "de_DE",
+    "en": "en_US",
+    "fr": "fr_FR",
+    "es": "es_ES",
+    "it": "it_IT",
+    "pt": "pt_PT",
+    "ru": "ru_RU",
+}

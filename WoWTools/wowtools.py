@@ -21,10 +21,12 @@ from .pvp import PvP
 from .raiderio import Raiderio
 from .scoreboard import Scoreboard
 from .token import Token
-from .user_installable.auctionhouse import UserInstallableAuctionHouse
 from .user_installable.raiderio import UserInstallableRaiderio
 
 from .gearcheck import GearCheck
+from .charinfo import CharInfo
+from .charstats import CharStats
+from .talentcheck import TalentCheck
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
@@ -40,7 +42,9 @@ class WoWTools(
     OnMessage,
     CVarDocs,
     GearCheck,
-    UserInstallableAuctionHouse,
+    CharInfo,
+    CharStats,
+    TalentCheck,
     UserInstallableRaiderio,
     commands.Cog,
 ):

@@ -9,34 +9,9 @@ from discord import app_commands
 from redbot.core import commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
+from .autocomplete import REALMS as AC_REALMS, REGIONS as VALID_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
 
 _ = Translator("WoWTools", __file__)
-
-# Regionen
-VALID_REGIONS = ["eu", "us", "kr"]
-
-# Blizzard Hosts
-_API_HOST = {
-    "eu": "eu.api.blizzard.com",
-    "us": "us.api.blizzard.com",
-    "kr": "kr.api.blizzard.com",
-}
-_AUTH_HOST = {
-    "eu": "eu.battle.net",
-    "us": "us.battle.net",
-    "kr": "apac.battle.net",  # KR/TW auth über APAC
-}
-
-# Kurzcode -> Locale
-_LANG_CODES = {
-    "de": "de_DE",
-    "en": "en_US",
-    "fr": "fr_FR",
-    "es": "es_ES",
-    "it": "it_IT",
-    "pt": "pt_PT",
-    "ru": "ru_RU",
-}
 
 def _resolve_locale(lang_or_locale: str) -> str:
     if not lang_or_locale:
@@ -360,12 +335,62 @@ class GearCheck(commands.Cog):
     async def ac_region(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
-        current = (current or "").lower()
+        cur = (current or "").lower()
+        # mappe AC_REGIONS ("EU") -> ("EU","eu")
+        opts = [(r, r.lower()) for r in AC_REGIONS if r.lower() in {"eu","us","kr","tw"}]  # safety
         return [
-            app_commands.Choice(name=r.upper(), value=r)
-            for r in VALID_REGIONS
-            if current in r
+            app_commands.Choice(name=name, value=value)
+            for (name, value) in opts
+            if cur in value
         ][:25]
+
+    @gearcheck.autocomplete("realm")
+    async def ac_realm(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        # bereits gewählte Region (command option) lesen
+        sel_region = (getattr(interaction.namespace, "region", "eu") or "eu").upper()
+        cur = (current or "").lower()
+
+        suggestions: List[str] = []
+        for realm_name, realm_regions in AC_REALMS.items():
+            # Wenn Region gesetzt, nur diese Realms
+            if sel_region and sel_region not in realm_regions:
+                continue
+            if cur in realm_name.lower():
+                suggestions.append(realm_name)
+
+        suggestions = suggestions[:25]
+        return [app_commands.Choice(name=r, value=r) for r in suggestions]
+
+    @gearcheck.autocomplete("locale")
+    async def ac_locale(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        cur = (current or "").lower()
+
+        # Baue Vorschläge: ("Deutsch (de_DE)", "de_DE") + ("Deutsch (de)", "de")
+        display_map = {
+            "de": "Deutsch", "en": "English", "fr": "Français", "es": "Español",
+            "it": "Italiano", "pt": "Português", "ru": "Русский",
+        }
+
+        pairs: List[tuple[str, str]] = []
+        for short, full in AC_LANG_CODES.items():
+            label_base = display_map.get(short, short)
+            # volle Locale
+            pairs.append((f"{label_base} ({full})", full))
+            # Kurzcode
+            pairs.append((f"{label_base} ({short})", short))
+
+        # filtern
+        out = [
+            app_commands.Choice(name=label, value=val)
+            for (label, val) in pairs
+            if cur in label.lower() or cur in val.lower()
+        ][:25]
+        return out
+
 
 
 async def setup(bot: Red):
