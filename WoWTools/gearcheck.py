@@ -161,6 +161,7 @@ class GearCheck(commands.Cog):
         character: str,
         game: Literal["classic", "retail"] = "classic",
         locale: str = "en_US",
+        private: bool = True,
     ) -> dict:
         host = _API_HOST.get(region, "eu.api.blizzard.com")
         token = await _get_access_token_cached_gear(self, region)
@@ -328,7 +329,7 @@ class GearCheck(commands.Cog):
         )
 
         ephemeral = getattr(ctx, "interaction", None) is not None
-        await ctx.send(embed=embed, ephemeral=ephemeral)
+        await ctx.send(embed=embed, ephemeral=private)
 
     # --------- Autocomplete ---------
     @gearcheck.autocomplete("region")

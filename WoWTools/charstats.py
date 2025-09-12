@@ -131,6 +131,7 @@ class CharStats(commands.Cog):
         character: str,
         game: str,
         locale: str = "en",
+        private: bool = True,
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
@@ -160,9 +161,35 @@ class CharStats(commands.Cog):
             "Raids entered (10p)": _find_stat(all_stats, "Total 10-player raids entered"),
             "Raids entered (25p)": _find_stat(all_stats, "Total 25-player raids entered"),
             "Total damage done": _find_stat(all_stats, "Total damage done"),
+            "Total damage received": _find_stat(all_stats, "Total damage received"),
             "Total healing done": _find_stat(all_stats, "Total healing done"),
+            "Total healing received": _find_stat(all_stats, "Total healing received"),
             "Largest hit dealt": _find_stat(all_stats, "Largest hit dealt"),
             "Largest heal cast": _find_stat(all_stats, "Largest heal cast"),
+            "----------------------------",
+            "Bandages used": _find_stat(all_stats, "Bandages used"),
+            "Health potions consumed": _find_stat(all_stats, "Health potions consumed"),
+            "Mana potions consumed": _find_stat(all_stats, "Mana potions consumed"),
+            "Elixirs consumed": _find_stat(all_stats, "Elixirs consumed"),
+            "Flasks consumed": _find_stat(all_stats, "Flasks consumed"),
+            "Beverages consumed": _find_stat(all_stats, "Beverages consumed"),
+            "Food eaten": _find_stat(all_stats, "Food eaten"),
+            "Healthstones used": _find_stat(all_stats, "Healthstones used"),
+            "----------------------------",
+            "Factions Exalted": _find_stat(all_stats, "Most factions at Exalted"),
+            "Mounts owned": _find_stat(all_stats, "Mounts owned"),
+            "Greed rolls made on loot": _find_stat(all_stats, "Greed rolls made on loot"),
+            "Need rolls made on loot": _find_stat(all_stats, "Need rolls made on loot"),
+            "Deaths from falling": _find_stat(all_stats, "Deaths from falling"),
+            "----------------------------",
+            "Creatures killed": _find_stat(all_stats, "Creatures killed"),
+            "Total Honorable Kills": _find_stat(all_stats, "Total Honorable Kills"),
+            "Quests completed": _find_stat(all_stats, "Quests completed"),
+            "----------------------------",
+            "Flight paths taken": _find_stat(all_stats, "Flight paths taken"),
+            "Summons accepted": _find_stat(all_stats, "Summons accepted"),
+            "Mage Portals taken": _find_stat(all_stats, "Mage Portals taken"),
+            "Number of times hearthed": _find_stat(all_stats, "Number of times hearthed"),
         }
 
         lines: List[str] = []
@@ -185,7 +212,7 @@ class CharStats(commands.Cog):
             description="\n".join(lines),
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=bool(ctx.interaction))
+        await ctx.send(embed=embed, ephemeral=private)
 
     # ---------- Autocomplete ----------
     @charstats.autocomplete("region")

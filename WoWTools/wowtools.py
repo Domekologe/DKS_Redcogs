@@ -27,6 +27,7 @@ from .gearcheck import GearCheck
 from .charinfo import CharInfo
 from .charstats import CharStats
 from .talentcheck import TalentCheck
+from .raidinfo import RaidInfo
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
@@ -45,6 +46,7 @@ class WoWTools(
     CharInfo,
     CharStats,
     TalentCheck,
+    RaidInfo,
     UserInstallableRaiderio,
     commands.Cog,
 ):

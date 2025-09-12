@@ -128,6 +128,7 @@ class CharInfo(commands.Cog):
         character: str,
         game: str,
         locale: str = "en",
+        private: bool = True,
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
@@ -203,7 +204,7 @@ class CharInfo(commands.Cog):
             description="\n".join([x for x in lines if x is not None]),
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=bool(ctx.interaction))
+        await ctx.send(embed=embed, ephemeral=private)
 
     # ---------- Autocomplete ----------
     @charinfo.autocomplete("region")

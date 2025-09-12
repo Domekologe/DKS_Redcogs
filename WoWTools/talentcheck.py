@@ -115,6 +115,7 @@ class TalentCheck(commands.Cog):
         character: str,
         game: Literal["classic", "retail"] = "classic",
         locale: str = "en",
+        private: bool = True,
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
@@ -178,7 +179,7 @@ class TalentCheck(commands.Cog):
             description="\n".join(spec_lines + ([""] if spec_lines and glyph_lines else []) + glyph_lines),
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=bool(ctx.interaction))
+        await ctx.send(embed=embed, ephemeral=private)
 
     # ---------- Autocomplete ----------
     @talentcheck.autocomplete("region")
