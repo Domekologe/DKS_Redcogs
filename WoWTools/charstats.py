@@ -130,7 +130,7 @@ class CharStats(commands.Cog):
         realm: str,
         character: str,
         game: str,
-        locale: str = "en",
+        #locale: str = "en",
         private: bool = True,
     ):
         if ctx.interaction:

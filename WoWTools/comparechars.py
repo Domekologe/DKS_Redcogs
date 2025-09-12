@@ -136,6 +136,21 @@ async def _fetch_statistics(self, *, region: str, realm_slug: str, char_slug: st
                 raise RuntimeError(f"{resp.status}: {js}")
             return js
 
+
+async def _fetch_achv_statistics(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
+    host = _API_HOST.get(region, "eu.api.blizzard.com")
+    token = await _get_access_token(self, region)
+    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/achievements/statistics"
+    params = {"namespace": namespace, "locale": locale}
+    headers = {"Authorization": f"Bearer {token}"}
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url, params=params, headers=headers) as resp:
+            js = await resp.json()
+            if resp.status != 200:
+                raise RuntimeError(f"{resp.status}: {js}")
+            return js
+            
 # ----------------- Compare Logic -----------------
 def _avg_ilvl(ilvls: List[Optional[int]]) -> Optional[float]:
     vals = [x for x in ilvls if isinstance(x, int)]
@@ -234,6 +249,96 @@ def _build_info_compare_lines(js1: dict, js2: dict) -> List[str]:
 
     return lines
 
+def _collect_all_stats_nodes(js: dict) -> list[dict]:
+    out = []
+    for st in js.get("statistics") or []:
+        out.append(st)
+    def walk(cat: dict):
+        for st in cat.get("statistics") or []:
+            out.append(st)
+        for sub in cat.get("sub_categories") or []:
+            walk(sub)
+    for cat in js.get("categories") or []:
+        walk(cat)
+    return out
+
+def _find_stat_id_by_en_name(all_en: list[dict], needle: str) -> Optional[int]:
+    n = needle.lower()
+    for st in all_en:
+        if n in (st.get("name") or "").lower():
+            return st.get("id")
+    return None
+
+def _build_charstats_compare_lines_en(js1_en: dict, js2_en: dict) -> list[str]:
+    all1 = _collect_all_stats_nodes(js1_en)
+    all2 = _collect_all_stats_nodes(js2_en)
+    by_id_1 = {st["id"]: st for st in all1 if "id" in st}
+    by_id_2 = {st["id"]: st for st in all2 if "id" in st}
+
+    # Definitionen (engl. Muster -> Label in der Ausgabe)
+    defs = [
+        ("Total kills", "Total kills"),
+        ("Total deaths", "Total deaths"),
+        ("Quests completed", "Quests completed"),
+        ("Total 5-player dungeons entered", "Dungeons entered (5p)"),
+        ("Total 10-player raids entered", "Raids entered (10p)"),
+        ("Total 25-player raids entered", "Raids entered (25p)"),
+        ("Total damage done", "Total damage done"),
+        ("Total damage received", "Total damage received"),
+        ("Total healing done", "Total healing done"),
+        ("Total healing received", "Total healing received"),
+        ("Largest hit dealt", "Largest hit dealt"),
+        ("Largest heal cast", "Largest heal cast"),
+        ("SEP", None),
+        ("Bandages used", "Bandages used"),
+        ("Health potions consumed", "Health potions consumed"),
+        ("Mana potions consumed", "Mana potions consumed"),
+        ("Elixirs consumed", "Elixirs consumed"),
+        ("Flasks consumed", "Flasks consumed"),
+        ("Beverages consumed", "Beverages consumed"),
+        ("Food eaten", "Food eaten"),
+        ("Healthstones used", "Healthstones used"),
+        ("SEP", None),
+        ("Most factions at Exalted", "Factions Exalted"),
+        ("Mounts owned", "Mounts owned"),
+        ("Greed rolls made on loot", "Greed rolls made on loot"),
+        ("Need rolls made on loot", "Need rolls made on loot"),
+        ("Deaths from falling", "Deaths from falling"),
+        ("SEP", None),
+        ("Creatures killed", "Creatures killed"),
+        ("Total Honorable Kills", "Total Honorable Kills"),
+        ("SEP", None),
+        ("Flight paths taken", "Flight paths taken"),
+        ("Summons accepted", "Summons accepted"),
+        ("Mage Portals taken", "Mage Portals taken"),
+        ("Number of times hearthed", "Number of times hearthed"),
+    ]
+
+    lines: list[str] = []
+    for pattern, label in defs:
+        if pattern == "SEP":
+            lines.append("—" * 27)
+            continue
+        # gleiche ID in beiden suchen – wir matchen anhand von char1 (robust genug)
+        stat_id = _find_stat_id_by_en_name(all1, pattern)
+        if not stat_id:
+            continue
+        n1 = by_id_1.get(stat_id)
+        n2 = by_id_2.get(stat_id)
+        if not n1 or not n2:
+            continue
+        q1, q2 = n1.get("quantity"), n2.get("quantity")
+        # Zahl hübsch formatieren
+        def fmt(x):
+            if isinstance(x, (int, float)):
+                if isinstance(x, float) and x.is_integer():
+                    x = int(x)
+                return f"{x:,}"
+            return str(x)
+        lines.append(f"**{label}:** {fmt(q1)}  ⟷  {fmt(q2)}")
+    return lines
+
+
 # ----------------- Cog -----------------
 @cog_i18n(_)
 class CompareChars(commands.Cog):
@@ -261,6 +366,7 @@ class CompareChars(commands.Cog):
         type=[
             app_commands.Choice(name="Gear", value="gear"),
             app_commands.Choice(name="Info", value="info"),
+            app_commands.Choice(name="CharStats (en_US)", value="charstats"),  # NEU
         ],
     )
     async def comparechars(
@@ -310,7 +416,7 @@ class CompareChars(commands.Cog):
                 )
                 lines = _build_gear_compare_lines(eq1, eq2, il1, il2)
                 title_mid = "Gear"
-            else:
+            elif type == "info":
                 # info
                 js1, js2 = await asyncio.gather(
                     _fetch_statistics(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale=locale),
@@ -318,6 +424,15 @@ class CompareChars(commands.Cog):
                 )
                 lines = _build_info_compare_lines(js1, js2)
                 title_mid = "Info"
+            
+            else:  # "charstats"
+            # ACHTUNG: IMMER en_US, egal was locale sagt
+            js1_en, js2_en = await asyncio.gather(
+                _fetch_achv_statistics(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale="en_US"),
+                _fetch_achv_statistics(self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale="en_US"),
+            )
+            lines = _build_charstats_compare_lines_en(js1_en, js2_en)
+            title_mid = "CharStats (en_US)"
         except Exception as e:
             return await ctx.send(f"Fehler beim Abruf: {e}", ephemeral=(private if ctx.interaction else False))
 
