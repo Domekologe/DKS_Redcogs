@@ -194,17 +194,20 @@ class CharStats(commands.Cog):
 
         lines: List[str] = []
         for label, st in picks.items():
-            if st is None and label.startswith("-"):
-                lines.append(label)
-            elif st and "quantity" in st:
+            # Separator-Zeilen erkennen
+            if label.startswith("_sep"):
+                lines.append(str(st))
+                continue
+
+            if isinstance(st, dict) and "quantity" in st:
                 q = st["quantity"]
-                # hübsche Formatierung mit Tausendertrennzeichen, falls numerisch
                 if isinstance(q, (int, float)):
                     if isinstance(q, float) and q.is_integer():
                         q = int(q)
                     lines.append(f"**{label}:** {q:,}")
                 else:
                     lines.append(f"**{label}:** {q}")
+
 
         if not lines:
             lines = ["Keine passenden Statistiken gefunden."]
