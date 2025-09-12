@@ -166,7 +166,7 @@ class CharStats(commands.Cog):
             "Total healing received": _find_stat(all_stats, "Total healing received"),
             "Largest hit dealt": _find_stat(all_stats, "Largest hit dealt"),
             "Largest heal cast": _find_stat(all_stats, "Largest heal cast"),
-            "-":"---------------------------",
+            "_sep1":"---------------------------",
             "Bandages used": _find_stat(all_stats, "Bandages used"),
             "Health potions consumed": _find_stat(all_stats, "Health potions consumed"),
             "Mana potions consumed": _find_stat(all_stats, "Mana potions consumed"),
@@ -175,17 +175,17 @@ class CharStats(commands.Cog):
             "Beverages consumed": _find_stat(all_stats, "Beverages consumed"),
             "Food eaten": _find_stat(all_stats, "Food eaten"),
             "Healthstones used": _find_stat(all_stats, "Healthstones used"),
-            "-":"---------------------------",
+            "_sep2":"---------------------------",
             "Factions Exalted": _find_stat(all_stats, "Most factions at Exalted"),
             "Mounts owned": _find_stat(all_stats, "Mounts owned"),
             "Greed rolls made on loot": _find_stat(all_stats, "Greed rolls made on loot"),
             "Need rolls made on loot": _find_stat(all_stats, "Need rolls made on loot"),
             "Deaths from falling": _find_stat(all_stats, "Deaths from falling"),
-            "-":"---------------------------",
+            "_sep3":"---------------------------",
             "Creatures killed": _find_stat(all_stats, "Creatures killed"),
             "Total Honorable Kills": _find_stat(all_stats, "Total Honorable Kills"),
             "Quests completed": _find_stat(all_stats, "Quests completed"),
-            "-":"---------------------------",
+            "_sep4":"---------------------------",
             "Flight paths taken": _find_stat(all_stats, "Flight paths taken"),
             "Summons accepted": _find_stat(all_stats, "Summons accepted"),
             "Mage Portals taken": _find_stat(all_stats, "Mage Portals taken"),
@@ -194,7 +194,9 @@ class CharStats(commands.Cog):
 
         lines: List[str] = []
         for label, st in picks.items():
-            if st and "quantity" in st:
+            if st is None and label.startswith("-"):
+                lines.append(label)
+            elif st and "quantity" in st:
                 q = st["quantity"]
                 # hübsche Formatierung mit Tausendertrennzeichen, falls numerisch
                 if isinstance(q, (int, float)):
