@@ -255,7 +255,7 @@ class GearCheck(commands.Cog):
         locale = _resolve_locale(locale)
 
         try:
-            await ctx.defer()
+            await ctx.defer(ephemeral=private)
         except Exception:
             pass
 
@@ -328,8 +328,8 @@ class GearCheck(commands.Cog):
             color=await ctx.embed_color(),
         )
 
-        ephemeral = getattr(ctx, "interaction", None) is not None
-        await ctx.send(embed=embed, ephemeral=private)
+        ephemeral = private if ctx.interaction else False
+        await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # --------- Autocomplete ---------
     @gearcheck.autocomplete("region")

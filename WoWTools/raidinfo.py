@@ -237,7 +237,7 @@ class RaidInfo(commands.Cog):
         char_slug = character.lower()
 
         try:
-            await ctx.defer()
+            await ctx.defer(ephemeral=private)
         except Exception:
             pass
 
@@ -263,7 +263,8 @@ class RaidInfo(commands.Cog):
             description=text,
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=private)
+        ephemeral = private if ctx.interaction else False
+        await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # ---------- Autocomplete ----------
     @raidinfo.autocomplete("region")

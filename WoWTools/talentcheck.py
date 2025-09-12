@@ -126,7 +126,7 @@ class TalentCheck(commands.Cog):
         char_slug = character.lower()
 
         try:
-            await ctx.defer()
+            await ctx.defer(ephemeral=private)
         except Exception:
             pass
 
@@ -179,7 +179,8 @@ class TalentCheck(commands.Cog):
             description="\n".join(spec_lines + ([""] if spec_lines and glyph_lines else []) + glyph_lines),
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=private)
+        ephemeral = private if ctx.interaction else False
+        await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # ---------- Autocomplete ----------
     @talentcheck.autocomplete("region")

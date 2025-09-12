@@ -141,7 +141,7 @@ class CharStats(commands.Cog):
         char_slug = character.lower()
 
         try:
-            await ctx.defer()
+            await ctx.defer(ephemeral=private)
         except Exception:
             pass
 
@@ -214,7 +214,8 @@ class CharStats(commands.Cog):
             description="\n".join(lines),
             color=await ctx.embed_color(),
         )
-        await ctx.send(embed=embed, ephemeral=private)
+        ephemeral = private if ctx.interaction else False
+        await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # ---------- Autocomplete ----------
     @charstats.autocomplete("region")
