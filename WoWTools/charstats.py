@@ -11,7 +11,7 @@ from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
 
 from .autocomplete import (
-    REGIONS as AC_REGIONS,
+    REGIONS,
     REALMS as AC_REALMS,
     _LANG_CODES as AC_LANG_CODES,
     _API_HOST,
@@ -191,7 +191,7 @@ class CharStats(commands.Cog):
     @charstats.autocomplete("region")
     async def ac_region(self, interaction: discord.Interaction, current: str):
         cur = (current or "").lower()
-        opts = [(r, r.lower()) for r in AC_REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
+        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
         return [app_commands.Choice(name=name, value=val) for name, val in opts if cur in val][:25]
 
     @charstats.autocomplete("realm")
