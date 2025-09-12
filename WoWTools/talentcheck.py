@@ -110,7 +110,7 @@ class TalentCheck(commands.Cog):
     async def talentcheck(
         self,
         ctx: commands.Context,
-        region: Literal["eu", "us", "kr", "tw"],
+        region: str,
         realm: str,
         character: str,
         game: Literal["classic", "retail"] = "classic",

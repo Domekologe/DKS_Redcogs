@@ -126,10 +126,10 @@ class CharStats(commands.Cog):
     async def charstats(
         self,
         ctx: commands.Context,
-        region: Literal["eu", "us", "kr", "tw"],
+        region: str,
         realm: str,
         character: str,
-        game: Literal["classic", "retail"] = "classic",
+        game: str,
         locale: str = "en",
     ):
         if ctx.interaction:

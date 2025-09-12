@@ -9,7 +9,7 @@ from discord import app_commands
 from redbot.core import commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
-from .autocomplete import REALMS as AC_REALMS, REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
+from .autocomplete import REALMS as AC_REALMS, REGIONS as AC_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
 
 _ = Translator("WoWTools", __file__)
 
@@ -183,8 +183,8 @@ class GearCheck(commands.Cog):
     async def _fetch_item_levels(
         self,
         *,
-        region: Literal["eu", "us", "kr"],
-        game: Literal["classic", "retail"],
+        region: str,
+        game: str,
         locale: str,
         item_ids: List[int],
         concurrency: int = 5,
@@ -336,13 +336,26 @@ class GearCheck(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
         cur = (current or "").lower()
-        # mappe REGIONS ("EU") -> ("EU","eu")
-        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu","us","kr","tw"}]  # safety
-        return [
-            app_commands.Choice(name=name, value=value)
-            for (name, value) in opts
-            if cur in value
-        ][:25]
+
+        # AC_REGIONS enthält "EU","US","KR","TW" (Groß). Wir geben als value "eu","us","kr","tw" zurück.
+        candidates = []
+        for r in AC_REGIONS:
+            code = r.lower()
+            if code not in {"eu", "us", "kr", "tw"}:  # safety, falls du später mehr einträgst
+                continue
+            name = r.upper()
+            if not cur or cur in code or cur in name.lower():
+                candidates.append((name, code))
+
+        # Starts-with zuerst, dann enthält-Matches
+        def prio(t):
+            name, code = t
+            return (0 if code.startswith(cur) or name.lower().startswith(cur) else 1, code)
+
+        candidates.sort(key=prio)
+
+        return [app_commands.Choice(name=name, value=code) for name, code in candidates[:25]]
+
 
     @gearcheck.autocomplete("realm")
     async def ac_realm(
