@@ -1,0 +1,382 @@
+# WoWTools/comparechars.py
+import aiohttp
+import asyncio
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Optional, Tuple
+
+import discord
+from discord import app_commands
+from redbot.core import commands
+from redbot.core.bot import Red
+from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
+
+from .autocomplete import (
+    REGIONS,
+    REALMS as AC_REALMS,
+    _LANG_CODES as AC_LANG_CODES,
+    _API_HOST,
+    _AUTH_HOST,
+)
+
+_ = Translator("WoWTools", __file__)
+
+# ----------------- Helpers -----------------
+def _resolve_locale(lang_or_locale: str) -> str:
+    if not lang_or_locale:
+        return "en_US"
+    key = lang_or_locale.lower()
+    return AC_LANG_CODES.get(key, lang_or_locale)
+
+def _pct(v: Optional[float]) -> str:
+    try:
+        return f"{float(v):.2f}%"
+    except Exception:
+        return "?"
+
+def _fmt_rating_block(node: Optional[dict]) -> str:
+    if not node:
+        return "?"
+    val = node.get("value")
+    rn = node.get("rating_normalized")
+    if val is None and rn is None:
+        return "?"
+    if val is None:
+        return f"(RN {rn})"
+    if rn is None:
+        return _pct(val)
+    return f"{_pct(val)} (RN {rn})"
+
+# ----------------- OAuth Cache -----------------
+def _ensure_oauth_state(self):
+    if not hasattr(self, "_tok_lock"):
+        self._tok_lock = asyncio.Lock()
+    if not hasattr(self, "_tok"):
+        self._tok: Dict[str, str] = {}
+    if not hasattr(self, "_exp"):
+        self._exp: Dict[str, datetime] = {}
+
+async def _get_access_token(self, region: str) -> str:
+    _ensure_oauth_state(self)
+    async with self._tok_lock:
+        now = datetime.now(timezone.utc)
+        if self._tok.get(region) and self._exp.get(region) and now < self._exp[region]:
+            return self._tok[region]
+        api_tokens = await self.bot.get_shared_api_tokens("blizzard")
+        cid, secret = api_tokens.get("client_id"), api_tokens.get("client_secret")
+        if not cid or not secret:
+            raise RuntimeError("Blizzard API nicht eingerichtet. `[p]set api blizzard client_id,<id> client_secret,<secret>`")
+        auth_host = _AUTH_HOST.get(region, "eu.battle.net")
+        url = f"https://{auth_host}/oauth/token"
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url, data={"grant_type": "client_credentials"}, auth=aiohttp.BasicAuth(cid, secret)) as resp:
+                js = await resp.json()
+                if resp.status != 200:
+                    raise RuntimeError(f"Auth {resp.status}: {js}")
+        token = js["access_token"]
+        expires_in = int(js.get("expires_in", 3600))
+        self._tok[region] = token
+        self._exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
+        return token
+
+# ----------------- Fetchers -----------------
+async def _fetch_equipment(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
+    host = _API_HOST.get(region, "eu.api.blizzard.com")
+    token = await _get_access_token(self, region)
+    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
+    params = {"namespace": namespace, "locale": locale}
+    headers = {"Authorization": f"Bearer {token}"}
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url, params=params, headers=headers) as resp:
+            js = await resp.json()
+            if resp.status != 200:
+                raise RuntimeError(f"{resp.status}: {js}")
+            return js
+
+async def _fetch_item_levels(self, *, region: str, game: str, locale: str, item_ids: List[int], concurrency: int = 5) -> Dict[int, Optional[int]]:
+    host = _API_HOST.get(region, "eu.api.blizzard.com")
+    token = await _get_access_token(self, region)
+    namespace = f"static-{region}" if game == "retail" else f"static-classic-{region}"
+
+    sem = asyncio.Semaphore(concurrency)
+    results: Dict[int, Optional[int]] = {}
+
+    async def fetch_one(session: aiohttp.ClientSession, iid: int):
+        url = f"https://{host}/data/wow/item/{iid}"
+        params = {"namespace": namespace, "locale": locale}
+        headers = {"Authorization": f"Bearer {token}"}
+        async with sem:
+            async with session.get(url, params=params, headers=headers) as resp:
+                js = await resp.json()
+                if resp.status == 200:
+                    results[iid] = js.get("level")
+                else:
+                    results[iid] = None
+
+    uniq_ids = list({i for i in item_ids if i})
+    if not uniq_ids:
+        return {}
+
+    async with aiohttp.ClientSession() as session:
+        await asyncio.gather(*(fetch_one(session, iid) for iid in uniq_ids))
+
+    return results
+
+async def _fetch_statistics(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
+    host = _API_HOST.get(region, "eu.api.blizzard.com")
+    token = await _get_access_token(self, region)
+    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/statistics"
+    params = {"namespace": namespace, "locale": locale}
+    headers = {"Authorization": f"Bearer {token}"}
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url, params=params, headers=headers) as resp:
+            js = await resp.json()
+            if resp.status != 200:
+                raise RuntimeError(f"{resp.status}: {js}")
+            return js
+
+# ----------------- Compare Logic -----------------
+def _avg_ilvl(ilvls: List[Optional[int]]) -> Optional[float]:
+    vals = [x for x in ilvls if isinstance(x, int)]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+def _build_gear_compare_lines(eq1: dict, eq2: dict, ilvls1: Dict[int, Optional[int]], ilvls2: Dict[int, Optional[int]]) -> List[str]:
+    # slot -> (ilvl1, ilvl2)
+    pairs: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+
+    def add(equipped: List[dict], store: Dict[str, Optional[int]], mapping: Dict[int, Optional[int]]):
+        for it in equipped or []:
+            slot = it.get("slot", {}).get("name")
+            iid = (it.get("item") or {}).get("id")
+            lvl = mapping.get(iid)
+            if slot:
+                store[slot] = lvl
+
+    s1: Dict[str, Optional[int]] = {}
+    s2: Dict[str, Optional[int]] = {}
+    add(eq1.get("equipped_items") or [], s1, ilvls1)
+    add(eq2.get("equipped_items") or [], s2, ilvls2)
+
+    all_slots = sorted(set(list(s1.keys()) + list(s2.keys())), key=lambda x: x.lower())
+    lines: List[str] = []
+
+    # Durchschnitt
+    avg1 = _avg_ilvl(list(s1.values()))
+    avg2 = _avg_ilvl(list(s2.values()))
+    if avg1 is not None or avg2 is not None:
+        lines.append(f"**Ø Itemlevel:** {f'{avg1:.1f}' if avg1 is not None else '?'}  vs  {f'{avg2:.1f}' if avg2 is not None else '?'}")
+        lines.append("")
+
+    for slot in all_slots:
+        v1 = s1.get(slot)
+        v2 = s2.get(slot)
+        l1 = f"{v1}" if v1 is not None else "?"
+        l2 = f"{v2}" if v2 is not None else "?"
+        lines.append(f"**{slot}:** {l1}  ⟷  {l2}")
+
+    return lines
+
+def _build_info_compare_lines(js1: dict, js2: dict) -> List[str]:
+    def grab(js, key, sub=None, eff=False):
+        node = js.get(key) or {}
+        if sub:
+            return node.get(sub)
+        if eff:
+            return node.get("effective")
+        return js.get(key)
+
+    lines: List[str] = []
+    # Basics
+    health1, health2 = js1.get("health"), js2.get("health")
+    ptype1, ptype2 = (js1.get("power_type") or {}).get("name"), (js2.get("power_type") or {}).get("name")
+    power1, power2 = js1.get("power"), js2.get("power")
+
+    lines.append(f"**Health:** {health1:,}  ⟷  {health2:,}" if isinstance(health1, int) and isinstance(health2, int) else f"**Health:** {health1}  ⟷  {health2}")
+    if ptype1 == ptype2 and ptype1:
+        # gleicher Power-Typ
+        if isinstance(power1, int) and isinstance(power2, int):
+            lines.append(f"**{ptype1}:** {power1:,}  ⟷  {power2:,}")
+        else:
+            lines.append(f"**{ptype1}:** {power1}  ⟷  {power2}")
+    else:
+        lines.append(f"**Power:** {power1} ({ptype1})  ⟷  {power2} ({ptype2})")
+
+    lines.append("")
+    # Primärwerte
+    for k in ("strength", "agility", "intellect", "stamina"):
+        v1 = (js1.get(k) or {}).get("effective")
+        v2 = (js2.get(k) or {}).get("effective")
+        lines.append(f"**{k.title()}:** {v1}  ⟷  {v2}")
+
+    lines.append("")
+    armor1 = (js1.get("armor") or {}).get("effective")
+    armor2 = (js2.get("armor") or {}).get("effective")
+    sp1, sp2 = js1.get("spell_power"), js2.get("spell_power")
+    lines.append(f"**Armor:** {armor1}  ⟷  {armor2}")
+    lines.append(f"**Spell Power:** {sp1}  ⟷  {sp2}")
+
+    lines.append("")
+    # Ratings
+    pairs = [
+        ("Melee Crit", _fmt_rating_block(js1.get("melee_crit")), _fmt_rating_block(js2.get("melee_crit"))),
+        ("Melee Haste", _fmt_rating_block(js1.get("melee_haste")), _fmt_rating_block(js2.get("melee_haste"))),
+        ("Ranged Crit", _fmt_rating_block(js1.get("ranged_crit")), _fmt_rating_block(js2.get("ranged_crit"))),
+        ("Ranged Haste", _fmt_rating_block(js1.get("ranged_haste")), _fmt_rating_block(js2.get("ranged_haste"))),
+        ("Spell Crit", _fmt_rating_block(js1.get("spell_crit")), _fmt_rating_block(js2.get("spell_crit"))),
+        ("Spell Haste", _fmt_rating_block(js1.get("spell_haste")), _fmt_rating_block(js2.get("spell_haste"))),
+        ("Mastery", _fmt_rating_block(js1.get("mastery")), _fmt_rating_block(js2.get("mastery"))),
+    ]
+    for label, a, b in pairs:
+        lines.append(f"**{label}:** {a}  ⟷  {b}")
+
+    return lines
+
+# ----------------- Cog -----------------
+@cog_i18n(_)
+class CompareChars(commands.Cog):
+    """Vergleicht zwei Charaktere: Gear (Itemlevel je Slot) ODER Charakterwerte."""
+
+    def __init__(self, bot: Red) -> None:
+        self.bot = bot
+
+    @commands.hybrid_command(name="comparechars")
+    @app_commands.describe(
+        region="Region (eu/us/kr/tw)",
+        server_char1="Realm/Server von Charakter 1",
+        server_char2="Realm/Server von Charakter 2",
+        name_char1="Name von Charakter 1",
+        name_char2="Name von Charakter 2",
+        type="Vergleichstyp: 'gear' oder 'info'",
+        locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        private="Antwort nur für dich sichtbar (ephemeral)",
+    )
+    @app_commands.choices(
+        game=[
+            app_commands.Choice(name="Classic", value="classic"),
+            app_commands.Choice(name="Retail", value="retail"),
+        ],
+        type=[
+            app_commands.Choice(name="Gear", value="gear"),
+            app_commands.Choice(name="Info", value="info"),
+        ],
+    )
+    async def comparechars(
+        self,
+        ctx: commands.Context,
+        region: str,
+        server_char1: str,
+        server_char2: str,
+        name_char1: str,
+        name_char2: str,
+        type: str,
+        game: str,
+        locale: str = "en",
+        private: bool = True,
+    ):
+        if ctx.interaction:
+            await set_contextual_locales_from_guild(self.bot, ctx.guild)
+
+        region = (region or "").lower()
+        locale = _resolve_locale(locale)
+
+        realm1_slug = server_char1.lower().replace(" ", "-")
+        realm2_slug = server_char2.lower().replace(" ", "-")
+        char1_slug = name_char1.lower()
+        char2_slug = name_char2.lower()
+
+        # Slash: direkt korrekt defern (ephemeral vorher setzen!)
+        if ctx.interaction:
+            try:
+                await ctx.defer(ephemeral=private)
+            except Exception:
+                pass
+
+        try:
+            if type == "gear":
+                # Fetch Equip beider Chars
+                eq1, eq2 = await asyncio.gather(
+                    _fetch_equipment(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale=locale),
+                    _fetch_equipment(self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale=locale),
+                )
+                # Itemlevel nachladen
+                ids1 = [it.get("item", {}).get("id") for it in (eq1.get("equipped_items") or []) if it.get("item")]
+                ids2 = [it.get("item", {}).get("id") for it in (eq2.get("equipped_items") or []) if it.get("item")]
+                il1, il2 = await asyncio.gather(
+                    _fetch_item_levels(self, region=region, game=game, locale=locale, item_ids=ids1),
+                    _fetch_item_levels(self, region=region, game=game, locale=locale, item_ids=ids2),
+                )
+                lines = _build_gear_compare_lines(eq1, eq2, il1, il2)
+                title_mid = "Gear"
+            else:
+                # info
+                js1, js2 = await asyncio.gather(
+                    _fetch_statistics(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale=locale),
+                    _fetch_statistics(self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale=locale),
+                )
+                lines = _build_info_compare_lines(js1, js2)
+                title_mid = "Info"
+        except Exception as e:
+            return await ctx.send(f"Fehler beim Abruf: {e}", ephemeral=(private if ctx.interaction else False))
+
+        # Embed bauen
+        title = f"{name_char1.title()} @ {server_char1.title()}  ⟷  {name_char2.title()} @ {server_char2.title()}"
+        embed = discord.Embed(
+            title=f"{title} – {region.upper()} [{game.capitalize()}] ({title_mid})",
+            description="\n".join(lines)[:3900],
+            color=await ctx.embed_color(),
+        )
+        await ctx.send(embed=embed, ephemeral=(private if ctx.interaction else False))
+
+    # ---------- Autocomplete ----------
+    @comparechars.autocomplete("region")
+    async def ac_region(self, interaction: discord.Interaction, current: str):
+        cur = (current or "").lower()
+        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
+        # startswith priorisieren
+        def prio(t):
+            name, val = t
+            return (0 if val.startswith(cur) or name.lower().startswith(cur) else 1, val)
+        opts.sort(key=prio)
+        return [app_commands.Choice(name=name, value=val) for name, val in opts if not cur or cur in val][:25]
+
+    @comparechars.autocomplete("server_char1")
+    async def ac_realm1(self, interaction: discord.Interaction, current: str):
+        sel_region = (getattr(interaction.namespace, "region", "") or "").upper()
+        cur = (current or "").lower()
+        out: List[str] = []
+        for realm_name, realm_regions in AC_REALMS.items():
+            if sel_region and sel_region not in realm_regions:
+                continue
+            if not cur or cur in realm_name.lower():
+                out.append(realm_name)
+        return [app_commands.Choice(name=r, value=r) for r in out[:25]]
+
+    @comparechars.autocomplete("server_char2")
+    async def ac_realm2(self, interaction: discord.Interaction, current: str):
+        # gleiche Region wie oben
+        sel_region = (getattr(interaction.namespace, "region", "") or "").upper()
+        cur = (current or "").lower()
+        out: List[str] = []
+        for realm_name, realm_regions in AC_REALMS.items():
+            if sel_region and sel_region not in realm_regions:
+                continue
+            if not cur or cur in realm_name.lower():
+                out.append(realm_name)
+        return [app_commands.Choice(name=r, value=r) for r in out[:25]]
+
+    @comparechars.autocomplete("locale")
+    async def ac_locale(self, interaction: discord.Interaction, current: str):
+        cur = (current or "").lower()
+        display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
+        pairs = []
+        for short, full in AC_LANG_CODES.items():
+            label = display.get(short, short)
+            pairs.append((f"{label} ({full})", full))
+            pairs.append((f"{label} ({short})", short))
+        return [app_commands.Choice(name=l, value=v) for l, v in pairs if not cur or cur in l.lower() or cur in v.lower()][:25]
+
+async def setup(bot: Red):
+    await bot.add_cog(CompareChars(bot))

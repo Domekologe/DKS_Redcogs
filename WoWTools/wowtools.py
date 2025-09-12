@@ -28,6 +28,7 @@ from .charinfo import CharInfo
 from .charstats import CharStats
 from .talentcheck import TalentCheck
 from .raidinfo import RaidInfo
+from .comparechars import CompareChars
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
@@ -47,6 +48,7 @@ class WoWTools(
     CharStats,
     TalentCheck,
     RaidInfo,
+    CompareChars,
     UserInstallableRaiderio,
     commands.Cog,
 ):
