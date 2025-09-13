@@ -65,13 +65,13 @@ async def _fetch_achv_statistics(
     realm: str,
     character: str,
     game: Literal["classic", "retail"] = "classic",
-    #locale: str = "en_US",
 ) -> dict:
+    locale = "en_US",
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
     namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
     url = f"https://{host}/profile/wow/character/{realm}/{character}/achievements/statistics"
-    params = {"namespace": namespace)#, "locale": locale}
+    params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession() as s:
         async with s.get(url, params=params, headers=headers) as resp:
