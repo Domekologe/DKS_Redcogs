@@ -425,14 +425,19 @@ class CompareChars(commands.Cog):
                 lines = _build_info_compare_lines(js1, js2)
                 title_mid = "Info"
             
-            else  # "charstats"
-            # ACHTUNG: IMMER en_US, egal was locale sagt
-            js1_en, js2_en = await asyncio.gather(
-                _fetch_achv_statistics(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale="en_US"),
-                _fetch_achv_statistics(self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale="en_US"),
-            )
-            lines = _build_charstats_compare_lines_en(js1_en, js2_en)
-            title_mid = "CharStats (en_US)"
+            else:  # "charstats"
+                # Always use en_US for achievement statistics comparisons, regardless of requested locale.
+                js1_en, js2_en = await asyncio.gather(
+                    _fetch_achv_statistics(
+                        self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale="en_US"
+                    ),
+                    _fetch_achv_statistics(
+                        self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale="en_US"
+                    ),
+                )
+                lines = _build_charstats_compare_lines_en(js1_en, js2_en)
+                title_mid = "CharStats (en_US)"
+
         except Exception as e:
             return await ctx.send(f"Fehler beim Abruf: {e}", ephemeral=(private if ctx.interaction else False))
 
