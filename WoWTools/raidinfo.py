@@ -17,6 +17,7 @@ from .autocomplete import (
     _LANG_CODES as AC_LANG_CODES,
     _API_HOST,
     _AUTH_HOST,
+    _EXPENSIONS,
 )
 
 _ = Translator("WoWTools", __file__)
@@ -83,121 +84,214 @@ async def _fetch_achv_statistics(
             return js
 
 # -------- Helpers --------
-# Bekannte MoP-Raids
-_MOP_RAIDS = {
-    "Mogu'shan Vaults",
-    "Heart of Fear",
-    "Terrace of Endless Spring",
-    "Throne of Thunder",
-    "Siege of Orgrimmar",
-}
+_VERBS = ("kills", "victories", "rescues", "defeats", "defeated")
 
-# Regex: "<Boss> kills (10-player Normal <Raid>)"
-_RE_RAID_LINE = re.compile(
-    r"^(?P<boss>.+?) kills \((?P<mode>.+?) (?P<raid>.+?)\)$"
-)
+_RE_LINE_GENERIC = re.compile(r"^(?P<left>.+?)\s*\((?P<detail>.+?)\)\s*$")
 
-def _collect_all_mop_stats(js: dict) -> List[dict]:
-    """Nimmt nur Dungeons & Raids → Mists of Pandaria."""
+# -------- Generic collectors for Dungeons & Raids (with expansion tagging) --------
+def _collect_all_raid_stats_with_expansion(js: dict) -> List[dict]:
+    """
+    Walks categories → 'Dungeons & Raids' and returns all statistics from all expansions.
+    Each returned dict contains at least: {'name': str, 'quantity': int, 'expansion': str}.
+    """
     out: List[dict] = []
+
+    def coerce_int(q):
+        if isinstance(q, (int, float)):
+            return int(q)
+        return None
+
+    # Find the 'Dungeons & Raids' root
     for cat in js.get("categories") or []:
         if (cat.get("name") or "").lower() != "dungeons & raids":
             continue
-        for sub in cat.get("sub_categories") or []:
-            if (sub.get("name") or "").lower() == "mists of pandaria":
-                # Direkt enthaltene Stats
-                out.extend(sub.get("statistics") or [])
-                # Falls Unter-Unterkategorien existieren:
-                def walk(inner):
-                    out.extend(inner.get("statistics") or [])
-                    for sc in inner.get("sub_categories") or []:
-                        walk(sc)
-                for sc in sub.get("sub_categories") or []:
-                    walk(sc)
-                return out
+
+        # At the first level below, nodes are usually expansions (Classic, TBC, Wrath, Cataclysm, Mists of Pandaria, ...)
+        def walk(node: dict, current_expansion: Optional[str]):
+            # Collect stats at this node (tag with current_expansion if present)
+            for st in node.get("statistics") or []:
+                name = st.get("name") or ""
+                q = coerce_int(st.get("quantity"))
+                if name and q is not None:
+                    out.append({"name": name, "quantity": q, "expansion": current_expansion or ""})
+
+            # Recurse into subcategories; expansion sticks unless a child looks like a new expansion root
+            for sc in node.get("sub_categories") or []:
+                sc_name = sc.get("name") or ""
+                # Heuristic: if we're directly under the D&R root, treat this name as the expansion name.
+                next_exp = current_expansion
+                if (node is cat):  # immediate children of D&R are expansions
+                    next_exp = sc_name
+                walk(sc, next_exp)
+
+        # Start walk with no expansion at the root, it will be set at first sublevel
+        walk(cat, None)
+        break
+
     return out
+
+def _clean_tokens_for_raid(detail: str) -> Tuple[str, str]:
+    """
+    Returns (raid_name, diff) where diff ∈ {'hc','nhc'}.
+    Detects 'Heroic'/'Normal' tokens in detail and removes '10/25 player' noise.
+    """
+    diff = "nhc"
+    d = detail.strip()
+
+    if re.search(r"\bheroic\b", d, re.IGNORECASE):
+        diff = "hc"
+
+    d = re.sub(r"\b(10|25)\s*-\s*player\b", "", d, flags=re.IGNORECASE)
+    d = re.sub(r"\b(10|25)\s*player\b", "", d, flags=re.IGNORECASE)
+    d = re.sub(r"\b(10|25)-player\b", "", d, flags=re.IGNORECASE)
+    d = re.sub(r"\b(normal|heroic)\b", "", d, flags=re.IGNORECASE)
+    raid = re.sub(r"\s{2,}", " ", d).strip()
+    return raid, diff
 
 def _parse_raid_stat_name(name: str) -> Optional[Tuple[str, str, str]]:
     """
-    Gibt (boss, raid, diff) zurück oder None.
-    diff ∈ {"nhc","hc"} basierend auf "Normal"/"Heroic". 10/25 wird bewusst nicht getrennt.
+    Returns (boss, raid, diff) or None.
+    diff ∈ {"nhc","hc"}.
+    Only considers lines that contain a recognized verb and have a "(...)" trailer.
     """
     if not name:
         return None
-    m = _RE_RAID_LINE.match(name)
+
+    m = _RE_LINE_GENERIC.match(name)
     if not m:
         return None
-    boss = m.group("boss").strip()
-    mode = m.group("mode").strip()      # z. B. "10-player Normal"
-    raid = m.group("raid").strip()      # z. B. "Mogu'shan Vaults"
 
-    # Nur MoP-Raids berücksichtigen
-    if raid not in _MOP_RAIDS:
+    left = m.group("left").strip()
+    detail = m.group("detail").strip()
+
+    verb_match = None
+    for v in _VERBS:
+        vm = re.search(rf"\b{re.escape(v)}\b", left, flags=re.IGNORECASE)
+        if vm:
+            verb_match = (v, vm.start(), vm.end())
+            break
+    if not verb_match:
         return None
 
-    diff = "hc" if "heroic" in mode.lower() else "nhc"
+    _, s, _ = verb_match
+
+    is_heroic_left = "heroic" in left.lower()
+    boss = left[:s].strip()
+    boss = re.sub(r"\bheroic\b", "", boss, flags=re.IGNORECASE).strip()
+
+    raid, diff_from_detail = _clean_tokens_for_raid(detail)
+    diff = "hc" if (is_heroic_left or diff_from_detail == "hc") else "nhc"
+
+    if not boss or not raid:
+        return None
+
     return boss, raid, diff
 
-def _group_by_raid(stats: List[dict], only_extension: Optional[str]) -> Dict[str, Dict[str, Dict[str, int]]]:
+
+def _group_by_expansion_and_raid(stats: List[dict], only_expansion: Optional[str]) -> Dict[str, Dict[str, Dict[str, Dict[str, int]]]]:
     """
-    Rückgabe-Struktur:
+    Build:
     {
-      "<Raid>": {
-        "<Boss>": {"nhc": int, "hc": int}
+      "<Expansion>": {
+        "<Raid>": {
+          "<Boss>": {"nhc": int, "hc": int}
+        }
       }
     }
+    Optionally filter by expansion name (case-insensitive substring match).
     """
-    raids: Dict[str, Dict[str, Dict[str, int]]] = {}
-    ext = (only_extension or "").strip().lower() if only_extension else ""
+    out: Dict[str, Dict[str, Dict[str, Dict[str, int]]]] = {}
+    exp_filter = (only_expansion or "").strip().lower() if only_expansion else ""
 
     for st in stats:
         name = st.get("name") or ""
         q = st.get("quantity")
-        if not isinstance(q, (int, float)):
+        exp = (st.get("expansion") or "").strip()
+        if not isinstance(q, int):
             continue
-        if isinstance(q, float) and q.is_integer():
-            q = int(q)
 
         parsed = _parse_raid_stat_name(name)
         if not parsed:
             continue
         boss, raid, diff = parsed
 
-        # optionaler Extension-Filter (Raidname enthält extension)
-        if ext and ext not in raid.lower():
+        # expansion filter (substring on the human-readable expansion label)
+        if exp_filter and exp_filter not in exp.lower():
             continue
 
-        raids.setdefault(raid, {})
-        raids[raid].setdefault(boss, {"nhc": 0, "hc": 0})
-        raids[raid][boss][diff] += int(q)
+        out.setdefault(exp, {})
+        out[exp].setdefault(raid, {})
+        out[exp][raid].setdefault(boss, {"nhc": 0, "hc": 0})
+        out[exp][raid][boss][diff] += q
 
-    # Nach Raidname sortieren, innerhalb nach Bossname
-    sorted_raids: Dict[str, Dict[str, Dict[str, int]]] = {}
-    for raid in sorted(raids.keys()):
-        bosses = raids[raid]
-        sorted_bosses = dict(sorted(bosses.items(), key=lambda kv: kv[0].lower()))
-        sorted_raids[raid] = sorted_bosses
-    return sorted_raids
+    # sort: expansions by a sensible order (fallback: alpha), raids alpha, bosses alpha
+    # Try to respect a canonical expansion order if available
+    def exp_sort_key(e_name: str) -> Tuple[int, str]:
+        order = {
+            "Classic": 1,
+            "The Burning Crusade": 2,
+            "Wrath of the Lich King": 3,
+            "Cataclysm": 4,
+            "Mists of Pandaria": 5,
+        }
+        return (order.get(e_name, 999), e_name.lower())
 
-def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, int]]]) -> str:
+    sorted_out: Dict[str, Dict[str, Dict[str, Dict[str, int]]]] = {}
+    for exp in sorted(out.keys(), key=exp_sort_key):
+        raids = out[exp]
+        sorted_raids: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for raid in sorted(raids.keys(), key=lambda s: s.lower()):
+            bosses = raids[raid]
+            sorted_bosses = dict(sorted(bosses.items(), key=lambda kv: kv[0].lower()))
+            sorted_raids[raid] = sorted_bosses
+        sorted_out[exp] = sorted_raids
+
+    return sorted_out
+
+def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]]) -> str:
+    """
+    Expansion
+    RAID
+
+    Boss
+    Normal Kills => X
+    Heroic Kills => Y
+    """
     lines: List[str] = []
-    for raid, bosses in grouped.items():
-        lines.append(f"**{raid}**")
-        if not bosses:
-            lines.append("_Keine Bossdaten_")
+    for expansion, raids in grouped.items():
+        if expansion:
+            lines.append(f"**{expansion}**")
+        else:
+            lines.append("**(Unbekannte Expansion)**")
+
+        if not raids:
+            lines.append("_Keine Raids_")
+            lines.append("")  # blank line between expansions
             continue
-        for boss, counts in bosses.items():
-            nhc = counts.get("nhc", 0)
-            hc = counts.get("hc", 0)
-            lines.append(f"- {boss}\n  `nhc => {nhc}`\n  `hc  => {hc}`")
-        lines.append("")  # Leerzeile zwischen Raids
+
+        for raid, bosses in raids.items():
+            lines.append(f"{raid}\n")
+            if not bosses:
+                lines.append("_Keine Bossdaten_\n")
+                continue
+
+            for boss, counts in bosses.items():
+                nhc = counts.get("nhc", 0)
+                hc = counts.get("hc", 0)
+                lines.append(f"{boss}")
+                lines.append(f"Normal Kills => {nhc}")
+                lines.append(f"Heroic Kills => {hc}\n")  # blank line after each boss
+
+        lines.append("")  # blank line between expansions
+
     text = "\n".join(lines).strip()
-    # Discord-Softlimit: kürzen falls zu lang
-    return text[:3800]  # genug Luft für Titel/Farbe
+    return text[:3800]
+
 
 @cog_i18n(_)
 class RaidInfo(commands.Cog):
-    """Listet MoP-Raids → Bosse mit Kills nach Schwierigkeitsgrad (nhc/hc)."""
+    """Lists raid bosses with kill counters by difficulty (nhc/hc), grouped by Expansion → Raid → Boss."""
+
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -224,7 +318,7 @@ class RaidInfo(commands.Cog):
         realm: str,
         character: str,
         game: str,
-        locale: str = "en",
+        locale: str = "en_US",
         extension: Optional[str] = None,
         private: bool = True,
     ):
@@ -248,23 +342,24 @@ class RaidInfo(commands.Cog):
         except Exception as e:
             return await ctx.send(f"Fehler beim Abrufen der Achievements-Statistiken: {e}", ephemeral=bool(ctx.interaction))
 
-        mop_stats = _collect_all_mop_stats(js)
-        if not mop_stats:
-            return await ctx.send("Keine MoP-Dungeon/Raid-Statistiken gefunden.", ephemeral=bool(ctx.interaction))
+        all_stats = _collect_all_raid_stats_with_expansion(js)
+        if not all_stats:
+            return await ctx.send("Keine Dungeon/Raid-Statistiken gefunden.", ephemeral=bool(ctx.interaction))
 
-        grouped = _group_by_raid(mop_stats, extension)
+        grouped = _group_by_expansion_and_raid(all_stats, extension)
         if not grouped:
             flt = extension or "—"
-            return await ctx.send(f"Keine passenden Raid-Einträge für Filter **{flt}**.", ephemeral=bool(ctx.interaction))
+            return await ctx.send(f"Keine passenden Einträge für Expansion-Filter **{flt}**.", ephemeral=bool(ctx.interaction))
 
         text = _format_embed_text(grouped)
         embed = discord.Embed(
-            title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}] – Mists of Pandaria",
+            title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}] – Raids",
             description=text,
             color=await ctx.embed_color(),
         )
         ephemeral = private if ctx.interaction else False
         await ctx.send(embed=embed, ephemeral=ephemeral)
+
 
     # ---------- Autocomplete ----------
     @raidinfo.autocomplete("region")
@@ -293,13 +388,53 @@ class RaidInfo(commands.Cog):
     @raidinfo.autocomplete("locale")
     async def ac_locale(self, interaction: discord.Interaction, current: str):
         cur = (current or "").lower()
-        display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
+        display = {"de_DE":"Deutsch","en_US":"English"}
         pairs = []
         for short, full in AC_LANG_CODES.items():
             label = display.get(short, short)
             pairs.append((f"{label} ({full})", full))
             pairs.append((f"{label} ({short})", short))
-        return [app_commands.Choice(name=l, value=v) for l, v in pairs if not cur or cur in l.lower() or cur in v.lower()][:25]
+        return [app_commands.Choice(name=l, value=v) for l, v in pairs if cur in l.lower() or cur in v.lower()][:25]
+        
+    @raidinfo.autocomplete("extension")
+    async def ac_extension(self, interaction: discord.Interaction, current: str):
+        # This is an expansion filter (substring). Offer common expansion labels.
+        cur = (current or "").lower()
+
+        # Try to use provided expansions from .autocomplete if present,
+        # otherwise fall back to a static list.
+        labels: List[str] = []
+        try:
+            # _EXPENSIONS might be dict-like or list-like; handle both.
+            if hasattr(_EXPENSIONS, "items"):
+                # Prefer human-readable values if dict maps codes -> labels
+                vals = list(getattr(_EXPENSIONS, "values")())
+                keys = list(getattr(_EXPENSIONS, "keys")())
+                labels = [str(v) for v in vals] + [str(k) for k in keys]
+            else:
+                labels = [str(x) for x in list(_EXPENSIONS)]
+        except Exception:
+            labels = [
+                "Classic",
+                "The Burning Crusade",
+                "Wrath of the Lich King",
+                "Cataclysm",
+                "Mists of Pandaria",
+            ]
+
+        # Make unique and stable
+        seen = set()
+        uniq = []
+        for lbl in labels:
+            L = lbl.strip()
+            if not L or L.lower() in seen:
+                continue
+            seen.add(L.lower())
+            uniq.append(L)
+
+        opts = [e for e in uniq if not cur or cur in e.lower()]
+        return [app_commands.Choice(name=o, value=o) for o in opts[:25]]
+
 
 async def setup(bot: Red):
     await bot.add_cog(RaidInfo(bot))

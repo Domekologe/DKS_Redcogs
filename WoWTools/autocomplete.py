@@ -92,3 +92,11 @@ _LANG_CODES = {
     "pt": "pt_PT",
     "ru": "ru_RU",
 }
+
+_EXPENSIONS = {
+    "Classic",
+    "The Burning Crusade",
+    "Wrath of the Lich King",
+    "Cataclysm",
+    "Mists of Pandaria",
+}
