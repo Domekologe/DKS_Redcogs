@@ -115,7 +115,7 @@ class CharStats(commands.Cog):
         realm="Realm (mit Bindestrich statt Leerzeichen)",
         character="Charaktername",
         game="Classic (MoP Classic) oder Retail",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        #locale="Locale (z. B. de oder de_DE, en oder en_US)",
     )
     @app_commands.choices(
         game=[
@@ -136,7 +136,7 @@ class CharStats(commands.Cog):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
         region = region.lower()
-        locale = _resolve_locale(locale)
+        #locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")
         char_slug = character.lower()
 
@@ -146,7 +146,7 @@ class CharStats(commands.Cog):
             pass
 
         try:
-            js = await _fetch_achv_statistics(self, region=region, realm=realm_slug, character=char_slug, game=game, locale=locale)
+            js = await _fetch_achv_statistics(self, region=region, realm=realm_slug, character=char_slug, game=game)#, locale=locale)
         except Exception as e:
             return await ctx.send(f"Fehler beim Abrufen der Achievements-Statistiken: {e}", ephemeral=bool(ctx.interaction))
 
@@ -239,16 +239,16 @@ class CharStats(commands.Cog):
                 out.append(realm_name)
         return [app_commands.Choice(name=r, value=r) for r in out[:25]]
 
-    @charstats.autocomplete("locale")
-    async def ac_locale(self, interaction: discord.Interaction, current: str):
-        cur = (current or "").lower()
-        display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
-        pairs = []
-        for short, full in AC_LANG_CODES.items():
-            label = display.get(short, short)
-            pairs.append((f"{label} ({full})", full))
-            pairs.append((f"{label} ({short})", short))
-        return [app_commands.Choice(name=l, value=v) for l, v in pairs if cur in l.lower() or cur in v.lower()][:25]
+    #@charstats.autocomplete("locale")
+    #async def ac_locale(self, interaction: discord.Interaction, current: str):
+    #    cur = (current or "").lower()
+    #    display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
+    #    pairs = []
+    #    for short, full in AC_LANG_CODES.items():
+    #        label = display.get(short, short)
+    #        pairs.append((f"{label} ({full})", full))
+    #        pairs.append((f"{label} ({short})", short))
+    #    return [app_commands.Choice(name=l, value=v) for l, v in pairs if cur in l.lower() or cur in v.lower()][:25]
 
 async def setup(bot: Red):
     await bot.add_cog(CharStats(bot))
