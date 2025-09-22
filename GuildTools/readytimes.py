@@ -119,7 +119,11 @@ class ReadyTimes(commands.Cog):
         view = ReadyTimesView(self, interaction.user, avail_map)
         embed = await view.build_embed()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
+        try:
+            original = await interaction.original_response()
+            view.message_id = original.id
+        except Exception:
+            view.message_id = None
     # ------------------------------
     # Slash: /get-readytimes [day] [start] [end]
     # ------------------------------
@@ -261,10 +265,19 @@ class ReadyTimesView(discord.ui.View):
         return emb
 
     async def refresh_message(self, interaction: discord.Interaction):
-        # disable/enable edit button depending on can
         can_today = self.state.get(self.current_day_key, DayAvailability()).can
         self.edit_times.disabled = not can_today
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
+
+        if getattr(self, "message_id", None):
+            # falls bereits geantwortet (z.B. Modal), über followup editieren
+            if interaction.response.is_done():
+                await interaction.followup.edit_message(self.message_id, embed=await self.build_embed(), view=self)
+            else:
+                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        else:
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+
 
 
 class DaySelect(discord.ui.Select):
