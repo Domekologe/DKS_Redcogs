@@ -333,29 +333,10 @@ class GearCheck(commands.Cog):
 
     # --------- Autocomplete ---------
     @gearcheck.autocomplete("region")
-    async def ac_region(
-        self, interaction: discord.Interaction, current: str
-    ) -> List[app_commands.Choice[str]]:
+    async def ac_region(self, interaction: discord.Interaction, current: str):
         cur = (current or "").lower()
-
-        # AC_REGIONS enthält "EU","US","KR","TW" (Groß). Wir geben als value "eu","us","kr","tw" zurück.
-        candidates = []
-        for r in AC_REGIONS:
-            code = r.lower()
-            if code not in {"eu", "us", "kr", "tw"}:  # safety, falls du später mehr einträgst
-                continue
-            name = r.upper()
-            if not cur or cur in code or cur in name.lower():
-                candidates.append((name, code))
-
-        # Starts-with zuerst, dann enthält-Matches
-        def prio(t):
-            name, code = t
-            return (0 if code.startswith(cur) or name.lower().startswith(cur) else 1, code)
-
-        candidates.sort(key=prio)
-
-        return [app_commands.Choice(name=name, value=code) for name, code in candidates[:25]]
+        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
+        return [app_commands.Choice(name=name, value=val) for name, val in opts if cur in val][:25]
 
 
     @gearcheck.autocomplete("realm")
