@@ -88,17 +88,32 @@ def parse_time_or_none(s: Optional[str]) -> Optional[str]:
 
 
 def overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    """Classic overlap for non-wrapping intervals [a_start, a_end) vs [b_start, b_end)."""
     return max(a_start, b_start) < min(a_end, b_end)
+
+def overlaps_wrap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    """Overlap where [a_start, a_end) may wrap past midnight (end < start)."""
+    if a_end >= a_start:
+        # normal same-day window
+        return overlaps(a_start, a_end, b_start, b_end)
+    # wrap: split into [a_start, 1440) and [0, a_end)
+    return overlaps(a_start, 24 * 60, b_start, b_end) or overlaps(0, a_end, b_start, b_end)
+
 
 
 def format_range(start: Optional[str], end: Optional[str]) -> str:
     if start and end:
-        return f"{start} - {end}"
+        smin, emin = hhmm_to_min(start), hhmm_to_min(end)
+        if smin == emin:
+            return f"{start} - {end}"  # Falls du 'ganzer Tag' später mal erlaubst, sonst bleibt so
+        # (+1) kennzeichnet Überhang in den nächsten Tag
+        return f"{start} - {end}" + (" (+1)" if emin < smin else "")
     if start and not end:
         return f"Ab {start}"
     if end and not start:
         return f"Bis {end}"
     return "-"
+
 
 
 def format_range_with_parens(start: Optional[str], end: Optional[str]) -> str:
@@ -238,7 +253,7 @@ class ReadyTimes(commands.Cog):
                 a_start, a_end = hhmm_to_min(info["start"]), hhmm_to_min(info["end"])
                 b_start = want_start if want_start is not None else 0
                 b_end   = want_end   if want_end   is not None else 24 * 60 - 1
-                if overlaps(a_start, a_end, b_start, b_end):
+                if overlaps_wrap(a_start, a_end, b_start, b_end):
                     # NEU: wenn nur Ab -> zeige (Ende); wenn nur Bis -> zeige (Start)
                     if start_t and not end_t:
                         lines.append(f"{member.display_name} ({info['end']})")
@@ -271,7 +286,7 @@ class ReadyTimes(commands.Cog):
                     a_start, a_end = hhmm_to_min(info["start"]), hhmm_to_min(info["end"])
                     b_start = want_start if want_start is not None else 0
                     b_end   = want_end   if want_end   is not None else 24 * 60 - 1
-                    if overlaps(a_start, a_end, b_start, b_end):
+                    if overlaps_wrap(a_start, a_end, b_start, b_end):
                         if start_t and not end_t:
                             day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['end']})")
                         elif end_t and not start_t:
@@ -444,8 +459,10 @@ class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
         e = normalize_time_input(self.end.value)
         if not TIME_RE.match(s) or not TIME_RE.match(e):
             return await interaction.response.send_message("Bitte HH:MM 24h-Format verwenden.", ephemeral=True)
-        if hhmm_to_min(s) >= hhmm_to_min(e):
-            return await interaction.response.send_message("Ende muss nach Start liegen.", ephemeral=True)
+        if hhmm_to_min(s) == hhmm_to_min(e):
+            return await interaction.response.send_message("Start und Ende dürfen nicht gleich sein.", ephemeral=True)
+        # Wenn Ende < Start, interpretieren wir das als 'bis nächster Tag' → erlaubt.
+
 
         info = self.parent_view.state.get(self.day_key, DayAvailability(can=True))
         info.can = True
