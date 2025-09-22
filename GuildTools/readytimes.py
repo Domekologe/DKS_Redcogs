@@ -128,12 +128,19 @@ class ReadyTimes(commands.Cog):
     # Slash: /get-readytimes [day] [start] [end]
     # ------------------------------
 
+    # Choices für den Wochentag
     day_choices = [app_commands.Choice(name=de, value=key) for key, de in WEEKDAYS]
 
     @app_commands.command(name="get-readytimes", description="Abfrage, wer wann kann (Antwort ist privat).")
     @app_commands.describe(day="Optional: Wochentag", start="Optional: Startzeit HH:MM", end="Optional: Endzeit HH:MM")
     @app_commands.choices(day=day_choices)
-    async def get_readytimes(self, interaction: discord.Interaction, day: Optional[app_commands.Choice[str]] = None, start: Optional[str] = None, end: Optional[str] = None):
+    async def get_readytimes(
+        self,
+        interaction: discord.Interaction,
+        day: Optional[app_commands.Choice[str]] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ):
         if not interaction.guild:
             return await interaction.response.send_message("Nur in einem Server benutzbar.", ephemeral=True)
 
@@ -144,7 +151,7 @@ class ReadyTimes(commands.Cog):
         if end and not end_t:
             return await interaction.response.send_message("Ungültige Endzeit. Nutze HH:MM (24h).", ephemeral=True)
 
-        # Gather all members' availability in this guild
+        # Nur aktuelle Server-Mitglieder (Bots raus)
         results = []
         for member in interaction.guild.members:
             if member.bot:
@@ -152,7 +159,7 @@ class ReadyTimes(commands.Cog):
             data = await self.config.member(member).get_raw()
             results.append((member, data))
 
-        # No args => Gesamtübersicht
+        # 1) Keine Args => Gesamtübersicht
         if not day and not start_t and not end_t:
             embed = discord.Embed(title="Gesamtübersicht Verfügbarkeiten", color=discord.Color.blurple())
             for key in DAY_ORDER:
@@ -160,25 +167,30 @@ class ReadyTimes(commands.Cog):
                 for member, data in results:
                     info = data.get(key, {"can": False, "start": None, "end": None})
                     if info["can"]:
-                        disp = f"{member.display_name} ({format_range(info['start'], info['end'])})"
-                        line_parts.append(disp)
-                de_name = DAY_KEY_TO_DE[key]
-                embed.add_field(name=de_name, value=", ".join(line_parts) if line_parts else "Keiner!", inline=False)
+                        line_parts.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
+                embed.add_field(
+                    name=DAY_KEY_TO_DE[key],
+                    value=", ".join(line_parts) if line_parts else "Keiner!",
+                    inline=False,
+                )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Only day => Liste der Personen + Zeitfenster
+        # 2) Nur Tag => Liste inkl. Zeitfenster
         if day and not start_t and not end_t:
             key = day.value
-            de_name = DAY_KEY_TO_DE[key]
             lines: List[str] = []
             for member, data in results:
                 info = data.get(key, {"can": False, "start": None, "end": None})
                 if info["can"]:
                     lines.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
-            embed = discord.Embed(title=f"{de_name}", description="\n".join(lines) if lines else "Keiner!", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title=f"{DAY_KEY_TO_DE[key]}",
+                description="\n".join(lines) if lines else "Keiner!",
+                color=discord.Color.blurple(),
+            )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Day + (start and/or end) => Nur Namen, die in diesem Zeitfenster KÖNNEN
+        # 3) Tag + (Start/Ende) => Nur Namen, die in diesem Fenster können
         if day and (start_t or end_t):
             key = day.value
             want_start = hhmm_to_min(start_t) if start_t else None
@@ -190,24 +202,27 @@ class ReadyTimes(commands.Cog):
                 if not info["can"] or not info["start"] or not info["end"]:
                     continue
                 a_start, a_end = hhmm_to_min(info["start"]), hhmm_to_min(info["end"])
-
                 b_start = want_start if want_start is not None else 0
                 b_end = want_end if want_end is not None else 24 * 60 - 1
                 if overlaps(a_start, a_end, b_start, b_end):
                     names.append(member.display_name)
 
             title = f"{DAY_KEY_TO_DE[key]} — {format_range_with_parens(start_t, end_t)}"
-            embed = discord.Embed(title=title, description="\n".join(names) if names else "Keiner!", color=discord.Color.green())
+            embed = discord.Embed(
+                title=title,
+                description="\n".join(names) if names else "Keiner!",
+                color=discord.Color.green(),
+            )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Only time (no day) => je Nutzer die Tage listen, an denen er in diesem Fenster kann
+        # 4) Nur Zeit(en) (ohne Tag) => je Nutzer die Tage; bei nur-Ab zeige (Ende), bei nur-Bis zeige (Start)
         if (start_t or end_t) and not day:
             want_start = hhmm_to_min(start_t) if start_t else None
             want_end = hhmm_to_min(end_t) if end_t else None
 
             lines: List[str] = []
             for member, data in results:
-                days_hit: List[str] = []
+                day_tokens: List[str] = []
                 for key in DAY_ORDER:
                     info = data.get(key, {"can": False, "start": None, "end": None})
                     if not info["can"] or not info["start"] or not info["end"]:
@@ -216,16 +231,26 @@ class ReadyTimes(commands.Cog):
                     b_start = want_start if want_start is not None else 0
                     b_end = want_end if want_end is not None else 24 * 60 - 1
                     if overlaps(a_start, a_end, b_start, b_end):
-                        days_hit.append(DAY_KEY_TO_DE[key])
-                if days_hit:
-                    suffix = f" ({', '.join(days_hit)})"
-                    lines.append(f"{member.display_name}{suffix}")
+                        if start_t and not end_t:
+                            # Nur Ab -> je Tag Endzeit in Klammern zeigen
+                            day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['end']})")
+                        elif end_t and not start_t:
+                            # Nur Bis -> je Tag Startzeit in Klammern zeigen
+                            day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['start']})")
+                        else:
+                            day_tokens.append(DAY_KEY_TO_DE[key])
+                if day_tokens:
+                    lines.append(f"{member.display_name} ({', '.join(day_tokens)})")
 
             title = f"Zeitfenster — {format_range_with_parens(start_t, end_t)}"
-            embed = discord.Embed(title=title, description="\n".join(lines) if lines else "Keiner!", color=discord.Color.purple())
+            embed = discord.Embed(
+                title=title,
+                description="\n".join(lines) if lines else "Keiner!",
+                color=discord.Color.purple(),
+            )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # Fallback (should not happen)
+        # Fallback
         return await interaction.response.send_message("Ungültige Kombination.", ephemeral=True)
 
 
