@@ -95,7 +95,7 @@ class ReadyTimes(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0xD0M3R34DY7, force_registration=True)
+        self.config = Config.get_conf(self, identifier=0xD0DE20251, force_registration=True)
         member_defaults = {
             day: {"can": False, "start": None, "end": None} for day, _ in WEEKDAYS
         }
