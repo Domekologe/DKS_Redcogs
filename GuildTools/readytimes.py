@@ -62,6 +62,31 @@ def parse_time_or_none(s: Optional[str]) -> Optional[str]:
     return None
 
 
+def normalize_time_input(s: Optional[str]) -> Optional[str]:
+    if s is None: return None
+    s = str(s).strip()
+    if not s: return None
+    if TIME_RE.match(s):  # already HH:MM
+        return s
+    if s.isdigit():
+        if len(s) <= 2:  # "22" -> 22:00
+            h = int(s)
+            if 0 <= h <= 23:
+                return f"{h:02d}:00"
+        elif len(s) == 3:  # "915" -> 09:15
+            h, m = int(s[0]), int(s[1:])
+        elif len(s) == 4:  # "2230" -> 22:30
+            h, m = int(s[:2]), int(s[2:])
+        else:
+            return None
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return f"{h:02d}:{m:02d}"
+    return None
+
+def parse_time_or_none(s: Optional[str]) -> Optional[str]:
+    return normalize_time_input(s)
+
+
 def overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return max(a_start, b_start) < min(a_end, b_end)
 
@@ -276,6 +301,8 @@ class ReadyTimesView(discord.ui.View):
         self.member = member
         self.state = state  # key -> DayAvailability
 
+        self.finished = False
+
         self.current_day_key = DAY_ORDER[0]
 
         # Controls
@@ -290,33 +317,56 @@ class ReadyTimesView(discord.ui.View):
         self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
         self.add_item(self.edit_times)
 
+        self.finished_btn = FinishedButton(self)
+        self.add_item(self.finished_btn)
+
         # default set
         self.current_day_key = DAY_ORDER[0]
 
     async def build_embed(self) -> discord.Embed:
-        emb = discord.Embed(title=f"Verfügbarkeiten von {self.member.display_name}", color=discord.Color.blurple())
-        emb.description = f"**Aktuell ausgewählt:** {DAY_KEY_TO_DE.get(self.current_day_key, '-')}"
+        emb = discord.Embed(
+            title=f"Verfügbarkeiten von {self.member.display_name}",
+            color=discord.Color.blurple() if not self.finished else discord.Color.green(),
+        )
+        status = "Bearbeitung" if not self.finished else "Fertig (read-only)"
+        emb.description = (
+            f"**Aktuell ausgewählt:** {DAY_KEY_TO_DE.get(self.current_day_key, '-')}\n"
+            f"**Status:** {status}"
+        )
         for key in DAY_ORDER:
             info = self.state.get(key, DayAvailability())
             icon = "✅" if info.can else "❌"
             text = "Kann nicht" if not info.can else format_range(info.start, info.end)
             emb.add_field(name=DAY_KEY_TO_DE[key], value=f"{icon} {text}", inline=False)
-        emb.set_footer(text="Tag auswählen ▶️ | Ja/Nein togglen | Zeiten bearbeiten")
+
+        footer = "Tag auswählen ▶️ | Ja/Nein togglen | Zeiten bearbeiten"
+        if self.finished:
+            footer = "Fertig – diese Ansicht ist gesperrt."
+        emb.set_footer(text=footer)
         return emb
 
+
     async def refresh_message(self, interaction: discord.Interaction):
-        can_today = self.state.get(self.current_day_key, DayAvailability()).can
-        self.edit_times.disabled = not can_today
-        self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
+        # Wenn "Fertig": alle Controls sperren (inkl. sich selbst), sonst dynamisch je nach Tag
+        if getattr(self, "finished", False):
+            for item in self.children:
+                item.disabled = True
+        else:
+            can_today = self.state.get(self.current_day_key, DayAvailability()).can
+            self.edit_times.disabled = not can_today
+            self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
+
+        embed = await self.build_embed()
 
         if getattr(self, "message_id", None):
-            # falls bereits geantwortet (z.B. Modal), über followup editieren
+            # Falls bereits geantwortet (z. B. nach Modal), über followup editieren
             if interaction.response.is_done():
-                await interaction.followup.edit_message(self.message_id, embed=await self.build_embed(), view=self)
+                await interaction.followup.edit_message(self.message_id, embed=embed, view=self)
             else:
-                await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+                await interaction.response.edit_message(embed=embed, view=self)
         else:
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await interaction.response.edit_message(embed=embed, view=self)
+
 
 
 
@@ -363,6 +413,18 @@ class EditTimesButton(discord.ui.Button):
         modal = TimesModal(self.parent_view, key, info.start, info.end)
         await interaction.response.send_modal(modal)
 
+class FinishedButton(discord.ui.Button):
+    def __init__(self, parent: ReadyTimesView):
+        self.parent_view = parent
+        super().__init__(style=discord.ButtonStyle.success, label="Fertig!", emoji="✅")
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.finished = True
+        # Optional: Label ändern, damit's sichtbar bleibt, obwohl disabled
+        self.label = "Fertig ✓"
+        await self.parent_view.refresh_message(interaction)
+
+
 
 class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
     start = discord.ui.TextInput(label="Von (Start)", placeholder="z. B. 19:30", required=True, max_length=5)
@@ -378,8 +440,8 @@ class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
             self.end.default = cur_end
 
     async def on_submit(self, interaction: discord.Interaction):
-        s = str(self.start.value).strip()
-        e = str(self.end.value).strip()
+        s = normalize_time_input(self.start.value)
+        e = normalize_time_input(self.end.value)
         if not TIME_RE.match(s) or not TIME_RE.match(e):
             return await interaction.response.send_message("Bitte HH:MM 24h-Format verwenden.", ephemeral=True)
         if hhmm_to_min(s) >= hhmm_to_min(e):
@@ -393,10 +455,10 @@ class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
         await self.parent_view.cog.config.member(self.parent_view.member).set_raw(self.day_key, value={"can": True, "start": s, "end": e})
 
         # After a modal, we must send a new response first, then edit the original ephemeral message.
-        try:
-            await interaction.response.send_message("Gespeichert.", ephemeral=True)
-        except discord.InteractionResponded:
-            await interaction.followup.send("Gespeichert.", ephemeral=True)
+        #try:
+        #    await interaction.response.send_message("Gespeichert.", ephemeral=True)
+        #except discord.InteractionResponded:
+        #    await interaction.followup.send("Gespeichert.", ephemeral=True)
 
         # Find the original message to edit: interaction.message is None in modals, but the view will still be attached to the original message in memory.
         # We can safely update the embed via the View helper (using followup edit on the original message via the stored View).
