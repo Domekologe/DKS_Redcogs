@@ -1,4 +1,5 @@
 import discord
+import asyncio
 from discord import app_commands
 from datetime import timedelta
 from typing import Optional, List
@@ -105,7 +106,16 @@ class AdminUtils(commands.Cog):
         *,
         except_users: Optional[str] = None
     ):
-        # Liste von IDs aus Mentions/Namen bauen
+        # 0) Sofort defer für Slash/Hybrid, damit nichts „hängt“
+        deferred = False
+        if getattr(ctx, "interaction", None) is not None:
+            try:
+                await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+                deferred = True
+            except discord.InteractionResponded:
+                pass  # schon deferred
+
+        # 1) Ausnahme-IDs sammeln
         except_ids: List[int] = []
         if except_users:
             for u in except_users.split():
@@ -124,20 +134,93 @@ class AdminUtils(commands.Cog):
                 if uid:
                     except_ids.append(uid)
 
-        deleted = 0
-        async for msg in ctx.channel.history(limit=amount, oldest_first=False):
-            if msg.pinned:
-                continue
-            if msg.author.id in except_ids:
-                continue
+        def _check(m: discord.Message) -> bool:
+            if m.pinned:
+                return False
+            if m.author.id in except_ids:
+                return False
+            return True
+
+        total_target = amount
+        total_deleted = 0
+        progress_msg = None
+
+        async def update_progress():
+            nonlocal progress_msg
+            text = f"🧹 Lösche… {total_deleted}/{total_target} erledigt."
+            if getattr(ctx, "interaction", None) is not None:
+                # Bei Hybrid/Slash: Folge-Nachricht (ephemeral) oder editieren
+                if progress_msg is None:
+                    progress_msg = await ctx.send(text)  # wird als Followup gesendet
+                else:
+                    try:
+                        await progress_msg.edit(content=text)
+                    except discord.HTTPException:
+                        pass
+            else:
+                # Bei Prefix: tippen anzeigen, nicht spammen
+                await ctx.typing()
+
+        await update_progress()
+
+        # 2) Schneller Bulk-Pass (nur <14 Tage)
+        try:
+            recent_deleted = await ctx.channel.purge(
+                limit=amount,
+                check=_check,
+                bulk=True
+            )
+        except discord.Forbidden:
+            return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
+        except discord.HTTPException:
+            # Fallback: wenn purge scheitert, einfach weiter mit Einzel-Löschung
+            recent_deleted = []
+
+        total_deleted += len(recent_deleted)
+        await update_progress()
+
+        # 3) Falls noch nicht genug: ältere Nachrichten einzeln löschen
+        remaining = total_target - total_deleted
+        if remaining > 0:
+            # Wir iterieren die letzten `amount * 3` Nachrichten (Heuristik),
+            # um genug ältere Kandidaten zu finden.
+            scanned = 0
+            async for msg in ctx.channel.history(limit=amount * 3, oldest_first=False):
+                if scanned >= amount:
+                    break
+                scanned += 1
+
+                if not _check(msg):
+                    continue
+
+                # Alles, was purge NICHT erwischt (>=14 Tage), einzeln löschen
+                too_old = (discord.utils.utcnow() - msg.created_at) >= timedelta(days=14)
+                if too_old:
+                    try:
+                        await msg.delete()
+                        total_deleted += 1
+                        remaining -= 1
+                    except discord.HTTPException:
+                        pass
+
+                    # Event-Loop freigeben & Fortschritt updaten
+                    if total_deleted % 25 == 0:
+                        await update_progress()
+                        await asyncio.sleep(0)
+
+                    if remaining <= 0:
+                        break
+
+        # 4) Abschluss
+        if progress_msg is not None:
             try:
-                await msg.delete()
-                deleted += 1
+                await progress_msg.edit(content=f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
             except discord.HTTPException:
                 pass
 
-        await self._reply(ctx, f"✅ {deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
-
+        # Falls wir nie eine Followup-Msg geschickt haben (Prefix oder kein progress_msg):
+        if progress_msg is None:
+            await self._reply(ctx, f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
     # ---- MESSAGE MOVE (kopieren + optional löschen) ----
     @commands.hybrid_command(
         name="messagemove",
