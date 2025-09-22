@@ -237,8 +237,11 @@ class ReadyTimesView(discord.ui.View):
         # Controls
         self.day_select = DaySelect(self)
         self.add_item(self.day_select)
+        
         self.toggle_can = ToggleCanButton(self)
         self.add_item(self.toggle_can)
+
+        self.edit_times = EditTimesButton(self)
         self.edit_times.disabled = not self.state.get(self.current_day_key, DayAvailability()).can
         self.add_item(self.edit_times)
 
