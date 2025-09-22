@@ -237,12 +237,13 @@ class ReadyTimesView(discord.ui.View):
         # Controls
         self.day_select = DaySelect(self)
         self.add_item(self.day_select)
-        
+
         self.toggle_can = ToggleCanButton(self)
         self.add_item(self.toggle_can)
 
         self.edit_times = EditTimesButton(self)
         self.edit_times.disabled = not self.state.get(self.current_day_key, DayAvailability()).can
+        self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
         self.add_item(self.edit_times)
 
         # default set
@@ -250,6 +251,7 @@ class ReadyTimesView(discord.ui.View):
 
     async def build_embed(self) -> discord.Embed:
         emb = discord.Embed(title=f"Verfügbarkeiten von {self.member.display_name}", color=discord.Color.blurple())
+        emb.description = f"**Aktuell ausgewählt:** {DAY_KEY_TO_DE.get(self.current_day_key, '-')}"
         for key in DAY_ORDER:
             info = self.state.get(key, DayAvailability())
             icon = "✅" if info.can else "❌"
