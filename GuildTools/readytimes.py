@@ -169,16 +169,42 @@ class ReadyTimes(commands.Cog):
     # ------------------------------
 
     @app_commands.command(name="get-readytimes", description="Abfrage, wer wann kann (Antwort ist privat).")
-    @app_commands.describe(day="Optional: Wochentag", start="Optional: Startzeit HH:MM", end="Optional: Endzeit HH:MM")
+    @app_commands.describe(day="Optional: Wochentag", start="Optional: Startzeit HH:MM", end="Optional: Endzeit HH:MM",user="Optional: Benutzer (zeigt nur dessen Zeiten)")
     async def get_readytimes(
         self,
         interaction: discord.Interaction,
         day: Optional[str] = None,
         start: Optional[str] = None,
         end: Optional[str] = None,
+        user: Optional[discord.Member] = None,
     ):
         if not interaction.guild:
             return await interaction.response.send_message("Nur in einem Server benutzbar.", ephemeral=True)
+
+        # ——— Read-only Einzel-Übersicht wie bei /set-readytimes, wenn user gewählt ———
+        if user is not None:
+            if user.bot:
+                return await interaction.response.send_message("Bots werden nicht berücksichtigt.", ephemeral=True)
+            if user not in interaction.guild.members:
+                return await interaction.response.send_message("Dieser Benutzer ist nicht auf diesem Server.", ephemeral=True)
+
+            data = await self.config.member(user).get_raw()
+
+            embed = discord.Embed(
+                title=f"Verfügbarkeiten von {user.display_name}",
+                description="**Status:** Read-only",
+                color=discord.Color.blurple(),
+            )
+            for key in DAY_ORDER:
+                info = data.get(key, {"can": False, "start": None, "end": None})
+                icon = "✅" if info["can"] else "❌"
+                text = "Kann nicht" if not info["can"] else format_range(info["start"], info["end"])
+                embed.add_field(name=DAY_KEY_TO_DE[key], value=f"{icon} {text}", inline=False)
+
+            # Optional: Footer analog zu /set, aber ohne Controls
+            embed.set_footer(text="Übersicht ohne Bearbeitungsmöglichkeiten (read-only)")
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
         start_t = parse_time_or_none(start)
         end_t   = parse_time_or_none(end)
