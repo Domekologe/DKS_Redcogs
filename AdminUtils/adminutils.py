@@ -1,8 +1,8 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
 from datetime import timedelta
 from typing import Optional, List
+from redbot.core import commands
 
 
 def has_perms(**perms):
@@ -10,11 +10,22 @@ def has_perms(**perms):
         return commands.has_permissions(**perms).predicate(ctx)
     return commands.check(predicate)
 
+
 class AdminUtils(commands.Cog):
     """Admin-Utilities als Slash/Hybrid-Commands"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    # kleiner Helper, damit ephemeral nur bei Slash benutzt wird
+    async def _reply(self, ctx: commands.Context, content: str, **kwargs):
+        if getattr(ctx, "interaction", None) is not None:
+            # Slash/Hybrid via Interaction -> ephemeral erlaubt
+            await ctx.reply(content, ephemeral=True, **kwargs)
+        else:
+            # Prefix -> ohne ephemeral senden
+            # (reply() statt send(), damit Thread/Reply-Verhalten erhalten bleibt)
+            await ctx.reply(content, **{k: v for k, v in kwargs.items() if k != "ephemeral"})
 
     # ---- KICK ----
     @commands.hybrid_command(name="kick", description="Kicke ein Mitglied.")
@@ -29,7 +40,7 @@ class AdminUtils(commands.Cog):
         reason: Optional[str] = None
     ):
         await member.kick(reason=reason or f"Kicked by {ctx.author}")
-        await ctx.reply(f"✅ {member.mention} wurde gekickt. Grund: {reason or '—'}", ephemeral=True)
+        await self._reply(ctx, f"✅ {member.mention} wurde gekickt. Grund: {reason or '—'}")
 
     # ---- BAN ----
     @commands.hybrid_command(name="ban", description="Bannt ein Mitglied.")
@@ -48,14 +59,16 @@ class AdminUtils(commands.Cog):
         reason: Optional[str] = None,
         delete_message_days: app_commands.Range[int, 0, 7] = 0
     ):
+        # discord.py 2.x: delete_message_seconds ist korrekt
         await ctx.guild.ban(
             member,
             reason=reason or f"Banned by {ctx.author}",
             delete_message_seconds=delete_message_days * 24 * 3600
         )
-        await ctx.reply(
-            f"✅ {member.mention} wurde gebannt. Grund: {reason or '—'} | Nachrichten: {delete_message_days} Tage",
-            ephemeral=True
+        await self._reply(
+            ctx,
+            f"✅ {member.mention} wurde gebannt. Grund: {reason or '—'} | "
+            f"Nachrichten: {delete_message_days} Tage"
         )
 
     # ---- TIMEOUT ----
@@ -77,10 +90,7 @@ class AdminUtils(commands.Cog):
     ):
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await member.timeout(until, reason=reason or f"Timeout by {ctx.author}")
-        await ctx.reply(
-            f"✅ {member.mention} ist {minutes} Minuten im Timeout. Grund: {reason or '—'}",
-            ephemeral=True
-        )
+        await self._reply(ctx, f"✅ {member.mention} ist {minutes} Minuten im Timeout. Grund: {reason or '—'}")
 
     # ---- PURGE (mit Ausnahmen) ----
     @commands.hybrid_command(name="purge", description="Lösche X Nachrichten, optional mit Ausnahmen.")
@@ -88,7 +98,7 @@ class AdminUtils(commands.Cog):
     @has_perms(manage_messages=True)
     @app_commands.describe(
         amount="Anzahl Nachrichten (1-500)",
-        except_users="User, deren Nachrichten nicht gelöscht werden sollen (Mentions)."
+        except_users="User, deren Nachrichten nicht gelöscht werden sollen (Mentions oder IDs, getrennt durch Leerzeichen)."
     )
     async def purge(
         self,
@@ -101,14 +111,15 @@ class AdminUtils(commands.Cog):
         except_ids: List[int] = []
         if except_users:
             for u in except_users.split():
-                # Unterstützt Mentions <@id> oder Roh-IDs
                 uid = None
                 if u.startswith("<@") and u.endswith(">"):
-                    uid = int(u.strip("<@!>"))
+                    try:
+                        uid = int(u.strip("<@!>"))
+                    except ValueError:
+                        uid = None
                 elif u.isdigit():
                     uid = int(u)
                 else:
-                    # versuche Namen zu matchen
                     m = discord.utils.find(lambda m: str(m).lower() == u.lower(), ctx.guild.members)
                     if m:
                         uid = m.id
@@ -122,13 +133,12 @@ class AdminUtils(commands.Cog):
             if msg.author.id in except_ids:
                 continue
             try:
-                # Bulk-Delete ist effizienter, aber wegen Ausnahmen hier einzeln
                 await msg.delete()
                 deleted += 1
             except discord.HTTPException:
                 pass
 
-        await ctx.reply(f"✅ {deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}", ephemeral=True)
+        await self._reply(ctx, f"✅ {deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
 
     # ---- MESSAGE MOVE (kopieren + optional löschen) ----
     @commands.hybrid_command(
@@ -154,16 +164,21 @@ class AdminUtils(commands.Cog):
         try:
             msg = await source_channel.fetch_message(message_id)
         except discord.NotFound:
-            return await ctx.reply("❌ Nachricht nicht gefunden.", ephemeral=True)
+            return await self._reply(ctx, "❌ Nachricht nicht gefunden.")
         except discord.Forbidden:
-            return await ctx.reply("❌ Keine Berechtigung, die Nachricht zu lesen.", ephemeral=True)
+            return await self._reply(ctx, "❌ Keine Berechtigung, die Nachricht zu lesen.")
 
-        # Inhalt zusammenbauen
-        content = f"**Nachricht verschoben aus** {source_channel.mention} von {msg.author.mention}:\n{msg.content or ''}"
+        content = (
+            f"**Nachricht verschoben aus** {source_channel.mention} "
+            f"von {msg.author.mention}:\n{msg.content or ''}"
+        )
+
         files = []
         for a in msg.attachments:
-            fp = await a.to_file()
-            files.append(fp)
+            try:
+                files.append(await a.to_file())
+            except discord.HTTPException:
+                pass
 
         await destination.send(content=content, files=files if files else None)
 
@@ -173,7 +188,8 @@ class AdminUtils(commands.Cog):
             except discord.HTTPException:
                 pass
 
-        await ctx.reply(
-            f"✅ Nachricht nach {destination.mention} kopiert{' und Original gelöscht' if delete_original else ''}.",
-            ephemeral=True
+        await self._reply(
+            ctx,
+            f"✅ Nachricht nach {destination.mention} kopiert"
+            f"{' und Original gelöscht' if delete_original else ''}."
         )
