@@ -6,9 +6,7 @@ from redbot.core import commands
 
 
 def has_perms(**perms):
-    def predicate(ctx: commands.Context):
-        return commands.has_permissions(**perms).predicate(ctx)
-    return commands.check(predicate)
+    return commands.has_permissions(**perms)
 
 
 class AdminUtils(commands.Cog):
