@@ -244,13 +244,6 @@ class GearCheck(commands.Cog):
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
         region = region.lower()
-        if region not in REGIONS:
-            return await ctx.send(
-                _("Invalid region. Valid regions are: {regions}.").format(
-                    regions="`, `".join(REGIONS)
-                ),
-                ephemeral=True,
-            )
 
         locale = _resolve_locale(locale)
 
