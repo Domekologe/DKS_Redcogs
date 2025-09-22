@@ -238,7 +238,7 @@ class GearCheck(commands.Cog):
         ]
     )
     async def gearcheck(self, ctx, region: Literal["eu", "us", "kr"], realm: str, character: str,
-                    game: Literal["classic", "retail"] = "classic", locale: str = "en"):
+                    game: Literal["classic", "retail"] = "classic", locale: str = "en", private: bool = True):
         """Zeigt das aktuell ausgerüstete Gear eines Charakters (inkl. iLvl-Fetch & Socket/Enchant-Label)."""
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
@@ -322,7 +322,7 @@ class GearCheck(commands.Cog):
         )
 
         ephemeral = private if ctx.interaction else False
-        await ctx.send(embed=embed, ephemeral=ephemeral)
+        await ctx.send(embed=embed, ephemeral=private)
 
     # --------- Autocomplete ---------
     @gearcheck.autocomplete("region")
