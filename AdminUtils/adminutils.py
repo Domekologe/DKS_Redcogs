@@ -221,6 +221,76 @@ class AdminUtils(commands.Cog):
         # Falls wir nie eine Followup-Msg geschickt haben (Prefix oder kein progress_msg):
         if progress_msg is None:
             await self._reply(ctx, f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
+
+
+
+    # ---- Fast Purge (instant Purge but only for the last 14 days) ----
+    @commands.hybrid_command(
+        name="purgefast",
+        description="Löscht schnell Nachrichten der letzten 14 Tage (Bulk)."
+    )
+    @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
+    @has_perms(manage_messages=True)
+    @app_commands.describe(
+        amount="Anzahl Nachrichten (1-500)",
+        except_users="User, deren Nachrichten NICHT gelöscht werden sollen (Mentions oder IDs, getrennt durch Leerzeichen)."
+    )
+    async def purgefast(
+        self,
+        ctx: commands.Context,
+        amount: app_commands.Range[int, 1, 500],
+        *,
+        except_users: Optional[str] = None
+    ):
+        # Slash/Hybrid sofort defer, damit nichts „hängt“
+        if getattr(ctx, "interaction", None) is not None:
+            try:
+                await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+            except discord.InteractionResponded:
+                pass
+
+        # Ausnahme-IDs sammeln (gleiches Schema wie beim normalen purge)
+        except_ids: List[int] = []
+        if except_users:
+            for u in except_users.split():
+                uid = None
+                if u.startswith("<@") and u.endswith(">"):
+                    try:
+                        uid = int(u.strip("<@!>"))
+                    except ValueError:
+                        uid = None
+                elif u.isdigit():
+                    uid = int(u)
+                else:
+                    m = discord.utils.find(lambda m: str(m).lower() == u.lower(), ctx.guild.members)
+                    if m:
+                        uid = m.id
+                if uid:
+                    except_ids.append(uid)
+
+        def _check(m: discord.Message) -> bool:
+            if m.pinned:
+                return False
+            if m.author.id in except_ids:
+                return False
+            # WICHTIG: Bulk löscht nur Nachrichten <14 Tage – ältere werden von Discord ignoriert.
+            return True
+
+        try:
+            deleted = await ctx.channel.purge(
+                limit=amount,
+                check=_check,
+                bulk=True  # -> sehr schnell (aber nur ≤ 14 Tage)
+            )
+        except discord.Forbidden:
+            return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
+        except discord.HTTPException as e:
+            return await self._reply(ctx, f"❌ HTTP-Fehler beim Löschen: {e}")
+
+        await self._reply(
+            ctx,
+            f"✅ {len(deleted)} Nachrichten (≤14 Tage) gelöscht. Ausnahmen: {len(except_ids)}"
+        )
     # ---- MESSAGE MOVE (kopieren + optional löschen) ----
     @commands.hybrid_command(
         name="messagemove",
