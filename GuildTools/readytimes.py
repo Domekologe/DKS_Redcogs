@@ -81,9 +81,9 @@ def format_range_with_parens(start: Optional[str], end: Optional[str]) -> str:
     if start and end:
         return f"{start} - {end}"
     if start and not end:
-        return f"{start} (Bis)"
+        return f"Beginn: {start} (Bis)"
     if end and not start:
-        return f"(Ab) {end}"
+        return f"(Ab) Ende: {end}"
     return "-"
 
 
@@ -128,16 +128,12 @@ class ReadyTimes(commands.Cog):
     # Slash: /get-readytimes [day] [start] [end]
     # ------------------------------
 
-    # Choices für den Wochentag
-    day_choices = [app_commands.Choice(name=de, value=key) for key, de in WEEKDAYS]
-
     @app_commands.command(name="get-readytimes", description="Abfrage, wer wann kann (Antwort ist privat).")
     @app_commands.describe(day="Optional: Wochentag", start="Optional: Startzeit HH:MM", end="Optional: Endzeit HH:MM")
-    @app_commands.choices(day=day_choices)
     async def get_readytimes(
         self,
         interaction: discord.Interaction,
-        day: Optional[app_commands.Choice[str]] = None,
+        day: Optional[str] = None,
         start: Optional[str] = None,
         end: Optional[str] = None,
     ):
@@ -145,13 +141,13 @@ class ReadyTimes(commands.Cog):
             return await interaction.response.send_message("Nur in einem Server benutzbar.", ephemeral=True)
 
         start_t = parse_time_or_none(start)
-        end_t = parse_time_or_none(end)
+        end_t   = parse_time_or_none(end)
         if start and not start_t:
             return await interaction.response.send_message("Ungültige Startzeit. Nutze HH:MM (24h).", ephemeral=True)
         if end and not end_t:
             return await interaction.response.send_message("Ungültige Endzeit. Nutze HH:MM (24h).", ephemeral=True)
 
-        # Nur aktuelle Server-Mitglieder (Bots raus)
+        # Guild-Mitglieder (Bots raus)
         results = []
         for member in interaction.guild.members:
             if member.bot:
@@ -159,66 +155,86 @@ class ReadyTimes(commands.Cog):
             data = await self.config.member(member).get_raw()
             results.append((member, data))
 
+        # Helper: day normalisieren (Key wie "monday"); akzeptiere auch "Montag"
+        day_key = None
+        if day:
+            d = day.strip().lower()
+            # direkter key?
+            if d in DAY_ORDER:
+                day_key = d
+            else:
+                # versuche deutsches Label -> key
+                de2key = {v.lower(): k for k, v in DAY_KEY_TO_DE.items()}
+                if d in de2key:
+                    day_key = de2key[d]
+                else:
+                    return await interaction.response.send_message("Unbekannter Wochentag.", ephemeral=True)
+
         # 1) Keine Args => Gesamtübersicht
-        if not day and not start_t and not end_t:
+        if not day_key and not start_t and not end_t:
             embed = discord.Embed(title="Gesamtübersicht Verfügbarkeiten", color=discord.Color.blurple())
             for key in DAY_ORDER:
-                line_parts: List[str] = []
+                parts: List[str] = []
                 for member, data in results:
                     info = data.get(key, {"can": False, "start": None, "end": None})
                     if info["can"]:
-                        line_parts.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
+                        parts.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
                 embed.add_field(
                     name=DAY_KEY_TO_DE[key],
-                    value=", ".join(line_parts) if line_parts else "Keiner!",
+                    value=", ".join(parts) if parts else "Keiner!",
                     inline=False,
                 )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         # 2) Nur Tag => Liste inkl. Zeitfenster
-        if day and not start_t and not end_t:
-            key = day.value
+        if day_key and not start_t and not end_t:
             lines: List[str] = []
             for member, data in results:
-                info = data.get(key, {"can": False, "start": None, "end": None})
+                info = data.get(day_key, {"can": False, "start": None, "end": None})
                 if info["can"]:
                     lines.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
             embed = discord.Embed(
-                title=f"{DAY_KEY_TO_DE[key]}",
+                title=f"{DAY_KEY_TO_DE[day_key]}",
                 description="\n".join(lines) if lines else "Keiner!",
                 color=discord.Color.blurple(),
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        # 3) Tag + (Start/Ende) => Nur Namen, die in diesem Fenster können
-        if day and (start_t or end_t):
-            key = day.value
+        # 3) Tag + (Start/Ende)
+        if day_key and (start_t or end_t):
             want_start = hhmm_to_min(start_t) if start_t else None
-            want_end = hhmm_to_min(end_t) if end_t else None
+            want_end   = hhmm_to_min(end_t)   if end_t   else None
 
-            names: List[str] = []
+            lines: List[str] = []
             for member, data in results:
-                info = data.get(key, {"can": False, "start": None, "end": None})
+                info = data.get(day_key, {"can": False, "start": None, "end": None})
                 if not info["can"] or not info["start"] or not info["end"]:
                     continue
                 a_start, a_end = hhmm_to_min(info["start"]), hhmm_to_min(info["end"])
                 b_start = want_start if want_start is not None else 0
-                b_end = want_end if want_end is not None else 24 * 60 - 1
+                b_end   = want_end   if want_end   is not None else 24 * 60 - 1
                 if overlaps(a_start, a_end, b_start, b_end):
-                    names.append(member.display_name)
+                    # NEU: wenn nur Ab -> zeige (Ende); wenn nur Bis -> zeige (Start)
+                    if start_t and not end_t:
+                        lines.append(f"{member.display_name} ({info['end']})")
+                    elif end_t and not start_t:
+                        lines.append(f"{member.display_name} ({info['start']})")
+                    else:
+                        # beide Zeiten angegeben -> wie gehabt: nur Namen
+                        lines.append(member.display_name)
 
-            title = f"{DAY_KEY_TO_DE[key]} — {format_range_with_parens(start_t, end_t)}"
+            title = f"{DAY_KEY_TO_DE[day_key]} — {format_range_with_parens(start_t, end_t)}"
             embed = discord.Embed(
                 title=title,
-                description="\n".join(names) if names else "Keiner!",
+                description="\n".join(lines) if lines else "Keiner!",
                 color=discord.Color.green(),
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         # 4) Nur Zeit(en) (ohne Tag) => je Nutzer die Tage; bei nur-Ab zeige (Ende), bei nur-Bis zeige (Start)
-        if (start_t or end_t) and not day:
+        if (start_t or end_t) and not day_key:
             want_start = hhmm_to_min(start_t) if start_t else None
-            want_end = hhmm_to_min(end_t) if end_t else None
+            want_end   = hhmm_to_min(end_t)   if end_t   else None
 
             lines: List[str] = []
             for member, data in results:
@@ -229,13 +245,11 @@ class ReadyTimes(commands.Cog):
                         continue
                     a_start, a_end = hhmm_to_min(info["start"]), hhmm_to_min(info["end"])
                     b_start = want_start if want_start is not None else 0
-                    b_end = want_end if want_end is not None else 24 * 60 - 1
+                    b_end   = want_end   if want_end   is not None else 24 * 60 - 1
                     if overlaps(a_start, a_end, b_start, b_end):
                         if start_t and not end_t:
-                            # Nur Ab -> je Tag Endzeit in Klammern zeigen
                             day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['end']})")
                         elif end_t and not start_t:
-                            # Nur Bis -> je Tag Startzeit in Klammern zeigen
                             day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['start']})")
                         else:
                             day_tokens.append(DAY_KEY_TO_DE[key])
@@ -252,6 +266,7 @@ class ReadyTimes(commands.Cog):
 
         # Fallback
         return await interaction.response.send_message("Ungültige Kombination.", ephemeral=True)
+
 
 
 class ReadyTimesView(discord.ui.View):
