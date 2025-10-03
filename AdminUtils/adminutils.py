@@ -374,7 +374,7 @@ class AdminUtils(commands.Cog):
         msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
         if failed:
             msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
-        await self._reply(ctx, msg, ephemeral=True)
+        await self._reply(ctx, msg)
 
     # ---- MOVE MEMBER (mit Select Menü) ----
     @commands.hybrid_command(
@@ -395,7 +395,7 @@ class AdminUtils(commands.Cog):
     ):
         members = source_channel.members
         if not members:
-            return await self._reply(ctx, "❌ Im Quellchannel sind keine Mitglieder.", ephemeral=True)
+            return await self._reply(ctx, "❌ Im Quellchannel sind keine Mitglieder.")
 
         # Select Menü
         options = [
