@@ -424,18 +424,20 @@ class AdminUtils(commands.Cog):
                 self.selected: list[int] = []
                 self.confirmed = False
 
-                self.add_item(discord.ui.Select(
+                # Menü direkt hier hinzufügen (das reicht!)
+                self.select_menu = discord.ui.Select(
                     placeholder="Wähle Mitglieder zum Verschieben",
                     options=options,
                     min_values=1,
                     max_values=len(options),
-                ))
+                )
+                self.select_menu.callback = self.select_callback
+                self.add_item(self.select_menu)
 
-            @discord.ui.select()
-            async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+            async def select_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.ctx.author.id:
                     return await interaction.response.send_message("❌ Nicht dein Kommando.", ephemeral=True)
-                self.selected = [int(v) for v in select.values]
+                self.selected = [int(v) for v in self.select_menu.values]
                 await interaction.response.send_message("✅ Auswahl gespeichert. Bitte 'Bestätigen' klicken.", ephemeral=True)
 
             @discord.ui.button(label="Bestätigen", style=discord.ButtonStyle.success)
@@ -461,6 +463,7 @@ class AdminUtils(commands.Cog):
                     child.disabled = True
                 await interaction.message.edit(view=self)
                 await interaction.response.send_message("❌ Abgebrochen.", ephemeral=True)
+
 
         # View über followup schicken (da wir schon deferred haben)
         view = MemberSelect(ctx, options)
