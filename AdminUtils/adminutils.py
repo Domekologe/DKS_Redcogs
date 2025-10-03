@@ -377,6 +377,7 @@ class AdminUtils(commands.Cog):
         await self._reply(ctx, msg)
 
     # ---- MOVE MEMBER (mit Select Menü) ----
+        # ---- MOVE MEMBER (mit Select Menü + Bestätigung) ----
     @commands.hybrid_command(
         name="move-member",
         description="Verschiebe ausgewählte Mitglieder aus einem VoiceChannel in einen anderen."
@@ -393,55 +394,74 @@ class AdminUtils(commands.Cog):
         source_channel: discord.VoiceChannel,
         dest_channel: discord.VoiceChannel
     ):
+        if not ctx.interaction:
+            return await self._reply(ctx, "❌ Dieses Kommando geht nur als Slash-Command.")
+
         members = source_channel.members
         if not members:
             return await self._reply(ctx, "❌ Im Quellchannel sind keine Mitglieder.")
 
-        # Select Menü
+        # Discord erlaubt max. 25 Optionen
         options = [
             discord.SelectOption(label=m.display_name, value=str(m.id))
-            for m in members
+            for m in members[:25]
         ]
 
         class MemberSelect(discord.ui.View):
-            def __init__(self, timeout=30):
+            def __init__(self, ctx, options, timeout=60):
                 super().__init__(timeout=timeout)
-                self.result = []
+                self.ctx = ctx
+                self.selected: list[int] = []
+                self.confirmed = False
 
-            @discord.ui.select(
-                placeholder="Wähle die Mitglieder zum Verschieben (Mehrfachauswahl möglich)",
-                options=options,
-                min_values=1,
-                max_values=len(options)
-            )
-            async def select_callback(
-                self,
-                interaction: discord.Interaction,
-                select: discord.ui.Select
-            ):
-                # Nur der Author darf reagieren
-                if interaction.user.id != ctx.author.id:
-                    return await interaction.response.send_message(
-                        "❌ Du darfst diese Auswahl nicht benutzen.", ephemeral=True
-                    )
-                self.result = [int(v) for v in select.values]
+                self.add_item(discord.ui.Select(
+                    placeholder="Wähle Mitglieder zum Verschieben",
+                    options=options,
+                    min_values=1,
+                    max_values=len(options),
+                    custom_id="member_select"
+                ))
+
+            @discord.ui.select(custom_id="member_select")
+            async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+                if interaction.user.id != self.ctx.author.id:
+                    return await interaction.response.send_message("❌ Nur der Command-Author darf das.", ephemeral=True)
+                self.selected = [int(v) for v in select.values]
+                await interaction.response.send_message("✅ Auswahl gespeichert. Bitte mit 'Bestätigen' abschließen.", ephemeral=True)
+
+            @discord.ui.button(label="Bestätigen", style=discord.ButtonStyle.success)
+            async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.ctx.author.id:
+                    return await interaction.response.send_message("❌ Nicht für dich.", ephemeral=True)
+                if not self.selected:
+                    return await interaction.response.send_message("❌ Du hast noch niemanden ausgewählt.", ephemeral=True)
+                self.confirmed = True
                 self.stop()
                 await interaction.response.defer()
 
-        view = MemberSelect()
+            @discord.ui.button(label="Abbrechen", style=discord.ButtonStyle.danger)
+            async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.ctx.author.id:
+                    return await interaction.response.send_message("❌ Nicht für dich.", ephemeral=True)
+                self.confirmed = False
+                self.stop()
+                await interaction.response.defer()
+
+        view = MemberSelect(ctx, options)
         await ctx.interaction.response.send_message(
-            "➡️ Wähle die Mitglieder, die verschoben werden sollen:",
+            "➡️ Wähle die Mitglieder und bestätige oder breche ab:",
             view=view,
             ephemeral=True
         )
 
         await view.wait()
 
-        if not view.result:
-            return await ctx.followup.send("❌ Keine Auswahl getroffen.", ephemeral=True)
+        # Timeout oder abgebrochen
+        if not view.confirmed or not view.selected:
+            return await ctx.followup.send("❌ Abgebrochen oder keine Auswahl getroffen.", ephemeral=True)
 
         moved, failed = [], []
-        for mid in view.result:
+        for mid in view.selected:
             member = ctx.guild.get_member(mid)
             if member and member.voice and member.voice.channel.id == source_channel.id:
                 try:
@@ -454,4 +474,5 @@ class AdminUtils(commands.Cog):
         if failed:
             msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
         await ctx.followup.send(msg, ephemeral=True)
+
 
