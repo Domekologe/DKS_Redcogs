@@ -365,7 +365,7 @@ class AdminUtils(commands.Cog):
         if not ctx.interaction:
             return await self._reply(ctx, "❌ Dieses Kommando nur als Slash möglich.")
 
-        # sofort defer, damit Discord nicht meckert
+        # sofort defer -> Discord zufrieden
         await ctx.interaction.response.defer(ephemeral=True, thinking=True)
 
         moved, failed = [], []
@@ -381,6 +381,7 @@ class AdminUtils(commands.Cog):
             msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
 
         await ctx.interaction.followup.send(msg, ephemeral=True)
+
 
     # ---- MOVE MEMBER (Select Menü + Bestätigung) ----
     @commands.hybrid_command(
@@ -404,11 +405,13 @@ class AdminUtils(commands.Cog):
 
         members = source_channel.members
         if not members:
-            return await ctx.interaction.response.send_message(
-                "❌ Im Quellchannel sind keine Mitglieder.",
-                ephemeral=True
-            )
+            await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+            return await ctx.interaction.followup.send("❌ Im Quellchannel sind keine Mitglieder.", ephemeral=True)
 
+        # sofort defer
+        await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+
+        # Optionen (max. 25 wegen Discord-Limit)
         options = [
             discord.SelectOption(label=m.display_name, value=str(m.id))
             for m in members[:25]
@@ -459,17 +462,19 @@ class AdminUtils(commands.Cog):
                 await interaction.message.edit(view=self)
                 await interaction.response.send_message("❌ Abgebrochen.", ephemeral=True)
 
+        # View über followup schicken (da wir schon deferred haben)
         view = MemberSelect(ctx, options)
-        await ctx.interaction.response.send_message(
+        await ctx.interaction.followup.send(
             "➡️ Wähle die Mitglieder und bestätige oder breche ab:",
             view=view,
             ephemeral=True
         )
 
+        # auf Ergebnis warten
         await view.wait()
 
         if not view.confirmed or not view.selected:
-            return  # Abbruch/Timeout wurde schon ephemer gemeldet
+            return  # Abbruch oder Timeout → schon ephemer gemeldet
 
         moved, failed = [], []
         for mid in view.selected:
