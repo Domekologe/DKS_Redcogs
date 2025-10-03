@@ -450,7 +450,12 @@ class AdminUtils(commands.Cog):
                 self.stop()
                 for child in self.children:
                     child.disabled = True
-                await interaction.message.edit(view=self)
+                # Bei ephemeral Messages kein edit möglich, also einfach nur stoppen
+                try:
+                    await interaction.message.edit(view=self)
+                except discord.NotFound:
+                    pass
+
                 await interaction.response.send_message("✅ Bestätigt, verschiebe Mitglieder…", ephemeral=True)
 
             @discord.ui.button(label="Abbrechen", style=discord.ButtonStyle.danger)
@@ -461,7 +466,12 @@ class AdminUtils(commands.Cog):
                 self.stop()
                 for child in self.children:
                     child.disabled = True
-                await interaction.message.edit(view=self)
+                # Bei ephemeral Messages kein edit möglich, also einfach nur stoppen
+                try:
+                    await interaction.message.edit(view=self)
+                except discord.NotFound:
+                    pass
+
                 await interaction.response.send_message("❌ Abgebrochen.", ephemeral=True)
 
 
