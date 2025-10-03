@@ -19,12 +19,11 @@ class AdminUtils(commands.Cog):
     # kleiner Helper, damit ephemeral nur bei Slash benutzt wird
     async def _reply(self, ctx: commands.Context, content: str, **kwargs):
         if getattr(ctx, "interaction", None) is not None:
-            # Slash/Hybrid via Interaction -> ephemeral erlaubt
+            # Slash/Hybrid via Interaction -> immer ephemeral
             await ctx.reply(content, ephemeral=True, **kwargs)
         else:
-            # Prefix -> ohne ephemeral senden
-            # (reply() statt send(), damit Thread/Reply-Verhalten erhalten bleibt)
             await ctx.reply(content, **{k: v for k, v in kwargs.items() if k != "ephemeral"})
+
 
     # ---- KICK ----
     @commands.hybrid_command(name="kick", description="Kicke ein Mitglied.")
@@ -344,3 +343,115 @@ class AdminUtils(commands.Cog):
             f"✅ Nachricht nach {destination.mention} kopiert"
             f"{' und Original gelöscht' if delete_original else ''}."
         )
+        
+        
+        
+    # ---- MOVE MEMBER ALL ----
+    @commands.hybrid_command(
+        name="move-memberall",
+        description="Verschiebe alle Mitglieder aus einem VoiceChannel in einen anderen."
+    )
+    @commands.bot_has_guild_permissions(move_members=True)
+    @has_perms(move_members=True)
+    @app_commands.describe(
+        source_channel="VoiceChannel aus dem verschoben werden soll",
+        dest_channel="VoiceChannel in den verschoben werden soll"
+    )
+    async def move_memberall(
+        self,
+        ctx: commands.Context,
+        source_channel: discord.VoiceChannel,
+        dest_channel: discord.VoiceChannel
+    ):
+        moved, failed = [], []
+        for member in source_channel.members:
+            try:
+                await member.move_to(dest_channel)
+                moved.append(member.display_name)
+            except Exception:
+                failed.append(member.display_name)
+
+        msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
+        if failed:
+            msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
+        await self._reply(ctx, msg, ephemeral=True)
+
+    # ---- MOVE MEMBER (mit Select Menü) ----
+    @commands.hybrid_command(
+        name="move-member",
+        description="Verschiebe ausgewählte Mitglieder aus einem VoiceChannel in einen anderen."
+    )
+    @commands.bot_has_guild_permissions(move_members=True)
+    @has_perms(move_members=True)
+    @app_commands.describe(
+        source_channel="VoiceChannel aus dem verschoben werden soll",
+        dest_channel="VoiceChannel in den verschoben werden soll"
+    )
+    async def move_member(
+        self,
+        ctx: commands.Context,
+        source_channel: discord.VoiceChannel,
+        dest_channel: discord.VoiceChannel
+    ):
+        members = source_channel.members
+        if not members:
+            return await self._reply(ctx, "❌ Im Quellchannel sind keine Mitglieder.", ephemeral=True)
+
+        # Select Menü
+        options = [
+            discord.SelectOption(label=m.display_name, value=str(m.id))
+            for m in members
+        ]
+
+        class MemberSelect(discord.ui.View):
+            def __init__(self, timeout=30):
+                super().__init__(timeout=timeout)
+                self.result = []
+
+            @discord.ui.select(
+                placeholder="Wähle die Mitglieder zum Verschieben (Mehrfachauswahl möglich)",
+                options=options,
+                min_values=1,
+                max_values=len(options)
+            )
+            async def select_callback(
+                self,
+                interaction: discord.Interaction,
+                select: discord.ui.Select
+            ):
+                # Nur der Author darf reagieren
+                if interaction.user.id != ctx.author.id:
+                    return await interaction.response.send_message(
+                        "❌ Du darfst diese Auswahl nicht benutzen.", ephemeral=True
+                    )
+                self.result = [int(v) for v in select.values]
+                self.stop()
+                await interaction.response.defer()
+
+        view = MemberSelect()
+        await ctx.interaction.response.send_message(
+            "➡️ Wähle die Mitglieder, die verschoben werden sollen:",
+            view=view,
+            ephemeral=True
+        )
+
+        await view.wait()
+
+        if not view.result:
+            return await ctx.followup.send("❌ Keine Auswahl getroffen.", ephemeral=True)
+
+        moved, failed = [], []
+        for mid in view.result:
+            member = ctx.guild.get_member(mid)
+            if member and member.voice and member.voice.channel.id == source_channel.id:
+                try:
+                    await member.move_to(dest_channel)
+                    moved.append(member.display_name)
+                except Exception:
+                    failed.append(member.display_name)
+
+        msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
+        if failed:
+            msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
+        await ctx.followup.send(msg, ephemeral=True)
+
