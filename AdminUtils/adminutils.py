@@ -377,7 +377,7 @@ class AdminUtils(commands.Cog):
         await self._reply(ctx, msg)
 
     # ---- MOVE MEMBER (mit Select Menü) ----
-        # ---- MOVE MEMBER (mit Select Menü + Bestätigung) ----
+    # ---- MOVE MEMBER (mit Select Menü + Bestätigung) ----
     @commands.hybrid_command(
         name="move-member",
         description="Verschiebe ausgewählte Mitglieder aus einem VoiceChannel in einen anderen."
@@ -394,12 +394,16 @@ class AdminUtils(commands.Cog):
         source_channel: discord.VoiceChannel,
         dest_channel: discord.VoiceChannel
     ):
+        # Nur Slash erlaubt (kein Prefix)
         if not ctx.interaction:
-            return await self._reply(ctx, "❌ Dieses Kommando geht nur als Slash-Command.")
+            return await self._reply(ctx, "❌ Dieses Kommando funktioniert nur als Slash-Command.")
 
         members = source_channel.members
         if not members:
-            return await self._reply(ctx, "❌ Im Quellchannel sind keine Mitglieder.")
+            return await ctx.interaction.response.send_message(
+                "❌ Im Quellchannel sind keine Mitglieder.",
+                ephemeral=True
+            )
 
         # Discord erlaubt max. 25 Optionen
         options = [
@@ -447,6 +451,7 @@ class AdminUtils(commands.Cog):
                 self.stop()
                 await interaction.response.defer()
 
+        # Erste Nachricht mit View
         view = MemberSelect(ctx, options)
         await ctx.interaction.response.send_message(
             "➡️ Wähle die Mitglieder und bestätige oder breche ab:",
@@ -454,12 +459,17 @@ class AdminUtils(commands.Cog):
             ephemeral=True
         )
 
+        # Warten auf Auswahl
         await view.wait()
 
-        # Timeout oder abgebrochen
+        # Timeout oder Abbruch
         if not view.confirmed or not view.selected:
-            return await ctx.followup.send("❌ Abgebrochen oder keine Auswahl getroffen.", ephemeral=True)
+            return await ctx.interaction.followup.send(
+                "❌ Abgebrochen oder keine Auswahl getroffen.",
+                ephemeral=True
+            )
 
+        # Verschieben
         moved, failed = [], []
         for mid in view.selected:
             member = ctx.guild.get_member(mid)
@@ -473,6 +483,7 @@ class AdminUtils(commands.Cog):
         msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
         if failed:
             msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
-        await ctx.followup.send(msg, ephemeral=True)
+
+        await ctx.interaction.followup.send(msg, ephemeral=True)
 
 
