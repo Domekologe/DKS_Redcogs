@@ -14,6 +14,8 @@
 # - Extra-Datei-Export nach jeder Änderung (/data/membercharsetup/members.json)
 
 from __future__ import annotations
+from .dashboard_integration import DashboardIntegration
+
 
 import asyncio
 import json
@@ -27,6 +29,8 @@ from redbot.core import commands, Config, checks, data_manager
 from redbot.core.bot import Red
 
 import aiohttp
+
+
 
 
 LANGS = ("de", "en")
@@ -146,7 +150,7 @@ class RemoveMainView(discord.ui.View):
             await interaction.response.edit_message(content=_t(self.lang, "no_main"), view=None)
 
 
-class MemberCharSetup(commands.Cog):
+class MemberCharSetup(DashboardIntegration, commands.Cog):
     """Setup new members and link their WoW characters."""
 
     __author__ = "Domekologe"
