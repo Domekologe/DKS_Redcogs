@@ -157,6 +157,7 @@ class MemberCharSetup(DashboardIntegration, commands.Cog):
     __version__ = "1.0.0"
 
     def __init__(self, bot: Red):
+        super().__init__()
         self.bot = bot
         self.config = Config.get_conf(self, identifier=0xD0DECA7, force_registration=True)
         # Guild-wide
