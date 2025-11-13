@@ -30,15 +30,6 @@ class EventMessages(commands.Cog):
         self.config.register_guild(**default_guild)
 
     # ------------------------------------------------------------
-    # Slash Group
-    # ------------------------------------------------------------
-
-    eventmessages = app_commands.Group(
-        name="eventmessages",
-        description="Einstellungen für Eventmessages"
-    )
-
-    # ------------------------------------------------------------
     # Autocomplete
     # ------------------------------------------------------------
 
