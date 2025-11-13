@@ -1,5 +1,0 @@
-{
-    "LeaveNotifier wurde {state}.": "Leave Notifier has been {state}.",
-    "Channel wurde auf {channel} gesetzt.": "Channel set to {channel}.",
-    "Nachricht wurde gesetzt auf:\n> {msg}": "Message set to:\n> {msg}"
-}

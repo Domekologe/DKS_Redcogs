@@ -1,0 +1,24 @@
+{
+    "name": "EventMessages",
+    "short": "Automatische Join/Leave/Ban/Timeout Nachrichten",
+    "description": "Sendet automatisch öffentliche Nachrichten bei Server-Events wie Join, Leave, Ban, Unban und Timeouts. Einstellungen per Slash-Command (em-).",
+    "end_user_data_statement": "Dieses Cog speichert ausschließlich Guild-bezogene Einstellungen (Enabled-Status und Channel-IDs). Es werden keine personenbezogenen Daten dauerhaft gespeichert.",
+    "author": [
+        "Domekologe"
+    ],
+    "min_bot_version": "3.5.0",
+    "min_python_version": [
+        3,
+        10,
+        0
+    ],
+    "hidden": false,
+    "disabled": false,
+    "requirements": [],
+    "tags": [
+        "utility",
+        "events",
+        "moderation",
+        "messages"
+    ]
+}
