@@ -51,6 +51,7 @@ class EventMessages(commands.Cog):
         event="Welches Event?",
         value="true/false zum Setzen"
     )
+    @app_commands.autocomplete(event=event_autocomplete)
     async def em_enabled(
         self,
         interaction: discord.Interaction,
@@ -102,6 +103,7 @@ class EventMessages(commands.Cog):
         event="Welches Event?",
         channel="Channel für Benachrichtigungen"
     )
+    @app_commands.autocomplete(event=event_autocomplete)
     async def em_channel(
         self,
         interaction: discord.Interaction,
@@ -228,3 +230,13 @@ class EventMessages(commands.Cog):
                     f"📄 Grund: {reason}\n"
                     f"⏳ Dauer bis: {duration}"
                 )
+
+    async def event_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Autocomplete für Eventnamen."""
+        suggestions = [
+            app_commands.Choice(name=ev, value=ev)
+            for ev in EVENTS
+            if current.lower() in ev.lower()
+        ]
+        return suggestions[:25]
+
