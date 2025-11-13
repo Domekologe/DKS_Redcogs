@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 from redbot.core import Config, app_commands, commands
 
 EVENTS = [
@@ -38,6 +37,20 @@ class EventMessages(commands.Cog):
         name="eventmessages",
         description="Einstellungen für Eventmessages"
     )
+
+    # ------------------------------------------------------------
+    # Autocomplete
+    # ------------------------------------------------------------
+
+    async def event_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Autocomplete für Eventnamen."""
+        suggestions = [
+            app_commands.Choice(name=ev, value=ev)
+            for ev in EVENTS
+            if current.lower() in ev.lower()
+        ]
+        return suggestions[:25]
+
 
     # ------------------------------------------------------------
     # Slash: Enabled
@@ -231,12 +244,5 @@ class EventMessages(commands.Cog):
                     f"⏳ Dauer bis: {duration}"
                 )
 
-    async def event_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Autocomplete für Eventnamen."""
-        suggestions = [
-            app_commands.Choice(name=ev, value=ev)
-            for ev in EVENTS
-            if current.lower() in ev.lower()
-        ]
-        return suggestions[:25]
+    
 
