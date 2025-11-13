@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from redbot.core import Config, app_commands
+from redbot.core import Config, app_commands, commands
 
 EVENTS = [
     "join",
