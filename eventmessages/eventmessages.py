@@ -4,6 +4,7 @@ from redbot.core import Config, app_commands, commands
 EVENTS = [
     "join",
     "leave",
+    "kick",
     "ban",
     "unban",
     "timeout",
@@ -171,12 +172,39 @@ class EventMessages(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        # Kein Fall für Ban hier – das triggert separate Events!
+        guild = member.guild
+
+        # Audit Log prüfen: wurde der User gekickt?
+        entry = None
+        async for log in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
+            # Discord-Audit-Logs sind etwas verzögert, daher checken wir 5 Einträge
+            if log.target.id == member.id:
+                entry = log
+                break
+
+        if entry:
+            # → Das war ein Kick
+            moderator = entry.user.mention
+            reason = entry.reason or "Kein Grund angegeben"
+
+            await self._post(
+                guild,
+                "kick",
+                (
+                    f"👢 **{member.display_name}** (`{member}`) wurde vom Server gekickt.\n"
+                    f"👤 Moderator: {moderator}\n"
+                    f"📄 Grund: {reason}"
+                )
+            )
+            return
+
+        # Wenn kein Kick → normales Leave
         await self._post(
-            member.guild,
+            guild,
             "leave",
             f"👋 **{member.display_name}** (`{member}`) hat den Server verlassen."
         )
+
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild, user):
