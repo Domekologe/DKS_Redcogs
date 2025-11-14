@@ -89,7 +89,10 @@ class EventMessages(commands.Cog):
             await interaction.followup.send("Du musst true oder false angeben.", ephemeral=True)
             return
 
-        await self.config.guild(guild).events[event].enabled.set(value)
+        await self.config.guild(guild).events.set_raw(
+            event, "enabled", value=value
+        )
+
 
 
         await interaction.followup.send(
@@ -125,7 +128,10 @@ class EventMessages(commands.Cog):
             )
             return
 
-        await self.config.guild(interaction.guild).events[event].channel.set(channel.id)
+        await self.config.guild(interaction.guild).events.set_raw(
+            event, "channel", value=channel.id
+        )
+
 
 
         await interaction.followup.send(
