@@ -50,35 +50,24 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-enabled",
-        description="Event aktivieren/deaktivieren oder Status anzeigen."
+        description="Aktiviere oder deaktiviere ein Event."
     )
     @app_commands.describe(
         event="Welches Event?",
-        value="true/false zum Setzen"
+        value="true/false"
     )
     @app_commands.autocomplete(event=event_autocomplete)
     async def em_enabled(
         self,
         interaction: discord.Interaction,
-        event: str | None = None,
-        value: bool | None = None
+        event: str,                # <-- jetzt Pflichtfeld
+        value: bool                # <-- jetzt Pflichtfeld
     ):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
 
-        if event is None:
-            data = await self.config.guild(guild).events()
-            msg = "**Eventstatus:**\n"
-            for ev in EVENTS:
-                ch = data[ev]["channel"]
-                msg += f"- **{ev}**: {'Enabled' if data[ev]['enabled'] else 'Disabled'}"
-                if ch:
-                    msg += f" → <#{ch}>"
-                msg += "\n"
-            await interaction.followup.send(msg, ephemeral=True)
-            return
-
+        # Validierung
         if event not in EVENTS:
             await interaction.followup.send(
                 f"Ungültiges Event. Verwendet werden kann: `{', '.join(EVENTS)}`",
@@ -86,20 +75,16 @@ class EventMessages(commands.Cog):
             )
             return
 
-        if value is None:
-            await interaction.followup.send("Du musst true oder false angeben.", ephemeral=True)
-            return
-
+        # Setzen
         await self.config.guild(guild).events.set_raw(
             event, "enabled", value=value
         )
-
-
 
         await interaction.followup.send(
             f"Event **{event}** wurde auf **{value}** gesetzt.",
             ephemeral=True
         )
+
 
     # ------------------------------------------------------------
     # Slash: Channel setzen
@@ -107,7 +92,7 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-channel",
-        description="Setzt den Benachrichtigungschannel für ein Event."
+        description="Setzt den Channel für ein Event."
     )
     @app_commands.describe(
         event="Welches Event?",
@@ -117,8 +102,8 @@ class EventMessages(commands.Cog):
     async def em_channel(
         self,
         interaction: discord.Interaction,
-        event: str,
-        channel: discord.TextChannel
+        event: str,                    # <-- jetzt Pflichtfeld
+        channel: discord.TextChannel   # <-- Pflichtfeld
     ):
         await interaction.response.defer(ephemeral=True)
 
@@ -133,13 +118,37 @@ class EventMessages(commands.Cog):
             event, "channel", value=channel.id
         )
 
-
-
         await interaction.followup.send(
             f"Channel für **{event}** gesetzt auf {channel.mention}.",
             ephemeral=True
         )
 
+
+    # ------------------------------------------------------------
+    # Slash: Status anzeigen
+    # ------------------------------------------------------------
+
+    @app_commands.command(
+        name="em-status",
+        description="Zeigt den Status aller Events."
+    )
+    async def em_status(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        data = await self.config.guild(guild).events()
+
+        msg = "**Eventstatus:**\n\n"
+        for ev in EVENTS:
+            ch_id = data[ev]["channel"]
+            ch = f"<#{ch_id}>" if ch_id else "—"
+            msg += (
+                f"**Event:** `{ev}`\n"
+                f"→ Enabled: **{data[ev]['enabled']}**\n"
+                f"→ Channel: {ch}\n\n"
+            )
+
+        await interaction.followup.send(msg, ephemeral=True)
 
     # ------------------------------------------------------------
     # Helpers
