@@ -89,8 +89,8 @@ class EventMessages(commands.Cog):
             await interaction.followup.send("Du musst true oder false angeben.", ephemeral=True)
             return
 
-        ev_group = self.config.guild(guild).events.get_attr(event)
-        await ev_group.enabled.set(value)
+        await self.config.guild(guild).events[event].enabled.set(value)
+
 
         await interaction.followup.send(
             f"Event **{event}** wurde auf **{value}** gesetzt.",
@@ -125,8 +125,7 @@ class EventMessages(commands.Cog):
             )
             return
 
-        ev_group = self.config.guild(interaction.guild).events.get_attr(event)
-        await ev_group.channel.set(channel.id)
+        await self.config.guild(interaction.guild).events[event].channel.set(channel.id)
 
 
         await interaction.followup.send(
