@@ -1,0 +1,23 @@
+{
+    "author": [
+        "Domekologe"
+    ],
+    "name": "Neko",
+    "short": "Zeigt Neko-Bilder und GIFs via nekos.best.",
+    "description": "Dieses Cog zeigt zufällige Neko-/Anime-Bilder oder GIFs von nekos.best. Unterstützt Kategorien, Autocomplete, Prefix- & Slash-Commands.",
+    "install_msg": "Neko Cog installiert! Nutze !neko oder /neko.",
+    "required_cogs": {},
+    "requirements": [],
+    "tags": [
+        "fun",
+        "anime",
+        "nekos",
+        "images",
+        "nekos.best",
+        "api"
+    ],
+    "min_bot_version": "3.5.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
+}

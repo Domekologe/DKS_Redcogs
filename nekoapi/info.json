@@ -1,0 +1,22 @@
+{
+    "author": [
+        "Domekologe"
+    ],
+    "name": "NekoAPI",
+    "short": "Zeigt Anime-Bilder von NekosAPI mit Rating-Filter.",
+    "description": "NekoAPI Bild- und GIF-Abruf über https://nekosapi.com mit Rating-Unterstützung (safe, suggestive, borderline, explicit). Explicit wird nur in NSFW Channels zugelassen.",
+    "install_msg": "Danke fürs Installieren von NekoAPI! Benutze !nekoapi oder /nekoapi.",
+    "required_cogs": {},
+    "requirements": [],
+    "tags": [
+        "fun",
+        "anime",
+        "nekos",
+        "images",
+        "api"
+    ],
+    "min_bot_version": "3.5.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
+}
