@@ -1,0 +1,23 @@
+{
+    "author": [
+        "Domekologe"
+    ],
+    "name": "WoW Guild Automation",
+    "short": "Automate most of WoW Guild Stuff for Discord",
+    "description": "This Cogs helps WoW Guild Leads to better organize the Discord with automations and syncs.",
+    "install_msg": "Cog installed. Be aware what you do!",
+    "required_cogs": {},
+    "requirements": [],
+    "tags": [
+        "wow",
+        "world of warcraft",
+        "gaming",
+        "games",
+        "guild",
+        "automation"
+    ],
+    "min_bot_version": "3.5.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
+}

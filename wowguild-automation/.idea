@@ -1,0 +1,35 @@
+Idee:
+- Neue User kommen auf den Server
+    ├─ Frage ob Gast oder neues Gildenmitglied
+        ├─ Wenn Gast => Rolle Gast
+        └─ Wenn neues Gildenmitglied
+            └─ Frage nach dem Mainchar Namen
+                └─ Mainchar wird via API in der Gilde gesucht und dem User hinzugefügt wenn gefunden. Nach Verifizierung wird der Rang eingestellt, der auch Ingame ist
+            └─ Frage nach aktuell freien Zeiten (wie in /readytimes)
+
+- Event wird erstellt
+    ├─ Owner vom Event (bei Raidhelper abfragen wer Owner ist da es nicht der Raidhelper Bot ist) wird benachricht wer theoretisch Zeit hat an den Tagen
+    
+
+
+
+Structure:
+
+wowguild-automation/
+  ├─ __init__.py
+  ├─ information.json
+  ├─ wowguild-automation.py
+  └─ locales/
+        ├─ en-US.json -- default language
+        └─ de-DE.json -- for german servers
+  └─ media/
+  └─ functions/ -- Functions to get the commands running
+        ├─ autocomplete.py
+        ├─ blizzard.py -- Access to Blizzard API, Functions to get Guild Information, Char Information, etc.
+        ├─ automations.py -- Functions to Auto Sync DC Role und Ingame Role
+        └─ fileaccess.py
+  └─ core/ -- core-commands
+        ├─ blizzard.py -- Commands (per Discord Server) for: /wow-setup <Region: Autocomplete> <Version: Classic|Retail> <Server: Autocomplete> <Guildname: String>
+        ├─ admin.py -- Commands (Bot Owner): /serversetup-setblizzardtoken <ClientID> <ClientSecret>
+  └─ automation/ -- core-commands
+        ├─ new-user.py -- What will be done when a new User join
