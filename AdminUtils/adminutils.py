@@ -126,9 +126,29 @@ class AdminUtils(commands.Cog):
                 elif u.isdigit():
                     uid = int(u)
                 else:
-                    m = discord.utils.find(lambda m: str(m).lower() == u.lower(), ctx.guild.members)
+                    # Versuche mehrere sinnvolle Matching-Varianten
+                    u_lower = u.lower()
+
+                    # 1) Display-Name exakte Übereinstimmung
+                    m = discord.utils.find(lambda m: m.display_name.lower() == u_lower, ctx.guild.members)
                     if m:
                         uid = m.id
+                    else:
+                        # 2) Username exakte Übereinstimmung
+                        m = discord.utils.find(lambda m: m.name.lower() == u_lower, ctx.guild.members)
+                        if m:
+                            uid = m.id
+                        else:
+                            # 3) Display-Name contains (fuzzy)
+                            m = discord.utils.find(lambda m: u_lower in m.display_name.lower(), ctx.guild.members)
+                            if m:
+                                uid = m.id
+                            else:
+                                # 4) Username contains (fuzzy)
+                                m = discord.utils.find(lambda m: u_lower in m.name.lower(), ctx.guild.members)
+                                if m:
+                                    uid = m.id
+
                 if uid:
                     except_ids.append(uid)
 
@@ -260,9 +280,29 @@ class AdminUtils(commands.Cog):
                 elif u.isdigit():
                     uid = int(u)
                 else:
-                    m = discord.utils.find(lambda m: str(m).lower() == u.lower(), ctx.guild.members)
+                    # Versuche mehrere sinnvolle Matching-Varianten
+                    u_lower = u.lower()
+
+                    # 1) Display-Name exakte Übereinstimmung
+                    m = discord.utils.find(lambda m: m.display_name.lower() == u_lower, ctx.guild.members)
                     if m:
                         uid = m.id
+                    else:
+                        # 2) Username exakte Übereinstimmung
+                        m = discord.utils.find(lambda m: m.name.lower() == u_lower, ctx.guild.members)
+                        if m:
+                            uid = m.id
+                        else:
+                            # 3) Display-Name contains (fuzzy)
+                            m = discord.utils.find(lambda m: u_lower in m.display_name.lower(), ctx.guild.members)
+                            if m:
+                                uid = m.id
+                            else:
+                                # 4) Username contains (fuzzy)
+                                m = discord.utils.find(lambda m: u_lower in m.name.lower(), ctx.guild.members)
+                                if m:
+                                    uid = m.id
+
                 if uid:
                     except_ids.append(uid)
 
