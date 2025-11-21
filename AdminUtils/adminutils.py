@@ -544,3 +544,53 @@ class AdminUtils(commands.Cog):
             msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
 
         await ctx.interaction.followup.send(msg, ephemeral=True)
+
+
+     # ---- COPY ROLE PERMISSIONS ----
+    @app_commands.command(
+        name="copyrole",
+        description="Kopiere die Channel-Rechte einer Rolle auf eine andere Rolle."
+    )
+    @commands.bot_has_guild_permissions(manage_roles=True)
+    @has_perms(manage_roles=True)
+    @app_commands.describe(
+        channel="Der Channel, dessen Permissions kopiert werden sollen",
+        source_role="Rolle, von der kopiert wird",
+        dest_role="Rolle, auf die kopiert wird"
+    )
+    async def copyrole(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.abc.GuildChannel,
+        source_role: discord.Role,
+        dest_role: discord.Role
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        # 1) Overwrite holen
+        overwrites = channel.overwrites.get(source_role)
+        if overwrites is None:
+            return await interaction.followup.send(
+                f"❌ Die Rolle {source_role.mention} hat **keine spezifischen Overwrites** in {channel.mention}.",
+                ephemeral=True
+            )
+
+        # 2) Overwrite für Zielrolle setzen
+        try:
+            await channel.set_permissions(dest_role, overwrite=overwrites)
+        except discord.Forbidden:
+            return await interaction.followup.send(
+                "❌ Ich habe nicht genügend Berechtigungen, um diese Permissions zu setzen.",
+                ephemeral=True
+            )
+        except discord.HTTPException as e:
+            return await interaction.followup.send(
+                f"❌ Fehler von Discord: `{e}`",
+                ephemeral=True
+            )
+
+        # 3) Erfolg
+        await interaction.followup.send(
+            f"✅ Rechte von {source_role.mention} wurden für {channel.mention} → {dest_role.mention} kopiert.",
+            ephemeral=True
+        )
