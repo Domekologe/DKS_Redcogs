@@ -1,0 +1,14 @@
+{
+    "author": ["Domekologe"],
+    "name": "ReactionRole",
+    "short": "Simple ReactionRole system with IDs and manual sync",
+    "description": "Adds reaction roles with generated IDs, supports manual syncing and slash commands.",
+    "version": "1.0.0",
+    "requirements": [],
+    "permissions": [
+        "manage_roles",
+        "add_reactions",
+        "read_message_history"
+    ],
+    "min_bot_version": "3.5.0"
+}
