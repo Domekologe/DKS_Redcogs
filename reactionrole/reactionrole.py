@@ -19,10 +19,15 @@ class ReactionRole(commands.Cog):
     async def reactionrole_set(
         self,
         ctx: commands.Context,
-        message_id: int,
+        message_id: str,
         emoji: str,
         role: discord.Role
     ):
+        try:
+            message_id = int(message_id)
+        except ValueError:
+            return await ctx.send("❌ Message-ID muss eine Zahl sein.")
+
         guild = ctx.guild
         channel = ctx.channel
 
