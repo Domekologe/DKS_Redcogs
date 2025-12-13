@@ -143,55 +143,55 @@ class ReactionRole(commands.Cog):
                 break
 
     @commands.hybrid_command(name="reactionrole-sync")
-@commands.guild_only()
-@commands.has_permissions(manage_roles=True)
-async def reactionrole_sync(self, ctx: commands.Context):
-    guild = ctx.guild
-    data = await self.config.guild(guild).reactionroles()
+    @commands.guild_only()
+    @commands.has_permissions(manage_roles=True)
+    async def reactionrole_sync(self, ctx: commands.Context):
+        guild = ctx.guild
+        data = await self.config.guild(guild).reactionroles()
 
-    if not data:
-        return await ctx.send("ℹ️ Keine ReactionRoles zum Synchronisieren.")
+        if not data:
+            return await ctx.send("ℹ️ Keine ReactionRoles zum Synchronisieren.")
 
-    added = 0
+        added = 0
 
-    for rr_id, entry in data.items():
-        channel = guild.get_channel(entry["channel_id"])
-        if not channel:
-            continue
+        for rr_id, entry in data.items():
+            channel = guild.get_channel(entry["channel_id"])
+            if not channel:
+                continue
 
-        try:
-            message = await channel.fetch_message(entry["message_id"])
-        except (discord.NotFound, discord.Forbidden):
-            continue
+            try:
+                message = await channel.fetch_message(entry["message_id"])
+            except (discord.NotFound, discord.Forbidden):
+                continue
 
-        role = guild.get_role(entry["role_id"])
-        if not role:
-            continue
+            role = guild.get_role(entry["role_id"])
+            if not role:
+                continue
 
-        reaction = discord.utils.get(
-            message.reactions,
-            emoji=entry["emoji"]
+            reaction = discord.utils.get(
+                message.reactions,
+                emoji=entry["emoji"]
+            )
+
+            if not reaction:
+                continue
+
+            async for user in reaction.users():
+                if user.bot:
+                    continue
+
+                member = guild.get_member(user.id)
+                if not member:
+                    continue
+
+                if role not in member.roles:
+                    await member.add_roles(
+                        role,
+                        reason="ReactionRole manual sync"
+                    )
+                    added += 1
+
+        await ctx.send(
+            f"🔄 Synchronisation abgeschlossen\n"
+            f"➕ Rollen neu gesetzt: **{added}**"
         )
-
-        if not reaction:
-            continue
-
-        async for user in reaction.users():
-            if user.bot:
-                continue
-
-            member = guild.get_member(user.id)
-            if not member:
-                continue
-
-            if role not in member.roles:
-                await member.add_roles(
-                    role,
-                    reason="ReactionRole manual sync"
-                )
-                added += 1
-
-    await ctx.send(
-        f"🔄 Synchronisation abgeschlossen\n"
-        f"➕ Rollen neu gesetzt: **{added}**"
-    )
