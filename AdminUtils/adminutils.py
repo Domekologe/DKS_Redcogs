@@ -345,6 +345,7 @@ class AdminUtils(commands.Cog):
             ctx,
             f"✅ {len(deleted)} Nachrichten (≤14 Tage) gelöscht. Ausnahmen: {len(except_ids)}"
         )
+        
     # ---- MESSAGE MOVE (kopieren + optional löschen) ----
     @commands.hybrid_command(
         name="messagemove",
@@ -353,39 +354,32 @@ class AdminUtils(commands.Cog):
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
     @app_commands.describe(
-        source_channel="Quell-Channel oder Thread",
-        message_id="Message-ID oder Message-Link",
+        message="Message-ID oder Message-Link",
         destination="Ziel-Channel oder Thread",
         delete_original="Originalnachricht nach dem Kopieren löschen?"
     )
     async def messagemove(
         self,
         ctx: commands.Context,
-        source_channel: discord.abc.Messageable,
-        destination: discord.abc.Messageable,
-        message_id: str,
+        message: str,
+        destination: discord.TextChannel,
         delete_original: Optional[bool] = True
     ):
-        # --- Laufzeit-Typprüfung (weil Slash keine Filter erlaubt) ---
-        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
-            return await self._reply(ctx, "❌ Quell-Channel muss ein Textchannel oder Thread sein.")
-
-        if not isinstance(destination, (discord.TextChannel, discord.Thread)):
-            return await self._reply(ctx, "❌ Ziel-Channel muss ein Textchannel oder Thread sein.")
-
-        mid = _parse_message_id(message_id)
+        mid = _parse_message_id(message)
         if mid is None:
             return await self._reply(ctx, "❌ Ungültige Message-ID oder Message-Link.")
 
+        # Channel aus Message-Link ermitteln (oder Fallback: aktueller Channel)
+        channel = ctx.channel
         try:
-            msg = await source_channel.fetch_message(mid)
+            msg = await channel.fetch_message(mid)
         except discord.NotFound:
-            return await self._reply(ctx, "❌ Nachricht nicht gefunden.")
+            return await self._reply(ctx, "❌ Nachricht nicht gefunden (Channel prüfen!).")
         except discord.Forbidden:
             return await self._reply(ctx, "❌ Keine Berechtigung, die Nachricht zu lesen.")
 
         content = (
-            f"**Nachricht verschoben aus** {source_channel.mention} "
+            f"**Nachricht verschoben aus** {channel.mention} "
             f"von {msg.author.mention}:\n{msg.content or ''}"
         )
 
@@ -399,7 +393,7 @@ class AdminUtils(commands.Cog):
         try:
             await destination.send(content=content, files=files if files else None)
         except discord.Forbidden:
-            return await self._reply(ctx, "❌ Keine Berechtigung, in den Ziel-Channel zu schreiben.")
+            return await self._reply(ctx, "❌ Keine Berechtigung im Ziel-Channel.")
 
         if delete_original:
             try:
@@ -409,8 +403,6 @@ class AdminUtils(commands.Cog):
                     ctx,
                     "⚠️ Nachricht kopiert, aber ich darf das Original nicht löschen."
                 )
-            except discord.HTTPException:
-                pass
 
         await self._reply(
             ctx,
