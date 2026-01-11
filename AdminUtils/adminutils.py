@@ -361,15 +361,18 @@ class AdminUtils(commands.Cog):
     async def messagemove(
         self,
         ctx: commands.Context,
-        source_channel: app_commands.Channel[
-            discord.TextChannel | discord.Thread
-        ],
-        destination: app_commands.Channel[
-            discord.TextChannel | discord.Thread
-        ],
+        source_channel: discord.abc.Messageable,
+        destination: discord.abc.Messageable,
         message_id: str,
         delete_original: Optional[bool] = True
     ):
+        # --- Laufzeit-Typprüfung (weil Slash keine Filter erlaubt) ---
+        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+            return await self._reply(ctx, "❌ Quell-Channel muss ein Textchannel oder Thread sein.")
+
+        if not isinstance(destination, (discord.TextChannel, discord.Thread)):
+            return await self._reply(ctx, "❌ Ziel-Channel muss ein Textchannel oder Thread sein.")
+
         mid = _parse_message_id(message_id)
         if mid is None:
             return await self._reply(ctx, "❌ Ungültige Message-ID oder Message-Link.")
@@ -393,7 +396,10 @@ class AdminUtils(commands.Cog):
             except discord.HTTPException:
                 pass
 
-        await destination.send(content=content, files=files if files else None)
+        try:
+            await destination.send(content=content, files=files if files else None)
+        except discord.Forbidden:
+            return await self._reply(ctx, "❌ Keine Berechtigung, in den Ziel-Channel zu schreiben.")
 
         if delete_original:
             try:
@@ -411,6 +417,7 @@ class AdminUtils(commands.Cog):
             f"✅ Nachricht nach {destination.mention} kopiert"
             f"{' und Original gelöscht' if delete_original else ''}."
         )
+
 
 
         
