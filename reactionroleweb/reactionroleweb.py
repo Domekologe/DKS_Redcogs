@@ -25,33 +25,71 @@ class ReactionRoleWeb(commands.Cog):
         """Called when the cog is unloaded"""
         await self._unregister_from_dashboard()
 
+    @commands.Cog.listener()
+    async def on_cog_load(self, cog: commands.Cog):
+        """Called when a cog is loaded"""
+        if cog.qualified_name == "Dashboard":
+            await self._register_to_dashboard()
+
     async def _register_to_dashboard(self):
         """Register this cog as a third-party integration with the Dashboard"""
-        # Wait a bit to ensure Dashboard cog is loaded
+        # Wait a bit to ensure things are ready
         await self.bot.wait_until_red_ready()
         
         dashboard_cog = self.bot.get_cog("Dashboard")
         if not dashboard_cog:
-            log.warning(
-                "Dashboard cog not found. ReactionRoleWeb requires the Dashboard cog to function. "
-                "Please install and load the Dashboard cog from AAA3A-cogs."
-            )
+            # We don't log a warning here if called from on_cog_load only for specific calls
+            # But initial load we might want to know. 
+            # If this is called from cog_load, we log if missing.
+            # If called from on_cog_load(Dashboard), it must exist.
+            return
+
+        if self._dashboard_integration_ready:
             return
 
         try:
-            # Register RPC handlers for dashboard communication
-            if hasattr(dashboard_cog, 'rpc') and hasattr(dashboard_cog.rpc, 'third_parties_handler'):
-                # Register the third party
-                dashboard_cog.rpc.third_parties_handler.add_third_party(
-                    name="reactionrole",
-                    name_display="Reaction Roles",
-                    description="Manage reaction roles for your server through an easy-to-use web interface",
-                    cog=self
-                )
-                self._dashboard_integration_ready = True
-                log.info("Successfully registered ReactionRoleWeb as a third-party integration with Dashboard")
+            # The Dashboard cog uses a decorator-based system for third-party integrations
+            # We need to register our methods directly with the dashboard's third-party system
+            if hasattr(dashboard_cog, 'rpc') and dashboard_cog.rpc:
+                # Check if third_parties_handler exists
+                if hasattr(dashboard_cog.rpc, 'third_parties_handler'):
+                    handler = dashboard_cog.rpc.third_parties_handler
+                    
+                    # Try to find the correct method signature
+                    if hasattr(handler, 'add_third_party'):
+                        try:
+                            # Try with 'cog' and new keys
+                            handler.add_third_party(
+                                cog=self
+                            )
+                            # If we are here, it might have worked or not fully configured if it needs more args
+                            # But usually add_third_party(cog) is enough if the cog has the info or we pass it
+                        except TypeError:
+                            # If it requires arguments
+                             handler.add_third_party(
+                                cog=self,
+                                name="ReactionRoles",
+                                description="Manage reaction roles"
+                            )
+                        
+                        self._dashboard_integration_ready = True
+                        log.info("Successfully registered ReactionRoleWeb as a third-party integration with Dashboard")
+                    
+                    # Fallback or additional Check: manual dictionary insertion if the method doesn't exist/work
+                    elif hasattr(handler, 'third_parties'):
+                        handler.third_parties["reactionrole"] = {
+                            "name": "Reaction Roles",
+                            "description": "Manage reaction roles for your server through an easy-to-use web interface",
+                            "cog": self
+                        }
+                        self._dashboard_integration_ready = True
+                        log.info("Successfully registered ReactionRoleWeb (direct registration) with Dashboard")
+                    else:
+                        log.error("Dashboard third_parties_handler found but no registration method available")
+                else:
+                    log.error("Dashboard RPC found but third_parties_handler not available")
             else:
-                log.error("Dashboard cog found but RPC third_parties_handler not available")
+                log.error("Dashboard cog found but RPC not available - make sure bot is started with --rpc flag")
         except Exception as e:
             log.error(f"Failed to register with Dashboard: {e}", exc_info=True)
 
@@ -60,7 +98,13 @@ class ReactionRoleWeb(commands.Cog):
         dashboard_cog = self.bot.get_cog("Dashboard")
         if dashboard_cog and hasattr(dashboard_cog, 'rpc') and hasattr(dashboard_cog.rpc, 'third_parties_handler'):
             try:
-                dashboard_cog.rpc.third_parties_handler.remove_third_party("reactionrole")
+                if hasattr(dashboard_cog.rpc.third_parties_handler, 'remove_third_party'):
+                     dashboard_cog.rpc.third_parties_handler.remove_third_party("ReactionRoleWeb") # Try class name
+                     # The remove_third_party often takes the cog name
+                elif hasattr(dashboard_cog.rpc.third_parties_handler, 'third_parties'):
+                     if "reactionrole" in dashboard_cog.rpc.third_parties_handler.third_parties:
+                         del dashboard_cog.rpc.third_parties_handler.third_parties["reactionrole"]
+                
                 log.info("Successfully unregistered ReactionRoleWeb from Dashboard")
             except Exception as e:
                 log.error(f"Failed to unregister from Dashboard: {e}", exc_info=True)
