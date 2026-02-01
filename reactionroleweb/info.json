@@ -1,0 +1,19 @@
+{
+    "author": [
+        "Domekologe"
+    ],
+    "name": "ReactionRoleWeb",
+    "short": "Web interface for ReactionRole system via AAA3A Dashboard",
+    "description": "Provides a web interface for managing reaction roles through the AAA3A Dashboard. Requires the Dashboard cog to be installed and the bot to be started with --rpc flag.",
+    "version": "1.0.0",
+    "requirements": [],
+    "permissions": [
+        "manage_roles",
+        "add_reactions",
+        "read_message_history"
+    ],
+    "min_bot_version": "3.5.0",
+    "dependencies": [
+        "dashboard"
+    ]
+}
