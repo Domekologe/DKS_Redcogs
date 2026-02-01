@@ -128,7 +128,7 @@ class ReactionRoleWeb(commands.Cog):
         return decorator
 
     @_dashboard_page(name="get_reactionroles", description="Get all reaction roles for a guild", methods=["GET"])
-    async def rpc_get_reactionroles(self, guild_id: int) -> Dict[str, Any]:
+    async def rpc_get_reactionroles(self, guild_id: int, **kwargs) -> Dict[str, Any]:
         """
         Get all reaction roles for a guild
         
@@ -175,7 +175,8 @@ class ReactionRoleWeb(commands.Cog):
         channel_id: int, 
         message_id: int, 
         emoji: str, 
-        role_id: int
+        role_id: int,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Add a new reaction role
@@ -246,7 +247,7 @@ class ReactionRoleWeb(commands.Cog):
             return {"success": False, "error": str(e)}
 
     @_dashboard_page(name="remove_reactionrole", description="Remove a reaction role", methods=["POST"])
-    async def rpc_remove_reactionrole(self, guild_id: int, rr_id: str) -> Dict[str, Any]:
+    async def rpc_remove_reactionrole(self, guild_id: int, rr_id: str, **kwargs) -> Dict[str, Any]:
         """
         Remove a reaction role
         
@@ -274,7 +275,7 @@ class ReactionRoleWeb(commands.Cog):
             return {"success": False, "error": str(e)}
 
     @_dashboard_page(name="sync_reactionroles", description="Synchronize all reaction roles", methods=["POST"])
-    async def rpc_sync_reactionroles(self, guild_id: int) -> Dict[str, Any]:
+    async def rpc_sync_reactionroles(self, guild_id: int, **kwargs) -> Dict[str, Any]:
         """
         Synchronize all reaction roles (add roles to users who already reacted)
         
@@ -336,7 +337,7 @@ class ReactionRoleWeb(commands.Cog):
             return {"success": False, "error": str(e)}
 
     @_dashboard_page(name="get_channels", description="Get all text channels in a guild", methods=["GET"])
-    async def rpc_get_channels(self, guild_id: int) -> Dict[str, Any]:
+    async def rpc_get_channels(self, guild_id: int, **kwargs) -> Dict[str, Any]:
         """
         Get all text channels in a guild
         
@@ -367,7 +368,7 @@ class ReactionRoleWeb(commands.Cog):
             return {"success": False, "error": str(e)}
 
     @_dashboard_page(name="get_roles", description="Get all roles in a guild", methods=["GET"])
-    async def rpc_get_roles(self, guild_id: int) -> Dict[str, Any]:
+    async def rpc_get_roles(self, guild_id: int, **kwargs) -> Dict[str, Any]:
         """
         Get all roles in a guild
         
@@ -409,7 +410,8 @@ class ReactionRoleWeb(commands.Cog):
         self, 
         guild_id: int, 
         channel_id: int, 
-        message_id: int
+        message_id: int,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         Get message details
