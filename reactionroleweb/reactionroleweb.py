@@ -58,19 +58,19 @@ class ReactionRoleWeb(commands.Cog):
                     # Try to find the correct method signature
                     if hasattr(handler, 'add_third_party'):
                         try:
-                            # Try with 'cog' and new keys
-                            handler.add_third_party(
-                                cog=self
-                            )
-                            # If we are here, it might have worked or not fully configured if it needs more args
-                            # But usually add_third_party(cog) is enough if the cog has the info or we pass it
+                            # Try with positional argument (most standard)
+                            handler.add_third_party(self)
                         except TypeError:
-                            # If it requires arguments
-                             handler.add_third_party(
-                                cog=self,
-                                name="ReactionRoles",
-                                description="Manage reaction roles"
-                            )
+                            try:
+                                # Try with 'cog' kwarg
+                                handler.add_third_party(cog=self)
+                            except TypeError:
+                                # If it requires detailed arguments
+                                handler.add_third_party(
+                                    cog=self,
+                                    name="ReactionRoles",
+                                    description="Manage reaction roles"
+                                )
                         
                         self._dashboard_integration_ready = True
                         log.info("Successfully registered ReactionRoleWeb as a third-party integration with Dashboard")
@@ -113,6 +113,21 @@ class ReactionRoleWeb(commands.Cog):
     # RPC Methods for Dashboard
     # -------------------------
 
+    def _dashboard_page(name: str, description: str, methods: List[str] = None):
+        """Decorator to mark a method as a dashboard page"""
+        if methods is None:
+            methods = ["GET", "POST"]
+            
+        def decorator(func):
+            func.__dashboard_params__ = {
+                "name": name,
+                "description": description,
+                "methods": methods
+            }
+            return func
+        return decorator
+
+    @_dashboard_page(name="get_reactionroles", description="Get all reaction roles for a guild", methods=["GET"])
     async def rpc_get_reactionroles(self, guild_id: int) -> Dict[str, Any]:
         """
         Get all reaction roles for a guild
@@ -153,6 +168,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_get_reactionroles: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="add_reactionrole", description="Add a new reaction role", methods=["POST"])
     async def rpc_add_reactionrole(
         self, 
         guild_id: int, 
@@ -229,6 +245,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_add_reactionrole: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="remove_reactionrole", description="Remove a reaction role", methods=["POST"])
     async def rpc_remove_reactionrole(self, guild_id: int, rr_id: str) -> Dict[str, Any]:
         """
         Remove a reaction role
@@ -256,6 +273,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_remove_reactionrole: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="sync_reactionroles", description="Synchronize all reaction roles", methods=["POST"])
     async def rpc_sync_reactionroles(self, guild_id: int) -> Dict[str, Any]:
         """
         Synchronize all reaction roles (add roles to users who already reacted)
@@ -317,6 +335,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_sync_reactionroles: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="get_channels", description="Get all text channels in a guild", methods=["GET"])
     async def rpc_get_channels(self, guild_id: int) -> Dict[str, Any]:
         """
         Get all text channels in a guild
@@ -347,6 +366,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_get_channels: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="get_roles", description="Get all roles in a guild", methods=["GET"])
     async def rpc_get_roles(self, guild_id: int) -> Dict[str, Any]:
         """
         Get all roles in a guild
@@ -384,6 +404,7 @@ class ReactionRoleWeb(commands.Cog):
             log.error(f"Error in rpc_get_roles: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    @_dashboard_page(name="get_message", description="Get message details", methods=["GET"])
     async def rpc_get_message(
         self, 
         guild_id: int, 
