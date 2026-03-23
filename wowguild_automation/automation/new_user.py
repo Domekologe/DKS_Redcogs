@@ -197,6 +197,25 @@ async def handle_new_member_onboarding(
             await destination.send(
                 t["rules_channel_hint"].format(rules_channel=rule_channel.mention, emoji=rule_emoji)
             )
+            try:
+                rules_msg = await rule_channel.send(
+                    f"{member.mention} - bitte bestaetige die Regeln mit {rule_emoji}."
+                )
+                await rules_msg.add_reaction(rule_emoji)
+
+                def reaction_check(payload: discord.RawReactionActionEvent) -> bool:
+                    return (
+                        payload.guild_id == member.guild.id
+                        and payload.channel_id == rule_channel.id
+                        and payload.message_id == rules_msg.id
+                        and payload.user_id == member.id
+                        and str(payload.emoji) == rule_emoji
+                    )
+
+                await bot.wait_for("raw_reaction_add", check=reaction_check, timeout=300)
+                return True
+            except Exception:
+                pass
         confirm_view = RulesConfirmView(member.id, f"{t['rules_confirm']} {rule_emoji}")
         await destination.send("Click to finish onboarding:", view=confirm_view)
         return (not await confirm_view.wait()) and confirm_view.value == "confirmed"

@@ -109,6 +109,8 @@ class WowGuildAutomation(commands.Cog):
                 "onboarding_new_role_id": 0,
                 "onboarding_complete_role_id": 0,
             },
+            rank_mapping={},
+            rank_titles={},
             channels={
                 "onboarding_channel_id": 0,
                 "manual_review_channel_id": 0,
@@ -146,6 +148,9 @@ class WowGuildAutomation(commands.Cog):
             return False
 
     async def cog_load(self) -> None:
+        bot_setup = await self.config.bot_setup()
+        self.blizzard.client_id = bot_setup.get("client_id", "")
+        self.blizzard.client_secret = bot_setup.get("client_secret", "")
         dashboard_cog = self.bot.get_cog("Dashboard")
         if dashboard_cog is not None:
             self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
@@ -473,6 +478,85 @@ class WowGuildAutomation(commands.Cog):
     async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: str) -> None:
         """Slash-style alias for rank syncing."""
         await self.wow_syncrank(ctx, mainchar)
+
+    @wow.command(name="setrankmap")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_setrankmap(self, ctx: commands.Context, rank_name: str, role: discord.Role) -> None:
+        if not ctx.guild:
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        cfg = await self._guild_config(ctx.guild)
+        rank_mapping = cfg.get("rank_mapping", {})
+        rank_mapping[rank_name.strip()] = role.id
+        cfg["rank_mapping"] = rank_mapping
+        await self.config.guild(ctx.guild).set(cfg)
+        await ctx.send(f"Mapping gesetzt: `{rank_name}` -> {role.mention}")
+
+    @commands.hybrid_command(name="wow-setrankmap")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_setrankmap_direct(
+        self, ctx: commands.Context, rank_name: str, role: discord.Role
+    ) -> None:
+        """Slash-style alias for rank mapping set."""
+        await self.wow_setrankmap(ctx, rank_name, role)
+
+    @wow.command(name="setranktitle")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_setranktitle(self, ctx: commands.Context, rank_index: int, title: str) -> None:
+        if not ctx.guild:
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        cfg = await self._guild_config(ctx.guild)
+        rank_titles = cfg.get("rank_titles", {})
+        rank_titles[str(rank_index)] = title.strip()
+        cfg["rank_titles"] = rank_titles
+        await self.config.guild(ctx.guild).set(cfg)
+        await ctx.send(f"Rangtitel gesetzt: Index `{rank_index}` -> `{title}`")
+
+    @commands.hybrid_command(name="wow-setranktitle")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_setranktitle_direct(
+        self, ctx: commands.Context, rank_index: int, title: str
+    ) -> None:
+        """Slash-style alias for rank title set."""
+        await self.wow_setranktitle(ctx, rank_index, title)
+
+    @wow.command(name="listrankmap")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_listrankmap(self, ctx: commands.Context) -> None:
+        if not ctx.guild:
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        cfg = await self._guild_config(ctx.guild)
+        rank_mapping = cfg.get("rank_mapping", {})
+        rank_titles = cfg.get("rank_titles", {})
+        lines = ["Rank Titles:"]
+        if rank_titles:
+            for idx, title in sorted(rank_titles.items(), key=lambda kv: int(kv[0])):
+                lines.append(f"- `{idx}` -> `{title}`")
+        else:
+            lines.append("- none")
+        lines.append("\nRank Mapping:")
+        if rank_mapping:
+            for rank_name, role_id in rank_mapping.items():
+                role = ctx.guild.get_role(int(role_id))
+                role_label = role.mention if role else f"`{role_id}`"
+                lines.append(f"- `{rank_name}` -> {role_label}")
+        else:
+            lines.append("- none")
+        await ctx.send("\n".join(lines))
+
+    @commands.hybrid_command(name="wow-listrankmap")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_listrankmap_direct(self, ctx: commands.Context) -> None:
+        """Slash-style alias for listing rank titles/mapping."""
+        await self.wow_listrankmap(ctx)
 
     @wow.command(name="botsetup")
     @commands.is_owner()
