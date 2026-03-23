@@ -218,8 +218,7 @@ class WowGuildAutomation(commands.Cog):
         if complete_role:
             await channel.set_permissions(complete_role, view_channel=False, send_messages=False)
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:
+    async def _run_onboarding_flow(self, member: discord.Member) -> None:
         guild_cfg = await self._guild_config(member.guild)
         if not guild_cfg.get("features", {}).get("onboarding", True):
             return
@@ -231,9 +230,7 @@ class WowGuildAutomation(commands.Cog):
                 await member.add_roles(new_role, reason="Onboarding started")
 
         manual_channel_id = guild_cfg.get("channels", {}).get("manual_review_channel_id", 0)
-        manual_channel = (
-            member.guild.get_channel(manual_channel_id) if manual_channel_id else None
-        )
+        manual_channel = member.guild.get_channel(manual_channel_id) if manual_channel_id else None
         if manual_channel and not isinstance(manual_channel, discord.TextChannel):
             manual_channel = None
 
@@ -261,6 +258,10 @@ class WowGuildAutomation(commands.Cog):
             new_role = member.guild.get_role(new_role_id)
             if new_role and new_role in member.roles:
                 await member.remove_roles(new_role, reason="Onboarding completed")
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        await self._run_onboarding_flow(member)
 
     @commands.hybrid_group(name="wow")
     @commands.guild_only()
@@ -584,6 +585,21 @@ class WowGuildAutomation(commands.Cog):
         """Slash-style alias for onboarding setup wizard."""
         await self.wow_onboarding_setup(ctx)
 
+    @wow.command(name="simulate-join")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_simulate_join(self, ctx: commands.Context, member: discord.Member) -> None:
+        await ctx.send(f"Simuliere Join-Onboarding fuer {member.mention}...")
+        await self._run_onboarding_flow(member)
+        await ctx.send("Simulation abgeschlossen.")
+
+    @commands.hybrid_command(name="wow-simulate-join")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_simulate_join_direct(self, ctx: commands.Context, member: discord.Member) -> None:
+        """Slash-style alias to simulate a member join onboarding."""
+        await self.wow_simulate_join(ctx, member)
+
     @wow.command(name="dashboard-status")
     @commands.is_owner()
     async def wow_dashboard_status(self, ctx: commands.Context) -> None:
@@ -713,9 +729,27 @@ class WowGuildAutomation(commands.Cog):
                     }
 
                 source = f"""
-<div style="padding:12px;">
+<style>
+.wow-wrap {{
+  background: linear-gradient(180deg, #15110c 0%, #1f160f 100%);
+  border: 1px solid #8a6a3a;
+  border-radius: 10px;
+  padding: 14px;
+  color: #f3e9d2;
+}}
+.wow-wrap h2 {{ color: #ffcc66; }}
+.wow-wrap input, .wow-wrap select {{
+  background: #2b1f14;
+  color: #f5e7c8;
+  border: 1px solid #7d5b2b;
+  border-radius: 6px;
+  padding: 6px;
+  min-width: 360px;
+}}
+</style>
+<div class="wow-wrap">
   <h2>WoW Master Settings</h2>
-  <p>Global defaults for all guild instances.</p>
+  <p>Global defaults and Blizzard credentials for all guild instances.</p>
   <form method="post">
     {form.hidden_tag()}
     <p><label>Default Language</label><br>{form.default_language()}</p>
@@ -817,6 +851,17 @@ class WowGuildAutomation(commands.Cog):
                     onboarding_channel_id = wtforms.SelectField("Onboarding Channel")
                     manual_review_channel_id = wtforms.SelectField("Manual Review Channel")
                     raid_guest_channel_id = wtforms.SelectField("Raid Guest Channel")
+                    create_missing_resources = wtforms.BooleanField(
+                        "Create missing roles/channels automatically"
+                    )
+                    target_category_id = wtforms.SelectField("Target Category for new channels")
+                    guest_role_name = wtforms.StringField("Create Guest Role Name")
+                    member_role_name = wtforms.StringField("Create Member Role Name")
+                    onboarding_new_role_name = wtforms.StringField("Create Onboarding New Role Name")
+                    onboarding_complete_role_name = wtforms.StringField("Create Onboarding Complete Role Name")
+                    onboarding_channel_name = wtforms.StringField("Create Onboarding Channel Name")
+                    manual_review_channel_name = wtforms.StringField("Create Manual Review Channel Name")
+                    raid_guest_channel_name = wtforms.StringField("Create Raid Guest Channel Name")
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
@@ -827,10 +872,14 @@ class WowGuildAutomation(commands.Cog):
                 channels = cfg.get("channels", {})
                 onboarding = cfg.get("onboarding", {})
                 role_choices = [("0", "-- none --")] + [
-                    (str(role.id), role.name) for role in sorted(guild.roles, key=lambda r: r.position, reverse=True)
+                    (str(role.id), f"{role.name} ({role.id})")
+                    for role in sorted(guild.roles, key=lambda r: r.position, reverse=True)
                 ]
                 channel_choices = [("0", "-- none --")] + [
-                    (str(channel.id), f"#{channel.name}") for channel in guild.text_channels
+                    (str(channel.id), f"#{channel.name} ({channel.id})") for channel in guild.text_channels
+                ]
+                category_choices = [("0", "-- no category --")] + [
+                    (str(category.id), f"{category.name} ({category.id})") for category in guild.categories
                 ]
                 profile_choices = [(k, k) for k in sorted(wow_profiles.keys())] or [("retail", "retail")]
                 form.profile_key.choices = profile_choices + [("__new__", "+ create new profile")]
@@ -841,6 +890,7 @@ class WowGuildAutomation(commands.Cog):
                 form.onboarding_channel_id.choices = channel_choices
                 form.manual_review_channel_id.choices = channel_choices
                 form.raid_guest_channel_id.choices = channel_choices
+                form.target_category_id.choices = category_choices
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
                     form.profile_key.data = active_key
@@ -857,6 +907,15 @@ class WowGuildAutomation(commands.Cog):
                     form.onboarding_channel_id.data = str(channels.get("onboarding_channel_id", 0))
                     form.manual_review_channel_id.data = str(channels.get("manual_review_channel_id", 0))
                     form.raid_guest_channel_id.data = str(channels.get("raid_guest_channel_id", 0))
+                    form.create_missing_resources.data = False
+                    form.target_category_id.data = "0"
+                    form.guest_role_name.data = "guest"
+                    form.member_role_name.data = "guild-member"
+                    form.onboarding_new_role_name.data = "onboarding-new"
+                    form.onboarding_complete_role_name.data = "onboarding-complete"
+                    form.onboarding_channel_name.data = "onboarding-private"
+                    form.manual_review_channel_name.data = "wow-manual-review"
+                    form.raid_guest_channel_name.data = "wow-raid-guests"
 
                 if form.validate_on_submit():
                     cfg["language"] = form.language.data if form.language.data in ("de-DE", "en-US") else "de-DE"
@@ -888,20 +947,97 @@ class WowGuildAutomation(commands.Cog):
                         "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
                         "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
                     }
+                    notifications = []
+                    if form.create_missing_resources.data:
+                        category = None
+                        try:
+                            category = guild.get_channel(int(form.target_category_id.data or 0))
+                            if category and not isinstance(category, discord.CategoryChannel):
+                                category = None
+                        except Exception:
+                            category = None
+
+                        role_create_map = [
+                            ("guest_role_id", form.guest_role_name.data or "guest"),
+                            ("member_role_id", form.member_role_name.data or "guild-member"),
+                            ("onboarding_new_role_id", form.onboarding_new_role_name.data or "onboarding-new"),
+                            (
+                                "onboarding_complete_role_id",
+                                form.onboarding_complete_role_name.data or "onboarding-complete",
+                            ),
+                        ]
+                        for key, role_name in role_create_map:
+                            if cfg["roles"].get(key, 0):
+                                continue
+                            existing = discord.utils.get(guild.roles, name=role_name)
+                            if existing is None:
+                                existing = await guild.create_role(
+                                    name=role_name, reason="WoW dashboard auto-create role"
+                                )
+                                notifications.append(
+                                    {"message": f"Created role: {existing.name}", "category": "info"}
+                                )
+                            cfg["roles"][key] = existing.id
+
+                        channel_create_map = [
+                            ("onboarding_channel_id", form.onboarding_channel_name.data or "onboarding-private"),
+                            ("manual_review_channel_id", form.manual_review_channel_name.data or "wow-manual-review"),
+                            ("raid_guest_channel_id", form.raid_guest_channel_name.data or "wow-raid-guests"),
+                        ]
+                        for key, channel_name in channel_create_map:
+                            if cfg["channels"].get(key, 0):
+                                continue
+                            existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
+                            if existing_channel is None:
+                                existing_channel = await guild.create_text_channel(
+                                    name=channel_name,
+                                    category=category,
+                                    reason="WoW dashboard auto-create channel",
+                                )
+                                notifications.append(
+                                    {
+                                        "message": f"Created channel: #{existing_channel.name}",
+                                        "category": "info",
+                                    }
+                                )
+                            cfg["channels"][key] = existing_channel.id
+
                     await self.config.guild(guild).set(cfg)
                     await self._apply_onboarding_channel_permissions(guild)
                     return {
                         "status": 0,
-                        "notifications": [{"message": "WoW guild settings saved.", "category": "success"}],
+                        "notifications": notifications + [{"message": "WoW guild settings saved.", "category": "success"}],
                         "redirect_url": kwargs.get("request_url"),
                     }
 
                 source = f"""
-<div style="padding:12px;">
+<style>
+.wow-wrap {{
+  background: linear-gradient(180deg, #16120d 0%, #20160f 100%);
+  border: 1px solid #8a6a3a;
+  border-radius: 10px;
+  padding: 14px;
+  color: #f3e9d2;
+  box-shadow: 0 0 20px rgba(0,0,0,.35);
+}}
+.wow-wrap h2, .wow-wrap h3 {{ color: #ffcc66; margin: 4px 0 10px 0; }}
+.wow-wrap label {{ color: #ffe7b0; font-weight: 600; }}
+.wow-wrap input, .wow-wrap select {{
+  background: #2b1f14;
+  color: #f5e7c8;
+  border: 1px solid #7d5b2b;
+  border-radius: 6px;
+  padding: 6px;
+  min-width: 360px;
+}}
+.wow-wrap hr {{ border-color: #6f5129; opacity: .6; }}
+</style>
+<div class="wow-wrap">
   <h2>WoW Guild Settings</h2>
-  <p>Settings for <b>{guild.name}</b>.</p>
+  <p>Settings for <b>{guild.name}</b> - For the Horde/Alliance dashboard mode.</p>
   <form method="post">
     {form.hidden_tag()}
+    <h3>Profile</h3>
     <p><label>Language</label><br>{form.language()}</p>
     <p><label>WoW Profile</label><br>{form.profile_key()}</p>
     <p><small>Select existing profile or choose <b>+ create new profile</b> and set version.</small></p>
@@ -912,6 +1048,7 @@ class WowGuildAutomation(commands.Cog):
     <p><label>Onboarding Text DE</label><br>{form.welcome_text_de()}</p>
     <p><label>Onboarding Text EN</label><br>{form.welcome_text_en()}</p>
     <hr>
+    <h3>Discord Mapping</h3>
     <p><label>Guest Role</label><br>{form.guest_role_id()}</p>
     <p><label>Member Role</label><br>{form.member_role_id()}</p>
     <p><label>Onboarding New Role</label><br>{form.onboarding_new_role_id()}</p>
@@ -920,6 +1057,17 @@ class WowGuildAutomation(commands.Cog):
     <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}</p>
     <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}</p>
     <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}</p>
+    <hr>
+    <h3>Auto Create (optional)</h3>
+    <p><label>{form.create_missing_resources()} Create missing roles/channels automatically</label></p>
+    <p><label>Target Category for new channels</label><br>{form.target_category_id()}</p>
+    <p><label>Guest Role Name</label><br>{form.guest_role_name()}</p>
+    <p><label>Member Role Name</label><br>{form.member_role_name()}</p>
+    <p><label>Onboarding New Role Name</label><br>{form.onboarding_new_role_name()}</p>
+    <p><label>Onboarding Complete Role Name</label><br>{form.onboarding_complete_role_name()}</p>
+    <p><label>Onboarding Channel Name</label><br>{form.onboarding_channel_name()}</p>
+    <p><label>Manual Review Channel Name</label><br>{form.manual_review_channel_name()}</p>
+    <p><label>Raid Guest Channel Name</label><br>{form.raid_guest_channel_name()}</p>
     <p>{form.submit()}</p>
   </form>
 </div>
