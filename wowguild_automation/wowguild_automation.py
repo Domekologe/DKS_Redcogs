@@ -534,6 +534,7 @@ class WowGuildAutomation(commands.Cog):
         description="Configure WoW Guild Automation for this server.",
         methods=("GET", "POST"),
         context_ids=["user_id", "guild_id"],
+        hidden=False,
     )
     async def dashboard_wowguild_automation(
         self,
