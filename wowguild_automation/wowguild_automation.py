@@ -32,6 +32,7 @@ I18N = {
         "rank_synced": "Rang erfolgreich synchronisiert: `{rank}`",
         "rank_failed": "Mainchar nicht gefunden oder API nicht konfiguriert.",
         "botsetup_saved": "Bot-Setup gespeichert.",
+        "master_saved": "Master-Setup gespeichert.",
         "onboarding_setup_intro": "Onboarding-Setup gestartet. Antworte pro Schritt im Chat.",
         "onboarding_setup_mode": "Soll der Bot Channel/Rollen erstellen? Antworte mit `create` oder `existing`.",
         "onboarding_setup_done": "Onboarding-Setup gespeichert. Channel: {channel}, Rollen: new={new_role}, complete={complete_role}",
@@ -52,6 +53,7 @@ I18N = {
         "rank_synced": "Rank synchronized successfully: `{rank}`",
         "rank_failed": "Main character not found or API not configured.",
         "botsetup_saved": "Bot setup saved.",
+        "master_saved": "Master setup saved.",
         "onboarding_setup_intro": "Onboarding setup started. Reply to each step in this channel.",
         "onboarding_setup_mode": "Should the bot create channel/roles? Reply with `create` or `existing`.",
         "onboarding_setup_done": "Onboarding setup saved. Channel: {channel}, Roles: new={new_role}, complete={complete_role}",
@@ -70,7 +72,15 @@ class WowGuildAutomation(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=980231234, force_registration=True)
         self.config.register_global(
-            bot_setup={"client_id": "", "client_secret": "", "owner_ids": []}
+            bot_setup={
+                "client_id": "",
+                "client_secret": "",
+                "owner_ids": [],
+                "default_language": "de-DE",
+                "default_region": "eu",
+                "default_version": "retail",
+                "dashboard_enabled": True,
+            }
         )
         self.config.register_guild(
             language="de-DE",
@@ -392,6 +402,26 @@ class WowGuildAutomation(commands.Cog):
         self.blizzard.client_secret = client_secret
         await ctx.send(await self._t(ctx, "botsetup_saved"))
 
+    @wow.command(name="mastersetup")
+    @commands.is_owner()
+    async def wow_mastersetup(
+        self,
+        ctx: commands.Context,
+        default_language: str = "de-DE",
+        default_region: str = "eu",
+        default_version: str = "retail",
+        dashboard_enabled: bool = True,
+    ) -> None:
+        data = await self.config.bot_setup()
+        if default_language not in ("de-DE", "en-US"):
+            default_language = "de-DE"
+        data["default_language"] = default_language
+        data["default_region"] = default_region.lower().strip()
+        data["default_version"] = default_version.lower().strip()
+        data["dashboard_enabled"] = bool(dashboard_enabled)
+        await self.config.bot_setup.set(data)
+        await ctx.send(await self._t(ctx, "master_saved"))
+
     @commands.hybrid_command(name="wow-botsetup")
     @commands.is_owner()
     async def wow_botsetup_direct(
@@ -402,6 +432,25 @@ class WowGuildAutomation(commands.Cog):
     ) -> None:
         """Slash-style alias for bot owner setup."""
         await self.wow_botsetup(ctx, client_id, client_secret)
+
+    @commands.hybrid_command(name="wow-mastersetup")
+    @commands.is_owner()
+    async def wow_mastersetup_direct(
+        self,
+        ctx: commands.Context,
+        default_language: str = "de-DE",
+        default_region: str = "eu",
+        default_version: str = "retail",
+        dashboard_enabled: bool = True,
+    ) -> None:
+        """Slash-style alias for master setup."""
+        await self.wow_mastersetup(
+            ctx,
+            default_language=default_language,
+            default_region=default_region,
+            default_version=default_version,
+            dashboard_enabled=dashboard_enabled,
+        )
 
     @wow.command(name="onboarding-setup")
     @commands.guild_only()
@@ -528,6 +577,82 @@ class WowGuildAutomation(commands.Cog):
             )
         except Exception as e:
             await ctx.send(f"Dashboard status check failed: {e}")
+
+    @_dashboard_page(name=None, description="WoW Guild Automation Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        return {
+            "status": 0,
+            "web_content": {
+                "title": "WoW Guild Automation",
+                "description": (
+                    "Available pages: global `wowguild_master` (owner) and "
+                    "guild `wowguild_automation` (server context)."
+                ),
+            },
+        }
+
+    @_dashboard_page(
+        name="wowguild_master",
+        description="Global bot master settings for WoW Guild Automation.",
+        methods=("GET", "POST"),
+        context_ids=["user_id"],
+        is_owner=True,
+        hidden=False,
+    )
+    async def dashboard_wowguild_master(
+        self,
+        user_id: int,
+        method: str,
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        _ = kwargs
+        if user_id not in self.bot.owner_ids:
+            return {"status": 1, "message": "Not allowed."}
+
+        bot_setup = await self.config.bot_setup()
+        if method.upper() == "POST":
+            payload: Dict[str, Any] = {}
+            if data:
+                payload.update(dict(data.get("json", {})))
+                payload.update(dict(data.get("form", {})))
+
+            lang = str(payload.get("default_language", bot_setup.get("default_language", "de-DE"))).strip()
+            if lang not in ("de-DE", "en-US"):
+                lang = "de-DE"
+            bot_setup["default_language"] = lang
+            bot_setup["default_region"] = str(
+                payload.get("default_region", bot_setup.get("default_region", "eu"))
+            ).strip().lower()
+            bot_setup["default_version"] = str(
+                payload.get("default_version", bot_setup.get("default_version", "retail"))
+            ).strip().lower()
+            raw_enabled = payload.get("dashboard_enabled", bot_setup.get("dashboard_enabled", True))
+            if isinstance(raw_enabled, str):
+                bot_setup["dashboard_enabled"] = raw_enabled.lower() in ("1", "true", "yes", "on")
+            else:
+                bot_setup["dashboard_enabled"] = bool(raw_enabled)
+
+            await self.config.bot_setup.set(bot_setup)
+            return {
+                "status": 0,
+                "notifications": [{"message": "WoW master settings saved.", "category": "success"}],
+            }
+
+        return {
+            "status": 0,
+            "web_content": {
+                "title": "WoW Guild Automation - Master Settings",
+                "config": bot_setup,
+                "payload_example": {
+                    "default_language": "de-DE",
+                    "default_region": "eu",
+                    "default_version": "retail",
+                    "dashboard_enabled": True,
+                },
+            },
+        }
 
     @_dashboard_page(
         name="wowguild_automation",
