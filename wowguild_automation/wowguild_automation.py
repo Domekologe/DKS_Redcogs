@@ -581,14 +581,22 @@ class WowGuildAutomation(commands.Cog):
     @_dashboard_page(name=None, description="WoW Guild Automation Dashboard")
     async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
         _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>WoW Guild Automation</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use contextual pages:</p>
+  <ul>
+    <li><b>wowguild_master</b> (bot owner/global settings)</li>
+    <li><b>wowguild_automation</b> (guild/server settings)</li>
+  </ul>
+</div>
+"""
         return {
             "status": 0,
             "web_content": {
-                "title": "WoW Guild Automation",
-                "description": (
-                    "Available pages: global `wowguild_master` (owner) and "
-                    "guild `wowguild_automation` (server context)."
-                ),
+                "source": source,
+                "standalone": True,
             },
         }
 
@@ -602,12 +610,18 @@ class WowGuildAutomation(commands.Cog):
     )
     async def dashboard_wowguild_master(
         self,
-        user_id: int,
-        method: str,
+        user_id: Optional[int] = None,
+        method: str = "GET",
         data: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         _ = kwargs
+        if user_id is None:
+            return {
+                "status": 0,
+                "error_code": 400,
+                "message": "Missing context: user_id. Open this page from a logged-in owner context.",
+            }
         if user_id not in self.bot.owner_ids:
             return {"status": 1, "message": "Not allowed."}
 
@@ -663,13 +677,19 @@ class WowGuildAutomation(commands.Cog):
     )
     async def dashboard_wowguild_automation(
         self,
-        user_id: int,
-        guild_id: int,
-        method: str,
+        user_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
+        method: str = "GET",
         data: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         _ = kwargs
+        if user_id is None or guild_id is None:
+            return {
+                "status": 0,
+                "error_code": 400,
+                "message": "Missing context: user_id/guild_id. Open this page from a server context.",
+            }
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             return {"status": 1, "message": "Guild not found."}
