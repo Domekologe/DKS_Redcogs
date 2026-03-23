@@ -86,6 +86,7 @@ class WowGuildAutomation(commands.Cog):
         )
         self.config.register_guild(
             language="de-DE",
+            active_profile_key="retail",
             features={
                 "onboarding": True,
                 "auto_verify": True,
@@ -886,11 +887,14 @@ class WowGuildAutomation(commands.Cog):
                     onboarding_channel_name = wtforms.StringField("Create Onboarding Channel Name")
                     manual_review_channel_name = wtforms.StringField("Create Manual Review Channel Name")
                     raid_guest_channel_name = wtforms.StringField("Create Raid Guest Channel Name")
+                    load_profile = wtforms.SubmitField("Load Selected Profile")
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
                 wow_profiles = cfg.get("wow_profiles", {})
-                active_key = next(iter(wow_profiles.keys()), "retail")
+                active_key = cfg.get("active_profile_key", "") or next(iter(wow_profiles.keys()), "retail")
+                if active_key not in wow_profiles and wow_profiles:
+                    active_key = next(iter(wow_profiles.keys()))
                 wow = wow_profiles.get(active_key, cfg.get("wow", {}))
                 roles = cfg.get("roles", {})
                 channels = cfg.get("channels", {})
@@ -957,6 +961,30 @@ class WowGuildAutomation(commands.Cog):
                     form.manual_review_channel_name.data = "wow-manual-review"
                     form.raid_guest_channel_name.data = "wow-raid-guests"
 
+                if form.load_profile.data:
+                    selected_key = str(form.profile_key.data or "").strip().lower()
+                    if selected_key and selected_key != "__new__" and selected_key in wow_profiles:
+                        cfg["active_profile_key"] = selected_key
+                        cfg["wow"] = wow_profiles[selected_key]
+                        await self.config.guild(guild).set(cfg)
+                        return {
+                            "status": 0,
+                            "notifications": [
+                                {"message": f"Profile `{selected_key}` loaded.", "category": "success"}
+                            ],
+                            "redirect_url": kwargs.get("request_url"),
+                        }
+                    return {
+                        "status": 0,
+                        "notifications": [
+                            {
+                                "message": "Select an existing profile to load.",
+                                "category": "warning",
+                            }
+                        ],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
                 if form.validate_on_submit():
                     cfg["language"] = form.language.data if form.language.data in ("de-DE", "en-US") else "de-DE"
                     if form.profile_key.data == "__new__":
@@ -989,6 +1017,7 @@ class WowGuildAutomation(commands.Cog):
                     cfg.setdefault("wow_profiles", {})
                     cfg["wow_profiles"][profile_key] = profile
                     # Immediately switch active profile to the selected/new one.
+                    cfg["active_profile_key"] = profile_key
                     cfg["wow"] = profile
                     cfg["onboarding"] = {
                         "welcome_text_de": str(form.welcome_text_de.data or "").strip(),
@@ -1113,6 +1142,7 @@ class WowGuildAutomation(commands.Cog):
 <div class="wow-wrap">
   <h2>WoW Guild Settings</h2>
   <p>Settings for <b>{guild.name}</b> - For the Horde/Alliance dashboard mode.</p>
+  <p><small>Active profile: <b>{cfg.get("active_profile_key", active_key)}</b></small></p>
   <form method="post">
     {form.hidden_tag()}
     <h3>Profile</h3>
@@ -1120,6 +1150,7 @@ class WowGuildAutomation(commands.Cog):
     <p><label>WoW Profile</label><br>{form.profile_key()}</p>
     <p><small>Select existing profile or choose <b>+ create new profile</b>. New profile key comes from selected version.</small></p>
     <p><label>Create New Profile For Version</label><br>{form.new_profile_version()}<br><small>Only versions without an existing profile are listed.</small></p>
+    <p>{form.load_profile()}</p>
     <p><label>Profile Region</label><br>{form.region()}<br><small>Examples: eu, us, kr, tw</small></p>
     <p><label>Profile Version</label><br>{form.version()}<br><small>Used for onboarding game selection.</small></p>
     <p><label>Realm</label><br>{form.realm()}<br><small>Example: blackmoore</small></p>
