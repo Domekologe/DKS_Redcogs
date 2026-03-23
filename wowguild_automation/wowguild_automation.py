@@ -93,6 +93,13 @@ class WowGuildAutomation(commands.Cog):
                 "sync_rank": True,
             },
             wow={"region": "eu", "version": "retail", "realm": "", "guild_name": ""},
+            wow_profiles={
+                "retail": {"region": "eu", "version": "retail", "realm": "", "guild_name": ""}
+            },
+            onboarding={
+                "welcome_text_de": "Willkommen beim Onboarding!",
+                "welcome_text_en": "Welcome to onboarding!",
+            },
             roles={
                 "guest_role_id": 0,
                 "member_role_id": 0,
@@ -109,7 +116,9 @@ class WowGuildAutomation(commands.Cog):
                 "manual_verification": "Manuelle Verifizierung nötig! User {username} hat sich gemeldet als Char {charname} und möchte Gildenrechte erhalten. Bitte bestätigen sie dies manuell."
             },
         )
-        self.config.register_member(chars=[], ready_times={}, onboarding_language="de-DE")
+        self.config.register_member(
+            chars=[], ready_times={}, onboarding_language="de-DE", selected_game="retail"
+        )
         self.blizzard = BlizzardService()
         self.rank_sync = RankSyncService(self.blizzard)
         self._dashboard_attached = False
@@ -143,7 +152,15 @@ class WowGuildAutomation(commands.Cog):
         self._dashboard_attached = False
 
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
-        return await self.config.guild(guild).all()
+        cfg = await self.config.guild(guild).all()
+        wow_profiles = cfg.get("wow_profiles", {})
+        if not wow_profiles:
+            wow_single = cfg.get("wow", {})
+            version_key = wow_single.get("version", "retail") or "retail"
+            wow_profiles = {version_key: wow_single}
+            cfg["wow_profiles"] = wow_profiles
+            await self.config.guild(guild).set(cfg)
+        return cfg
 
     async def _lang(self, ctx: commands.Context) -> str:
         if isinstance(ctx.author, discord.Member):
@@ -220,14 +237,19 @@ class WowGuildAutomation(commands.Cog):
         if manual_channel and not isinstance(manual_channel, discord.TextChannel):
             manual_channel = None
 
-        chosen_lang = await handle_new_member_onboarding(
+        onboarding_result = await handle_new_member_onboarding(
             bot=self.bot,
             member=member,
             guild_config=guild_cfg,
             rank_sync=self.rank_sync,
             manual_channel=manual_channel,  # type: ignore[arg-type]
         )
+        chosen_lang = onboarding_result
+        selected_game = "retail"
+        if "|" in onboarding_result:
+            chosen_lang, selected_game = onboarding_result.split("|", 1)
         await self.config.member(member).onboarding_language.set(chosen_lang)
+        await self.config.member(member).selected_game.set(selected_game)
 
         complete_role_id = guild_cfg.get("roles", {}).get("onboarding_complete_role_id", 0)
         if complete_role_id:
@@ -289,15 +311,19 @@ class WowGuildAutomation(commands.Cog):
             await ctx.send(await self._t(ctx, "server_only"))
             return
 
-        await self.config.guild(ctx.guild).language.set(language)
-        await self.config.guild(ctx.guild).wow.set(
-            {
-                "region": region.lower().strip(),
-                "version": version.lower().strip(),
-                "realm": realm.strip(),
-                "guild_name": guildname.strip(),
-            }
-        )
+        cfg = await self._guild_config(ctx.guild)
+        cfg["language"] = language if language in ("de-DE", "en-US") else "de-DE"
+        version_key = version.lower().strip()
+        profile = {
+            "region": region.lower().strip(),
+            "version": version_key,
+            "realm": realm.strip(),
+            "guild_name": guildname.strip(),
+        }
+        cfg.setdefault("wow_profiles", {})
+        cfg["wow_profiles"][version_key] = profile
+        cfg["wow"] = profile
+        await self.config.guild(ctx.guild).set(cfg)
         await ctx.send(
             await self._t(
                 ctx,
@@ -373,6 +399,11 @@ class WowGuildAutomation(commands.Cog):
             return
 
         cfg = await self._guild_config(ctx.guild)
+        selected_game = await self.config.member(ctx.author).selected_game()
+        wow_profiles = cfg.get("wow_profiles", {})
+        if selected_game in wow_profiles:
+            cfg = dict(cfg)
+            cfg["wow"] = wow_profiles[selected_game]
         rank = await self.rank_sync.sync_member_rank(ctx.author, cfg, mainchar)
         if rank:
             await ctx.send(await self._t(ctx, "rank_synced", rank=rank))
@@ -629,33 +660,75 @@ class WowGuildAutomation(commands.Cog):
                 return {"status": 1, "message": "Not allowed."}
 
             bot_setup = await self.config.bot_setup()
-            if method.upper() == "POST":
-                payload: Dict[str, Any] = {}
-                if data:
-                    payload.update(dict(data.get("json", {})))
-                    payload.update(dict(data.get("form", {})))
+            Form = kwargs.get("Form")
+            if Form is not None:
+                import wtforms
 
-                lang = str(payload.get("default_language", bot_setup.get("default_language", "de-DE"))).strip()
-                if lang not in ("de-DE", "en-US"):
-                    lang = "de-DE"
-                bot_setup["default_language"] = lang
-                bot_setup["default_region"] = str(
-                    payload.get("default_region", bot_setup.get("default_region", "eu"))
-                ).strip().lower()
-                bot_setup["default_version"] = str(
-                    payload.get("default_version", bot_setup.get("default_version", "retail"))
-                ).strip().lower()
-                raw_enabled = payload.get("dashboard_enabled", bot_setup.get("dashboard_enabled", True))
-                if isinstance(raw_enabled, str):
-                    bot_setup["dashboard_enabled"] = raw_enabled.lower() in ("1", "true", "yes", "on")
-                else:
-                    bot_setup["dashboard_enabled"] = bool(raw_enabled)
+                class MasterForm(Form):
+                    def __init__(_self) -> None:
+                        super().__init__(prefix="master_")
 
-                await self.config.bot_setup.set(bot_setup)
-                return {
-                    "status": 0,
-                    "notifications": [{"message": "WoW master settings saved.", "category": "success"}],
-                }
+                    client_id = wtforms.StringField("Blizzard Client ID")
+                    client_secret = wtforms.StringField("Blizzard Client Secret")
+                    default_language = wtforms.SelectField(
+                        "Default Language",
+                        choices=[("de-DE", "de-DE"), ("en-US", "en-US")],
+                        validators=[wtforms.validators.DataRequired()],
+                    )
+                    default_region = wtforms.StringField(
+                        "Default Region", validators=[wtforms.validators.DataRequired()]
+                    )
+                    default_version = wtforms.StringField(
+                        "Default Version", validators=[wtforms.validators.DataRequired()]
+                    )
+                    dashboard_enabled = wtforms.BooleanField("Dashboard Enabled")
+                    submit = wtforms.SubmitField("Save Master Settings")
+
+                form = MasterForm()
+                if method.upper() == "GET":
+                    form.client_id.data = bot_setup.get("client_id", "")
+                    form.client_secret.data = bot_setup.get("client_secret", "")
+                    form.default_language.data = bot_setup.get("default_language", "de-DE")
+                    form.default_region.data = bot_setup.get("default_region", "eu")
+                    form.default_version.data = bot_setup.get("default_version", "retail")
+                    form.dashboard_enabled.data = bool(bot_setup.get("dashboard_enabled", True))
+
+                if form.validate_on_submit():
+                    lang = str(form.default_language.data).strip()
+                    if lang not in ("de-DE", "en-US"):
+                        lang = "de-DE"
+                    bot_setup["client_id"] = str(form.client_id.data or "").strip()
+                    bot_setup["client_secret"] = str(form.client_secret.data or "").strip()
+                    bot_setup["default_language"] = lang
+                    bot_setup["default_region"] = str(form.default_region.data).strip().lower()
+                    bot_setup["default_version"] = str(form.default_version.data).strip().lower()
+                    bot_setup["dashboard_enabled"] = bool(form.dashboard_enabled.data)
+                    await self.config.bot_setup.set(bot_setup)
+                    self.blizzard.client_id = bot_setup["client_id"]
+                    self.blizzard.client_secret = bot_setup["client_secret"]
+                    return {
+                        "status": 0,
+                        "notifications": [{"message": "WoW master settings saved.", "category": "success"}],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
+                source = f"""
+<div style="padding:12px;">
+  <h2>WoW Master Settings</h2>
+  <p>Global defaults for all guild instances.</p>
+  <form method="post">
+    {form.hidden_tag()}
+    <p><label>Default Language</label><br>{form.default_language()}</p>
+    <p><label>Blizzard Client ID</label><br>{form.client_id()}</p>
+    <p><label>Blizzard Client Secret</label><br>{form.client_secret()}</p>
+    <p><label>Default Region</label><br>{form.default_region()}</p>
+    <p><label>Default Version</label><br>{form.default_version()}</p>
+    <p><label>{form.dashboard_enabled()} Dashboard Enabled</label></p>
+    <p>{form.submit()}</p>
+  </form>
+</div>
+"""
+                return {"status": 0, "web_content": {"source": source, "standalone": True}}
 
             return {
                 "status": 0,
@@ -719,56 +792,139 @@ class WowGuildAutomation(commands.Cog):
                 return {"status": 1, "message": "Not allowed."}
 
             cfg = await self._guild_config(guild)
-            if method.upper() == "POST":
-                payload: Dict[str, Any] = {}
-                if data:
-                    payload.update(dict(data.get("json", {})))
-                    payload.update(dict(data.get("form", {})))
+            Form = kwargs.get("Form")
+            if Form is not None:
+                import wtforms
 
-                def to_int(value: Any, default: int = 0) -> int:
-                    try:
-                        return int(value)
-                    except Exception:
-                        return default
+                class GuildForm(Form):
+                    def __init__(_self) -> None:
+                        super().__init__(prefix="guild_")
 
-                language = str(payload.get("language", cfg.get("language", "de-DE"))).strip()
-                if language not in ("de-DE", "en-US"):
-                    language = "de-DE"
-                cfg["language"] = language
+                    language = wtforms.SelectField(
+                        "Language", choices=[("de-DE", "de-DE"), ("en-US", "en-US")]
+                    )
+                    profile_key = wtforms.SelectField("WoW Profile")
+                    region = wtforms.StringField("Profile Region")
+                    version = wtforms.StringField("Profile Version")
+                    realm = wtforms.StringField("Realm")
+                    guild_name = wtforms.StringField("Guild Name")
+                    welcome_text_de = wtforms.StringField("Onboarding Text DE")
+                    welcome_text_en = wtforms.StringField("Onboarding Text EN")
+                    guest_role_id = wtforms.SelectField("Guest Role")
+                    member_role_id = wtforms.SelectField("Member Role")
+                    onboarding_new_role_id = wtforms.SelectField("Onboarding New Role")
+                    onboarding_complete_role_id = wtforms.SelectField("Onboarding Complete Role")
+                    onboarding_channel_id = wtforms.SelectField("Onboarding Channel")
+                    manual_review_channel_id = wtforms.SelectField("Manual Review Channel")
+                    raid_guest_channel_id = wtforms.SelectField("Raid Guest Channel")
+                    submit = wtforms.SubmitField("Save Guild Settings")
 
-                wow = cfg.get("wow", {})
-                wow["region"] = str(payload.get("region", wow.get("region", "eu"))).strip().lower()
-                wow["version"] = str(payload.get("version", wow.get("version", "retail"))).strip().lower()
-                wow["realm"] = str(payload.get("realm", wow.get("realm", ""))).strip()
-                wow["guild_name"] = str(payload.get("guild_name", wow.get("guild_name", ""))).strip()
-                cfg["wow"] = wow
-
+                form = GuildForm()
+                wow_profiles = cfg.get("wow_profiles", {})
+                active_key = next(iter(wow_profiles.keys()), "retail")
+                wow = wow_profiles.get(active_key, cfg.get("wow", {}))
                 roles = cfg.get("roles", {})
-                roles["guest_role_id"] = to_int(payload.get("guest_role_id", roles.get("guest_role_id", 0)))
-                roles["member_role_id"] = to_int(payload.get("member_role_id", roles.get("member_role_id", 0)))
-                roles["onboarding_new_role_id"] = to_int(
-                    payload.get("onboarding_new_role_id", roles.get("onboarding_new_role_id", 0))
-                )
-                roles["onboarding_complete_role_id"] = to_int(
-                    payload.get("onboarding_complete_role_id", roles.get("onboarding_complete_role_id", 0))
-                )
-                cfg["roles"] = roles
-
                 channels = cfg.get("channels", {})
-                channels["onboarding_channel_id"] = to_int(
-                    payload.get("onboarding_channel_id", channels.get("onboarding_channel_id", 0))
-                )
-                channels["manual_review_channel_id"] = to_int(
-                    payload.get("manual_review_channel_id", channels.get("manual_review_channel_id", 0))
-                )
-                channels["raid_guest_channel_id"] = to_int(
-                    payload.get("raid_guest_channel_id", channels.get("raid_guest_channel_id", 0))
-                )
-                cfg["channels"] = channels
+                onboarding = cfg.get("onboarding", {})
+                role_choices = [("0", "-- none --")] + [
+                    (str(role.id), role.name) for role in sorted(guild.roles, key=lambda r: r.position, reverse=True)
+                ]
+                channel_choices = [("0", "-- none --")] + [
+                    (str(channel.id), f"#{channel.name}") for channel in guild.text_channels
+                ]
+                profile_choices = [(k, k) for k in sorted(wow_profiles.keys())] or [("retail", "retail")]
+                form.profile_key.choices = profile_choices + [("__new__", "+ create new profile")]
+                form.guest_role_id.choices = role_choices
+                form.member_role_id.choices = role_choices
+                form.onboarding_new_role_id.choices = role_choices
+                form.onboarding_complete_role_id.choices = role_choices
+                form.onboarding_channel_id.choices = channel_choices
+                form.manual_review_channel_id.choices = channel_choices
+                form.raid_guest_channel_id.choices = channel_choices
+                if method.upper() == "GET":
+                    form.language.data = cfg.get("language", "de-DE")
+                    form.profile_key.data = active_key
+                    form.region.data = wow.get("region", "eu")
+                    form.version.data = wow.get("version", "retail")
+                    form.realm.data = wow.get("realm", "")
+                    form.guild_name.data = wow.get("guild_name", "")
+                    form.welcome_text_de.data = onboarding.get("welcome_text_de", "")
+                    form.welcome_text_en.data = onboarding.get("welcome_text_en", "")
+                    form.guest_role_id.data = str(roles.get("guest_role_id", 0))
+                    form.member_role_id.data = str(roles.get("member_role_id", 0))
+                    form.onboarding_new_role_id.data = str(roles.get("onboarding_new_role_id", 0))
+                    form.onboarding_complete_role_id.data = str(roles.get("onboarding_complete_role_id", 0))
+                    form.onboarding_channel_id.data = str(channels.get("onboarding_channel_id", 0))
+                    form.manual_review_channel_id.data = str(channels.get("manual_review_channel_id", 0))
+                    form.raid_guest_channel_id.data = str(channels.get("raid_guest_channel_id", 0))
 
-                await self.config.guild(guild).set(cfg)
-                await self._apply_onboarding_channel_permissions(guild)
-                return {"status": 0, "notifications": [{"message": "WoW settings saved.", "category": "success"}]}
+                if form.validate_on_submit():
+                    cfg["language"] = form.language.data if form.language.data in ("de-DE", "en-US") else "de-DE"
+                    if form.profile_key.data == "__new__":
+                        profile_key = str(form.version.data or "retail").strip().lower()
+                    else:
+                        profile_key = str(form.profile_key.data or form.version.data or "retail").strip().lower()
+                    profile = {
+                        "region": str(form.region.data or "eu").strip().lower(),
+                        "version": str(form.version.data or profile_key or "retail").strip().lower(),
+                        "realm": str(form.realm.data or "").strip(),
+                        "guild_name": str(form.guild_name.data or "").strip(),
+                    }
+                    cfg.setdefault("wow_profiles", {})
+                    cfg["wow_profiles"][profile_key] = profile
+                    cfg["wow"] = profile
+                    cfg["onboarding"] = {
+                        "welcome_text_de": str(form.welcome_text_de.data or "").strip(),
+                        "welcome_text_en": str(form.welcome_text_en.data or "").strip(),
+                    }
+                    cfg["roles"] = {
+                        "guest_role_id": int(form.guest_role_id.data or 0),
+                        "member_role_id": int(form.member_role_id.data or 0),
+                        "onboarding_new_role_id": int(form.onboarding_new_role_id.data or 0),
+                        "onboarding_complete_role_id": int(form.onboarding_complete_role_id.data or 0),
+                    }
+                    cfg["channels"] = {
+                        "onboarding_channel_id": int(form.onboarding_channel_id.data or 0),
+                        "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
+                        "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
+                    }
+                    await self.config.guild(guild).set(cfg)
+                    await self._apply_onboarding_channel_permissions(guild)
+                    return {
+                        "status": 0,
+                        "notifications": [{"message": "WoW guild settings saved.", "category": "success"}],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
+                source = f"""
+<div style="padding:12px;">
+  <h2>WoW Guild Settings</h2>
+  <p>Settings for <b>{guild.name}</b>.</p>
+  <form method="post">
+    {form.hidden_tag()}
+    <p><label>Language</label><br>{form.language()}</p>
+    <p><label>WoW Profile</label><br>{form.profile_key()}</p>
+    <p><small>Select existing profile or choose <b>+ create new profile</b> and set version.</small></p>
+    <p><label>Profile Region</label><br>{form.region()}</p>
+    <p><label>Profile Version</label><br>{form.version()}</p>
+    <p><label>Realm</label><br>{form.realm()}</p>
+    <p><label>Guild Name</label><br>{form.guild_name()}</p>
+    <p><label>Onboarding Text DE</label><br>{form.welcome_text_de()}</p>
+    <p><label>Onboarding Text EN</label><br>{form.welcome_text_en()}</p>
+    <hr>
+    <p><label>Guest Role</label><br>{form.guest_role_id()}</p>
+    <p><label>Member Role</label><br>{form.member_role_id()}</p>
+    <p><label>Onboarding New Role</label><br>{form.onboarding_new_role_id()}</p>
+    <p><label>Onboarding Complete Role</label><br>{form.onboarding_complete_role_id()}</p>
+    <hr>
+    <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}</p>
+    <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}</p>
+    <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}</p>
+    <p>{form.submit()}</p>
+  </form>
+</div>
+"""
+                return {"status": 0, "web_content": {"source": source, "standalone": True}}
 
             return {
                 "status": 0,

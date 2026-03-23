@@ -12,6 +12,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "role_prompt": "Bist du **Gast** oder **neues Gildenmitglied**? Antworte mit `gast` oder `mitglied`.",
         "guest_done": "Du wurdest als Gast markiert. Bitte lies trotzdem die Regeln und bestaetige sie.",
         "mainchar_prompt": "Bitte nenne deinen Mainchar Namen.",
+        "game_prompt": "Fuer welches WoW-Spiel meldest du dich an? Verfuegbar: {games}.",
         "mainchar_timeout": "Kein Mainchar erhalten, Onboarding beendet.",
         "verified": "Verifizierung erfolgreich. Mainchar `{main}` gefunden, Ingame-Rang `{rank}`.",
         "manual": "Automatische Verifizierung nicht moeglich. Das Team wurde fuer manuelle Pruefung benachrichtigt.",
@@ -23,6 +24,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "role_prompt": "Are you a **guest** or a **new guild member**? Reply with `guest` or `member`.",
         "guest_done": "You are marked as a guest. Please still read and confirm the server rules.",
         "mainchar_prompt": "Please send your main character name.",
+        "game_prompt": "Which WoW game are you signing up for? Available: {games}.",
         "mainchar_timeout": "No main character received, onboarding cancelled.",
         "verified": "Verification successful. Main character `{main}` found, ingame rank `{rank}`.",
         "manual": "Automatic verification failed. The team was notified for manual review.",
@@ -40,6 +42,11 @@ async def handle_new_member_onboarding(
 ) -> str:
     # Onboarding in DM to keep answers private.
     dm = await member.create_dm()
+    onboarding_cfg = guild_config.get("onboarding", {})
+    if onboarding_cfg.get("welcome_text_de") or onboarding_cfg.get("welcome_text_en"):
+        await dm.send(
+            (onboarding_cfg.get("welcome_text_de", "") + "\n" + onboarding_cfg.get("welcome_text_en", "")).strip()
+        )
 
     def check(message: discord.Message) -> bool:
         return message.author.id == member.id and isinstance(message.channel, discord.DMChannel)
@@ -73,6 +80,23 @@ async def handle_new_member_onboarding(
         await dm.send(t["guest_done"])
         return lang
 
+    wow_profiles = guild_config.get("wow_profiles", {})
+    if not wow_profiles:
+        wow_single = guild_config.get("wow", {})
+        wow_profiles = {wow_single.get("version", "retail"): wow_single}
+    game_keys = list(wow_profiles.keys())
+    selected_game = game_keys[0] if game_keys else "retail"
+    await dm.send(t["game_prompt"].format(games=", ".join(game_keys)))
+    try:
+        game_reply = await bot.wait_for("message", check=check, timeout=180)
+        candidate = game_reply.content.strip().lower()
+        for key in game_keys:
+            if candidate == key.lower():
+                selected_game = key
+                break
+    except Exception:
+        pass
+
     await dm.send(t["mainchar_prompt"])
     try:
         char_reply = await bot.wait_for("message", check=check, timeout=300)
@@ -81,7 +105,10 @@ async def handle_new_member_onboarding(
         return lang
 
     main_char = char_reply.content.strip()
-    rank = await rank_sync.sync_member_rank(member, guild_config, main_char)
+    selected_wow = wow_profiles.get(selected_game, {})
+    selected_cfg = dict(guild_config)
+    selected_cfg["wow"] = selected_wow
+    rank = await rank_sync.sync_member_rank(member, selected_cfg, main_char)
     if rank:
         if member_role and member_role not in member.roles:
             await member.add_roles(member_role, reason="WoW onboarding: verified guild member")
@@ -98,5 +125,5 @@ async def handle_new_member_onboarding(
         await dm.send(t["manual"])
 
     await dm.send(t["rules"])
-    return lang
+    return f"{lang}|{selected_game}"
 
