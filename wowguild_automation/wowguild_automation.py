@@ -102,6 +102,34 @@ class WowGuildAutomation(commands.Cog):
         self.rank_sync = RankSyncService(self.blizzard)
         self._dashboard_attached = False
 
+    def _attach_to_dashboard(self, dashboard_cog: commands.Cog) -> bool:
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            return True
+        except TypeError:
+            # Backward compatibility for Dashboard versions without overwrite kwarg.
+            try:
+                dashboard_cog.rpc.third_parties_handler.add_third_party(self)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    async def cog_load(self) -> None:
+        dashboard_cog = self.bot.get_cog("Dashboard")
+        if dashboard_cog is not None:
+            self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
+
+    async def cog_unload(self) -> None:
+        dashboard_cog = self.bot.get_cog("Dashboard")
+        if dashboard_cog is not None:
+            try:
+                dashboard_cog.rpc.third_parties_handler.remove_third_party(self)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        self._dashboard_attached = False
+
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
         return await self.config.guild(guild).all()
 
@@ -135,11 +163,7 @@ class WowGuildAutomation(commands.Cog):
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
         if self._dashboard_attached:
             return
-        try:
-            dashboard_cog.rpc.third_parties_handler.add_third_party(self)  # type: ignore[attr-defined]
-            self._dashboard_attached = True
-        except Exception:
-            self._dashboard_attached = False
+        self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
 
     @commands.Cog.listener()
     async def on_dashboard_cog_remove(self, dashboard_cog: commands.Cog) -> None:
@@ -478,8 +502,24 @@ class WowGuildAutomation(commands.Cog):
         """Slash-style alias for onboarding setup wizard."""
         await self.wow_onboarding_setup(ctx)
 
+    @wow.command(name="dashboard-status")
+    @commands.is_owner()
+    async def wow_dashboard_status(self, ctx: commands.Context) -> None:
+        dashboard_cog = self.bot.get_cog("Dashboard")
+        if dashboard_cog is None:
+            await ctx.send("Dashboard cog is not loaded.")
+            return
+        try:
+            third_parties = dashboard_cog.rpc.third_parties_handler.third_parties  # type: ignore[attr-defined]
+            names = sorted(third_parties.keys())
+            await ctx.send(
+                f"Dashboard loaded: yes | attached: {self._dashboard_attached} | third parties: {', '.join(names) if names else 'none'}"
+            )
+        except Exception as e:
+            await ctx.send(f"Dashboard status check failed: {e}")
+
     @_dashboard_page(
-        name="wowguild-automation",
+        name="wowguild_automation",
         description="Configure WoW Guild Automation for this server.",
         methods=("GET", "POST"),
         context_ids=["user_id", "guild_id"],
