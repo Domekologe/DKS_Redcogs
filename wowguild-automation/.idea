@@ -9,13 +9,17 @@ Idee:
 
 - Event wird erstellt
     ├─ Owner vom Event (bei Raidhelper abfragen wer Owner ist da es nicht der Raidhelper Bot ist) wird benachricht wer theoretisch Zeit hat an den Tagen
+
+
+Es soll ein Onbarding Channel geben wo die ghejoined User in einer Privatnachricht angeschrieben werden. Darin sollen die dann bestimmte Tasks erfüllen für das Onbarding.
+WICHTIG! Die User sollen nicht normal in den CHat schreiben können!
     
 Structure:
 
 wowguild-automation/
   ├─ __init__.py
-  ├─ information.json
-  ├─ wowguild-automation.py
+  ├─ info.json
+  ├─ wowguild_automation.py
   └─ locales/
         ├─ en-US.json -- default language
         └─ de-DE.json -- for german servers
@@ -29,7 +33,7 @@ wowguild-automation/
         ├─ blizzard.py -- Commands (per Discord Server) for: /wow-guildsettings <Region: Autocomplete> <Version: Classic|Retail> <Server: Autocomplete> <Guildname: String>
         ├─ admin.py -- Commands (Bot Owner): /wow-botsetup <ClientID> <ClientSecret>
   └─ automation/ -- core-commands
-        ├─ new-user.py -- What will be done when a new User join
+        ├─ new_user.py -- What will be done when a new User join
 
 
 Commands:
@@ -38,3 +42,21 @@ Commands:
 /wow-chars -- Anzeigen der verlinkten Chars, Hinzufügen und löschen von Chars zu seinem Account
 /wow-botsetup -- Setzen der API Einstellungen (nur für den Bot Owner)
 /wow-syncrank -- Syncen des Charhöchsten Ranges mit dem DC Rang
+
+
+Eine Funktion soll ebenfalls sein: Gildenmitglied, automatisch oder Per Manuellem Task
+    Bei Automatisch = Charlink erforderlich. Wichtig dabei ist auch dass der Name des Mainchars im Namen des Users vorkommen MUSS
+    Bei Manuell = Bot fragt beim User nach dem Char. In einem Ausgewähltem Channel (Setup für Botnachrichten) wird eine Nachricht erstellt a la Template wie
+        "Manuelle Verifizierung nötig! User {username} hat sich gemeldet als Char {charname} und möchte Gildenrechte erhalten. Bitte bestätigen sie dies manuell"
+    
+Wichtig ist dass der Bot EGAL bei der Wahl ob Gilde oder Gast, nochmal darauf hinweist dass der User die Regeln lesen muss und bestätigen muss mit dem Emoji
+
+
+
+Also das wichtigste man zusammengefasst, wie es am ende aussieht überlasse ich Dir.
+Man muss den Bot einstellen können mit DC befehlen (auch den jeweiligen Text, da eventuell ein help command für die Platzhalter die man nutzen kann)
+Wenn einer Joint, soll der ein Onboard bekommen. Die Nachrichten darin sollen Privat sein, nur für den User sichtbar. Die einzelnen Steps nutzen die gleichen Chats.
+Er soll eine Möglichkeit haben sich zu verifizieren. Wenn er nur für einen Raid da ist, reicht es wenn er in einen definierten Channel geht wo er gezogen wird.
+Was beim Setup wichtig ist, das man alles einstellen kann. Es soll 2 Setups geben: EInmal Botsetup für den Server, einmal Botsetup für das ganze Konstrukt. Das ganze Konstrukt soll nur vom Bot Admin gesteuert werden dürfen.
+
+Und vielleicht fallen dir noch einige Sachen ein (wie einbau in das Webinterface von Redcog Dashboard oder sowas)
