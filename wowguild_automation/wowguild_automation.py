@@ -189,6 +189,22 @@ class WowGuildAutomation(commands.Cog):
             return None
         return msg.content.strip()
 
+    async def _send_private_ack(self, ctx: commands.Context, message: str) -> None:
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is not None:
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(message, ephemeral=True)
+                else:
+                    await interaction.followup.send(message, ephemeral=True)
+                return
+            except Exception:
+                pass
+        try:
+            await ctx.author.send(message)
+        except Exception:
+            await ctx.send(message)
+
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
         if self._dashboard_attached:
@@ -215,7 +231,7 @@ class WowGuildAutomation(commands.Cog):
 
         await channel.set_permissions(guild.default_role, view_channel=False, send_messages=False)
         if new_role:
-            await channel.set_permissions(new_role, view_channel=True, send_messages=True)
+            await channel.set_permissions(new_role, view_channel=True, send_messages=False)
         if complete_role:
             await channel.set_permissions(complete_role, view_channel=False, send_messages=False)
 
@@ -234,6 +250,12 @@ class WowGuildAutomation(commands.Cog):
         manual_channel = member.guild.get_channel(manual_channel_id) if manual_channel_id else None
         if manual_channel and not isinstance(manual_channel, discord.TextChannel):
             manual_channel = None
+        onboarding_channel_id = guild_cfg.get("channels", {}).get("onboarding_channel_id", 0)
+        onboarding_channel = (
+            member.guild.get_channel(onboarding_channel_id) if onboarding_channel_id else None
+        )
+        if onboarding_channel and not isinstance(onboarding_channel, discord.TextChannel):
+            onboarding_channel = None
 
         onboarding_result = await handle_new_member_onboarding(
             bot=self.bot,
@@ -241,6 +263,7 @@ class WowGuildAutomation(commands.Cog):
             guild_config=guild_cfg,
             rank_sync=self.rank_sync,
             manual_channel=manual_channel,  # type: ignore[arg-type]
+            onboarding_channel=onboarding_channel,  # type: ignore[arg-type]
         )
         chosen_lang = onboarding_result
         selected_game = "retail"
@@ -590,9 +613,9 @@ class WowGuildAutomation(commands.Cog):
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_simulate_join(self, ctx: commands.Context, member: discord.Member) -> None:
-        await ctx.send(f"Simuliere Join-Onboarding fuer {member.mention}...")
+        await self._send_private_ack(ctx, f"Simuliere Join-Onboarding fuer {member.mention}...")
         await self._run_onboarding_flow(member)
-        await ctx.send("Simulation abgeschlossen.")
+        await self._send_private_ack(ctx, "Simulation abgeschlossen.")
 
     @commands.hybrid_command(name="wow-simulate-join")
     @commands.guild_only()
