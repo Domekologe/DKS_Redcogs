@@ -1,6 +1,8 @@
 from typing import Any, Dict, Optional
 import json
 import traceback
+import asyncio
+from datetime import datetime, timezone
 
 import discord
 from redbot.core import Config, commands
@@ -118,7 +120,12 @@ class WowGuildAutomation(commands.Cog):
             },
         )
         self.config.register_member(
-            chars=[], ready_times={}, onboarding_language="de-DE", selected_game="retail"
+            chars=[],
+            ready_times={},
+            onboarding_language="de-DE",
+            selected_game="retail",
+            registration={},
+            onboarding_session_id="",
         )
         self.blizzard = BlizzardService()
         self.rank_sync = RankSyncService(self.blizzard)
@@ -235,10 +242,12 @@ class WowGuildAutomation(commands.Cog):
         if complete_role:
             await channel.set_permissions(complete_role, view_channel=False, send_messages=False)
 
-    async def _run_onboarding_flow(self, member: discord.Member) -> None:
+    async def _run_onboarding_flow(self, member: discord.Member, simulated: bool = False) -> None:
         guild_cfg = await self._guild_config(member.guild)
         if not guild_cfg.get("features", {}).get("onboarding", True):
             return
+        session_id = f"{datetime.now(timezone.utc).timestamp()}:{member.guild.id}:{member.id}"
+        await self.config.member(member).onboarding_session_id.set(session_id)
 
         new_role_id = guild_cfg.get("roles", {}).get("onboarding_new_role_id", 0)
         if new_role_id:
@@ -265,27 +274,51 @@ class WowGuildAutomation(commands.Cog):
             manual_channel=manual_channel,  # type: ignore[arg-type]
             onboarding_channel=onboarding_channel,  # type: ignore[arg-type]
         )
-        chosen_lang = onboarding_result
-        selected_game = "retail"
-        if "|" in onboarding_result:
-            chosen_lang, selected_game = onboarding_result.split("|", 1)
+        chosen_lang = onboarding_result.get("language", "de-DE")
+        selected_game = onboarding_result.get("selected_game", "retail")
+        registration = onboarding_result.get("registration", {})
+        registration["registered_at"] = datetime.now(timezone.utc).isoformat()
+        rules_confirmed = bool(registration.get("rules_confirmed", False))
         await self.config.member(member).onboarding_language.set(chosen_lang)
         await self.config.member(member).selected_game.set(selected_game)
+        await self.config.member(member).registration.set(registration)
 
         complete_role_id = guild_cfg.get("roles", {}).get("onboarding_complete_role_id", 0)
-        if complete_role_id:
+        if complete_role_id and rules_confirmed:
             complete_role = member.guild.get_role(complete_role_id)
             if complete_role and complete_role not in member.roles:
                 await member.add_roles(complete_role, reason="Onboarding completed")
 
-        if new_role_id:
+        if new_role_id and rules_confirmed:
             new_role = member.guild.get_role(new_role_id)
             if new_role and new_role in member.roles:
                 await member.remove_roles(new_role, reason="Onboarding completed")
 
+        if not rules_confirmed and not simulated:
+            asyncio.create_task(self._send_rules_reminder_later(member, session_id))
+
+    async def _send_rules_reminder_later(
+        self, member: discord.Member, session_id: str, delay_seconds: int = 1800
+    ) -> None:
+        await asyncio.sleep(delay_seconds)
+        # Only remind for the same fresh onboarding session.
+        current_session = await self.config.member(member).onboarding_session_id()
+        if current_session != session_id:
+            return
+        registration = await self.config.member(member).registration()
+        if registration.get("rules_confirmed", False):
+            return
+        try:
+            dm = await member.create_dm()
+            await dm.send(
+                "Erinnerung: Bitte bestaetige noch die Serverregeln, damit dein Onboarding abgeschlossen wird."
+            )
+        except Exception:
+            pass
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        await self._run_onboarding_flow(member)
+        await self._run_onboarding_flow(member, simulated=False)
 
     @commands.hybrid_group(name="wow")
     @commands.guild_only()
@@ -614,7 +647,7 @@ class WowGuildAutomation(commands.Cog):
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_simulate_join(self, ctx: commands.Context, member: discord.Member) -> None:
         await self._send_private_ack(ctx, f"Simuliere Join-Onboarding fuer {member.mention}...")
-        await self._run_onboarding_flow(member)
+        await self._run_onboarding_flow(member, simulated=True)
         await self._send_private_ack(ctx, "Simulation abgeschlossen.")
 
     @commands.hybrid_command(name="wow-simulate-join")
@@ -623,6 +656,42 @@ class WowGuildAutomation(commands.Cog):
     async def wow_simulate_join_direct(self, ctx: commands.Context, member: discord.Member) -> None:
         """Slash-style alias to simulate a member join onboarding."""
         await self.wow_simulate_join(ctx, member)
+
+    @wow.command(name="registrations")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_registrations(self, ctx: commands.Context) -> None:
+        if not ctx.guild:
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        all_members = await self.config.all_members(ctx.guild)
+        lines = []
+        for member_id, payload in all_members.items():
+            reg = payload.get("registration", {})
+            if not reg:
+                continue
+            user = ctx.guild.get_member(int(member_id))
+            user_label = user.mention if user else f"<@{member_id}>"
+            reg_at = reg.get("registered_at", "-")
+            game = payload.get("selected_game", "retail")
+            reg_type = reg.get("type", "unknown")
+            char_name = reg.get("char_name", "")
+            details = f"{user_label} - {reg_at} - {game} - {reg_type}"
+            if reg_type == "member" and char_name:
+                details += f" ({char_name})"
+            lines.append(details)
+        if not lines:
+            await ctx.send("Keine Registrierungen vorhanden.")
+            return
+        message = "Registrierungen:\n" + "\n".join(f"- {line}" for line in lines[:100])
+        await ctx.send(message)
+
+    @commands.hybrid_command(name="wow-registrations")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_registrations_direct(self, ctx: commands.Context) -> None:
+        """Slash-style alias for registration list."""
+        await self.wow_registrations(ctx)
 
     @wow.command(name="dashboard-status")
     @commands.is_owner()
@@ -902,6 +971,8 @@ class WowGuildAutomation(commands.Cog):
                     create_raid_guest_channel = wtforms.BooleanField(
                         "Create Raid Guest Channel if missing"
                     )
+                    rule_channel_id = wtforms.SelectField("Rules Channel")
+                    rule_emoji = wtforms.StringField("Rules Confirmation Emoji")
                     target_category_id = wtforms.SelectField("Target Category for new channels")
                     guest_role_name = wtforms.StringField("Create Guest Role Name")
                     member_role_name = wtforms.StringField("Create Member Role Name")
@@ -948,6 +1019,7 @@ class WowGuildAutomation(commands.Cog):
                 form.onboarding_channel_id.choices = channel_choices
                 form.manual_review_channel_id.choices = channel_choices
                 form.raid_guest_channel_id.choices = channel_choices
+                form.rule_channel_id.choices = channel_choices
                 form.target_category_id.choices = category_choices
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
@@ -968,6 +1040,9 @@ class WowGuildAutomation(commands.Cog):
                     form.onboarding_channel_id.data = str(channels.get("onboarding_channel_id", 0))
                     form.manual_review_channel_id.data = str(channels.get("manual_review_channel_id", 0))
                     form.raid_guest_channel_id.data = str(channels.get("raid_guest_channel_id", 0))
+                    rules_cfg = cfg.get("rules", {})
+                    form.rule_channel_id.data = str(rules_cfg.get("rule_channel_id", 0))
+                    form.rule_emoji.data = str(rules_cfg.get("rule_emoji", "✅"))
                     form.create_guest_role.data = False
                     form.create_member_role.data = False
                     form.create_onboarding_new_role.data = False
@@ -1056,6 +1131,10 @@ class WowGuildAutomation(commands.Cog):
                         "onboarding_channel_id": int(form.onboarding_channel_id.data or 0),
                         "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
                         "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
+                    }
+                    cfg["rules"] = {
+                        "rule_channel_id": int(form.rule_channel_id.data or 0),
+                        "rule_emoji": str(form.rule_emoji.data or "✅").strip() or "✅",
                     }
                     notifications = []
                     category = None
@@ -1190,6 +1269,8 @@ class WowGuildAutomation(commands.Cog):
     <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}<br><label>{form.create_onboarding_channel()} Auto-create this channel if not selected</label></p>
     <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create this channel if not selected</label></p>
     <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create this channel if not selected</label></p>
+    <p><label>Rules Channel</label><br>{form.rule_channel_id()}<br><small>Members should confirm rules there.</small></p>
+    <p><label>Rules Confirmation Emoji</label><br>{form.rule_emoji()}<br><small>Example: ✅</small></p>
     <hr>
     <h3>Auto Create (optional)</h3>
     <p><label>Target Category for new channels</label><br>{form.target_category_id()}<br><small>Used only for channels set to auto-create.</small></p>

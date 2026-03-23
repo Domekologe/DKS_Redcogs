@@ -10,25 +10,29 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "lang_prompt": "Willkommen! Bitte waehle deine Sprache.",
         "lang_timeout": "Onboarding abgebrochen (Zeit abgelaufen).",
         "role_prompt": "Bist du Gast oder neues Gildenmitglied?",
-        "guest_done": "Du wurdest als Gast markiert. Bitte lies trotzdem die Regeln und bestaetige sie.",
+        "guest_done": "Du wurdest als Gast markiert.",
+        "rules_channel_hint": "Bitte gehe jetzt zu {rules_channel} und bestaetige die Regeln mit {emoji}.",
         "mainchar_prompt": "Bitte gib deinen Mainchar ein (Button -> Popup).",
         "game_prompt": "Fuer welches WoW-Spiel meldest du dich an?",
         "mainchar_timeout": "Kein Mainchar erhalten, Onboarding beendet.",
         "verified": "Verifizierung erfolgreich. Mainchar `{main}` gefunden, Ingame-Rang `{rank}`.",
         "manual": "Automatische Verifizierung nicht moeglich. Das Team wurde fuer manuelle Pruefung benachrichtigt.",
         "rules": "Wichtig: Bitte lies die Serverregeln und bestaetige sie mit dem vorgegebenen Emoji.",
+        "rules_confirm": "Regeln bestaetigen",
     },
     "en-US": {
         "lang_prompt": "Welcome! Please choose your language.",
         "lang_timeout": "Onboarding cancelled (timeout).",
         "role_prompt": "Are you a guest or a new guild member?",
-        "guest_done": "You are marked as a guest. Please still read and confirm the server rules.",
+        "guest_done": "You are marked as a guest.",
+        "rules_channel_hint": "Please go to {rules_channel} and confirm the rules with {emoji}.",
         "mainchar_prompt": "Please enter your main character (button -> popup).",
         "game_prompt": "Which WoW game are you signing up for?",
         "mainchar_timeout": "No main character received, onboarding cancelled.",
         "verified": "Verification successful. Main character `{main}` found, ingame rank `{rank}`.",
         "manual": "Automatic verification failed. The team was notified for manual review.",
         "rules": "Important: Please read the server rules and confirm with the required emoji.",
+        "rules_confirm": "Confirm rules",
     },
 }
 
@@ -106,6 +110,11 @@ class MainCharView(discord.ui.View):
             self.stop()
 
 
+class RulesConfirmView(ChoiceView):
+    def __init__(self, user_id: int, label: str, timeout: int = 300) -> None:
+        super().__init__(user_id=user_id, options=[(label, "confirmed")], timeout=timeout)
+
+
 async def handle_new_member_onboarding(
     bot: commands.Bot,
     member: discord.Member,
@@ -113,7 +122,7 @@ async def handle_new_member_onboarding(
     rank_sync: RankSyncService,
     manual_channel: Optional[discord.TextChannel],
     onboarding_channel: Optional[discord.TextChannel] = None,
-) -> str:
+) -> dict:
     destination: discord.abc.Messageable
     if onboarding_channel is not None:
         try:
@@ -141,7 +150,17 @@ async def handle_new_member_onboarding(
     await destination.send(TEXTS["de-DE"]["lang_prompt"] + "\n" + TEXTS["en-US"]["lang_prompt"], view=lang_view)
     if await lang_view.wait() or not lang_view.value:
         await destination.send(TEXTS["de-DE"]["lang_timeout"])
-        return "de-DE"
+        return {
+            "language": "de-DE",
+            "selected_game": "retail",
+            "registration": {
+                "type": "unknown",
+                "char_name": "",
+                "verified": False,
+                "requires_manual_verification": False,
+                "rules_confirmed": False,
+            },
+        }
     lang = lang_view.value
     t = TEXTS[lang]
 
@@ -153,16 +172,51 @@ async def handle_new_member_onboarding(
     await destination.send(t["role_prompt"], view=role_view)
     if await role_view.wait() or not role_view.value:
         await destination.send(t["lang_timeout"])
-        return lang
+        return {
+            "language": lang,
+            "selected_game": "retail",
+            "registration": {
+                "type": "unknown",
+                "char_name": "",
+                "verified": False,
+                "requires_manual_verification": False,
+                "rules_confirmed": False,
+            },
+        }
 
     roles = guild_config.get("roles", {})
     guest_role = member.guild.get_role(roles.get("guest_role_id", 0))
     member_role = member.guild.get_role(roles.get("member_role_id", 0))
+    rules_cfg = guild_config.get("rules", {})
+    rule_channel = member.guild.get_channel(rules_cfg.get("rule_channel_id", 0))
+    rule_emoji = str(rules_cfg.get("rule_emoji", "✅"))
+
+    async def confirm_rules() -> bool:
+        await destination.send(t["rules"])
+        if rule_channel is not None:
+            await destination.send(
+                t["rules_channel_hint"].format(rules_channel=rule_channel.mention, emoji=rule_emoji)
+            )
+        confirm_view = RulesConfirmView(member.id, f"{t['rules_confirm']} {rule_emoji}")
+        await destination.send("Click to finish onboarding:", view=confirm_view)
+        return (not await confirm_view.wait()) and confirm_view.value == "confirmed"
+
     if role_view.value == "guest":
         if guest_role:
             await member.add_roles(guest_role, reason="WoW onboarding: guest")
         await destination.send(t["guest_done"])
-        return lang
+        rules_confirmed = await confirm_rules()
+        return {
+            "language": lang,
+            "selected_game": "retail",
+            "registration": {
+                "type": "guest",
+                "char_name": "",
+                "verified": False,
+                "requires_manual_verification": False,
+                "rules_confirmed": rules_confirmed,
+            },
+        }
 
     wow_profiles = guild_config.get("wow_profiles", {})
     if not wow_profiles:
@@ -180,7 +234,17 @@ async def handle_new_member_onboarding(
     await destination.send(t["mainchar_prompt"], view=modal_view)
     if await modal_view.wait() or not modal_view.value:
         await destination.send(t["mainchar_timeout"])
-        return lang
+        return {
+            "language": lang,
+            "selected_game": selected_game,
+            "registration": {
+                "type": "member",
+                "char_name": "",
+                "verified": False,
+                "requires_manual_verification": True,
+                "rules_confirmed": False,
+            },
+        }
 
     main_char = modal_view.value.strip()
     selected_cfg = dict(guild_config)
@@ -190,6 +254,11 @@ async def handle_new_member_onboarding(
         if member_role and member_role not in member.roles:
             await member.add_roles(member_role, reason="WoW onboarding: verified guild member")
         await destination.send(t["verified"].format(main=main_char, rank=rank))
+        if manual_channel:
+            await manual_channel.send(
+                f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
+                f"Automatisch verifiziert (Rang: {rank})."
+            )
     else:
         template = guild_config.get("templates", {}).get(
             "manual_verification",
@@ -197,8 +266,22 @@ async def handle_new_member_onboarding(
         )
         if manual_channel:
             await manual_channel.send(template.format(username=member.display_name, charname=main_char))
+            await manual_channel.send(
+                f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
+                "Char nicht gefunden - manuelle Verifizierung noetig."
+            )
         await destination.send(t["manual"])
 
-    await destination.send(t["rules"])
-    return f"{lang}|{selected_game}"
+    rules_confirmed = await confirm_rules()
+    return {
+        "language": lang,
+        "selected_game": selected_game,
+        "registration": {
+            "type": "member",
+            "char_name": main_char,
+            "verified": bool(rank),
+            "requires_manual_verification": not bool(rank),
+            "rules_confirmed": rules_confirmed,
+        },
+    }
 
