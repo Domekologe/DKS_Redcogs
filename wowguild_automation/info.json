@@ -1,6 +1,6 @@
 {
   "name": "WoW Guild Automation",
-  "author": ["Redcog Team"],
+  "author": ["Domekologe"],
   "description": "Onboarding, verification and rank sync for WoW guild Discord servers.",
   "short": "WoW Guild automation",
   "requirements": [],
