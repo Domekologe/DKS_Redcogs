@@ -1093,6 +1093,9 @@ class WowGuildAutomation(commands.Cog):
                     map_role_id = wtforms.SelectField("Discord Role for this rank")
                     remove_rank_index = wtforms.SelectField("Remove mapping by rank index")
                     remove_registration_user_id = wtforms.SelectField("Remove registration entry")
+                    confirm_remove_registration = wtforms.BooleanField(
+                        "I understand this permanently removes the registration entry"
+                    )
                     load_profile = wtforms.SubmitField("Load Selected Profile")
                     apply_rank_mapping = wtforms.SubmitField("Apply Rank Mapping")
                     remove_rank_mapping = wtforms.SubmitField("Remove Rank Mapping")
@@ -1195,6 +1198,7 @@ class WowGuildAutomation(commands.Cog):
                     form.map_role_id.data = "0"
                     form.remove_rank_index.data = "__none__"
                     form.remove_registration_user_id.data = "0"
+                    form.confirm_remove_registration.data = False
 
                 if form.load_profile.data:
                     selected_key = str(form.profile_key.data or "").strip().lower()
@@ -1292,6 +1296,17 @@ class WowGuildAutomation(commands.Cog):
                         return {
                             "status": 0,
                             "notifications": [{"message": "Select a registration entry to remove.", "category": "warning"}],
+                            "redirect_url": kwargs.get("request_url"),
+                        }
+                    if not bool(form.confirm_remove_registration.data):
+                        return {
+                            "status": 0,
+                            "notifications": [
+                                {
+                                    "message": "Please tick the confirmation checkbox before deleting.",
+                                    "category": "warning",
+                                }
+                            ],
                             "redirect_url": kwargs.get("request_url"),
                         }
                     m_obj = guild.get_member(target_member_id)
@@ -1442,13 +1457,39 @@ class WowGuildAutomation(commands.Cog):
                         "redirect_url": kwargs.get("request_url"),
                     }
 
+                active_profile_for_ui = cfg.get("active_profile_key", active_key)
+                rank_titles_by_profile = cfg.get("rank_titles_by_profile", {})
+                rank_mapping_by_profile = cfg.get("rank_mapping_by_profile", {})
+                profile_titles_ui = rank_titles_by_profile.get(active_profile_for_ui, {})
+                profile_mapping_ui = rank_mapping_by_profile.get(active_profile_for_ui, {})
+                current_rank_rows = []
+                for idx in range(10):
+                    idx_s = str(idx)
+                    title = profile_titles_ui.get(idx_s, f"Rank {idx}")
+                    mapped_id = profile_mapping_ui.get(title) or profile_mapping_ui.get(f"Rank {idx}")
+                    if mapped_id:
+                        role_obj = guild.get_role(int(mapped_id))
+                        mapped_label = role_obj.mention if role_obj else f"`{mapped_id}`"
+                    else:
+                        mapped_label = "<em>fallback: member default role</em>"
+                    current_rank_rows.append(
+                        f"<tr><td>{idx}</td><td>{title}</td><td>{mapped_label}</td></tr>"
+                    )
+                current_rank_table = "".join(current_rank_rows)
+
+                reg_count = 0
+                all_members_ui = await self.config.all_members(guild)
+                for _m_id, _payload in all_members_ui.items():
+                    if _payload.get("registration"):
+                        reg_count += 1
+
                 source = f"""
 <style>
 .wow-wrap {{
   background: linear-gradient(180deg, #16120d 0%, #20160f 100%);
   border: 1px solid #8a6a3a;
   border-radius: 10px;
-  padding: 14px;
+  padding: 16px;
   color: #f3e9d2;
   box-shadow: 0 0 20px rgba(0,0,0,.35);
 }}
@@ -1463,60 +1504,124 @@ class WowGuildAutomation(commands.Cog):
   min-width: 360px;
 }}
 .wow-wrap hr {{ border-color: #6f5129; opacity: .6; }}
+.wow-grid {{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(360px, 1fr));
+  gap: 14px;
+}}
+.wow-card {{
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #6f5129;
+  border-radius: 8px;
+  padding: 12px;
+}}
+.wow-meta {{
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}}
+.wow-badge {{
+  background: #2b1f14;
+  border: 1px solid #7d5b2b;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}}
+.wow-table {{
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}}
+.wow-table th, .wow-table td {{
+  border-bottom: 1px solid #6f5129;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 13px;
+}}
 </style>
 <div class="wow-wrap">
   <h2>WoW Guild Settings</h2>
   <p>Settings for <b>{guild.name}</b> - For the Horde/Alliance dashboard mode.</p>
-  <p><small>Active profile: <b>{cfg.get("active_profile_key", active_key)}</b></small></p>
+  <div class="wow-meta">
+    <span class="wow-badge">Active profile: <b>{active_profile_for_ui}</b></span>
+    <span class="wow-badge">Registrations stored: <b>{reg_count}</b></span>
+    <span class="wow-badge">Configured profiles: <b>{len(wow_profiles)}</b></span>
+  </div>
   <form method="post">
     {form.hidden_tag()}
-    <h3>Profile</h3>
-    <p><label>Language</label><br>{form.language()}</p>
-    <p><label>WoW Profile</label><br>{form.profile_key()}</p>
-    <p><small>Select existing profile or choose <b>+ create new profile</b>. New profile key comes from selected version.</small></p>
-    <p><label>Create New Profile For Version</label><br>{form.new_profile_version()}<br><small>Only versions without an existing profile are listed.</small></p>
-    <p>{form.load_profile()}</p>
-    <p><label>Profile Region</label><br>{form.region()}<br><small>Examples: eu, us, kr, tw</small></p>
-    <p><label>Profile Version</label><br>{form.version()}<br><small>Used for onboarding game selection.</small></p>
-    <p><label>Realm</label><br>{form.realm()}<br><small>Example: blackmoore</small></p>
-    <p><label>Guild Name</label><br>{form.guild_name()}<br><small>Ingame guild name for this version profile.</small></p>
-    <p><label>Onboarding Text DE</label><br>{form.welcome_text_de()}<br><small>Shown in DM before questions.</small></p>
-    <p><label>Onboarding Text EN</label><br>{form.welcome_text_en()}<br><small>Shown in DM before questions.</small></p>
+    <div class="wow-grid">
+      <div class="wow-card">
+        <h3>Profile</h3>
+        <p><label>Language</label><br>{form.language()}</p>
+        <p><label>WoW Profile</label><br>{form.profile_key()}</p>
+        <p><small>Select existing profile or choose <b>+ create new profile</b>.</small></p>
+        <p><label>Create New Profile For Version</label><br>{form.new_profile_version()}</p>
+        <p>{form.load_profile()}</p>
+        <p><label>Profile Region</label><br>{form.region()}<br><small>eu, us, kr, tw</small></p>
+        <p><label>Profile Version</label><br>{form.version()}</p>
+        <p><label>Realm</label><br>{form.realm()}</p>
+        <p><label>Guild Name</label><br>{form.guild_name()}</p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Onboarding Texts</h3>
+        <p><label>Onboarding Text DE</label><br>{form.welcome_text_de()}</p>
+        <p><label>Onboarding Text EN</label><br>{form.welcome_text_en()}</p>
+        <h3>Rules</h3>
+        <p><label>Rules Channel</label><br>{form.rule_channel_id()}</p>
+        <p><label>Rules Confirmation Emoji</label><br>{form.rule_emoji()}</p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Discord Roles</h3>
+        <p><label>Guest Role</label><br>{form.guest_role_id()}<br><label>{form.create_guest_role()} Auto-create</label></p>
+        <p><label>Member Role</label><br>{form.member_role_id()}<br><label>{form.create_member_role()} Auto-create</label></p>
+        <p><label>Onboarding New Role</label><br>{form.onboarding_new_role_id()}<br><label>{form.create_onboarding_new_role()} Auto-create</label></p>
+        <p><label>Onboarding Complete Role</label><br>{form.onboarding_complete_role_id()}<br><label>{form.create_onboarding_complete_role()} Auto-create</label></p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Discord Channels</h3>
+        <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}<br><label>{form.create_onboarding_channel()} Auto-create</label></p>
+        <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create</label></p>
+        <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create</label></p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Auto-Create Names</h3>
+        <p><label>Target Category</label><br>{form.target_category_id()}</p>
+        <p><label>Guest Role Name</label><br>{form.guest_role_name()}</p>
+        <p><label>Member Role Name</label><br>{form.member_role_name()}</p>
+        <p><label>Onboarding New Role Name</label><br>{form.onboarding_new_role_name()}</p>
+        <p><label>Onboarding Complete Role Name</label><br>{form.onboarding_complete_role_name()}</p>
+        <p><label>Onboarding Channel Name</label><br>{form.onboarding_channel_name()}</p>
+        <p><label>Manual Review Channel Name</label><br>{form.manual_review_channel_name()}</p>
+        <p><label>Raid Guest Channel Name</label><br>{form.raid_guest_channel_name()}</p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Rank Mapping (0-9)</h3>
+        <p><small>Per active profile. Missing mapping uses member default role.</small></p>
+        <table class="wow-table">
+          <thead><tr><th>Index</th><th>Title</th><th>Mapped Role</th></tr></thead>
+          <tbody>{current_rank_table}</tbody>
+        </table>
+        <p><label>Rank Index</label><br>{form.map_rank_index()}</p>
+        <p><label>Rank Title (optional)</label><br>{form.map_rank_title()}</p>
+        <p><label>Discord Role</label><br>{form.map_role_id()}</p>
+        <p>{form.apply_rank_mapping()}</p>
+        <p><label>Remove by Rank Index</label><br>{form.remove_rank_index()}</p>
+        <p>{form.remove_rank_mapping()}</p>
+      </div>
+    </div>
     <hr>
-    <h3>Discord Mapping</h3>
-    <p><label>Guest Role</label><br>{form.guest_role_id()}<br><label>{form.create_guest_role()} Auto-create this role if not selected</label></p>
-    <p><label>Member Role</label><br>{form.member_role_id()}<br><label>{form.create_member_role()} Auto-create this role if not selected</label></p>
-    <p><label>Onboarding New Role</label><br>{form.onboarding_new_role_id()}<br><label>{form.create_onboarding_new_role()} Auto-create this role if not selected</label></p>
-    <p><label>Onboarding Complete Role</label><br>{form.onboarding_complete_role_id()}<br><label>{form.create_onboarding_complete_role()} Auto-create this role if not selected</label></p>
-    <hr>
-    <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}<br><label>{form.create_onboarding_channel()} Auto-create this channel if not selected</label></p>
-    <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create this channel if not selected</label></p>
-    <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create this channel if not selected</label></p>
-    <p><label>Rules Channel</label><br>{form.rule_channel_id()}<br><small>Members should confirm rules there.</small></p>
-    <p><label>Rules Confirmation Emoji</label><br>{form.rule_emoji()}<br><small>Example: ✅</small></p>
-    <hr>
-    <h3>Auto Create (optional)</h3>
-    <p><label>Target Category for new channels</label><br>{form.target_category_id()}<br><small>Used only for channels set to auto-create.</small></p>
-    <p><label>Guest Role Name</label><br>{form.guest_role_name()}</p>
-    <p><label>Member Role Name</label><br>{form.member_role_name()}</p>
-    <p><label>Onboarding New Role Name</label><br>{form.onboarding_new_role_name()}</p>
-    <p><label>Onboarding Complete Role Name</label><br>{form.onboarding_complete_role_name()}</p>
-    <p><label>Onboarding Channel Name</label><br>{form.onboarding_channel_name()}</p>
-    <p><label>Manual Review Channel Name</label><br>{form.manual_review_channel_name()}</p>
-    <p><label>Raid Guest Channel Name</label><br>{form.raid_guest_channel_name()}</p>
-    <hr>
-    <h3>Rank Mapping (per active profile)</h3>
-    <p><small>Active profile: <b>{cfg.get("active_profile_key", active_key)}</b>. WoW guild has max 10 ranks (0-9).</small></p>
-    <p><label>Rank Index</label><br>{form.map_rank_index()}</p>
-    <p><label>Rank Title (optional)</label><br>{form.map_rank_title()}<br><small>If empty, `Rank X` is used.</small></p>
-    <p><label>Discord Role</label><br>{form.map_role_id()}</p>
-    <p>{form.apply_rank_mapping()}</p>
-    <p><label>Remove by Rank Index</label><br>{form.remove_rank_index()}</p>
-    <p>{form.remove_rank_mapping()}</p>
-    <hr>
-    <h3>Registration Cleanup</h3>
-    <p><label>Registration Entry</label><br>{form.remove_registration_user_id()}</p>
-    <p>{form.remove_registration()}</p>
+    <div class="wow-card">
+      <h3>Registration Cleanup</h3>
+      <p><label>Registration Entry</label><br>{form.remove_registration_user_id()}</p>
+      <p><label>{form.confirm_remove_registration()} Confirm permanent deletion</label></p>
+      <p>{form.remove_registration()}</p>
+    </div>
     <p>{form.submit()}</p>
   </form>
 </div>
