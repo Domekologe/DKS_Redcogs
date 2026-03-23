@@ -512,8 +512,19 @@ class WowGuildAutomation(commands.Cog):
         try:
             third_parties = dashboard_cog.rpc.third_parties_handler.third_parties  # type: ignore[attr-defined]
             names = sorted(third_parties.keys())
+            disabled = await dashboard_cog.config.webserver.disabled_third_parties()  # type: ignore[attr-defined]
+            wow_pages = []
+            if "WowGuildAutomation" in third_parties:
+                wow_pages = [
+                    f"{page} (hidden={meta[1].get('hidden')})"
+                    for page, meta in third_parties["WowGuildAutomation"].items()
+                ]
             await ctx.send(
-                f"Dashboard loaded: yes | attached: {self._dashboard_attached} | third parties: {', '.join(names) if names else 'none'}"
+                "Dashboard loaded: yes"
+                f" | attached: {self._dashboard_attached}"
+                f" | third parties: {', '.join(names) if names else 'none'}"
+                f" | disabled: {', '.join(disabled) if disabled else 'none'}"
+                f" | wow pages: {', '.join(wow_pages) if wow_pages else 'none'}"
             )
         except Exception as e:
             await ctx.send(f"Dashboard status check failed: {e}")
