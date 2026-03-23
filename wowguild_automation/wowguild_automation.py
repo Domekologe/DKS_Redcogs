@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+import traceback
 
 import discord
 from redbot.core import Config, commands
@@ -615,58 +616,66 @@ class WowGuildAutomation(commands.Cog):
         data: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        _ = kwargs
-        if user_id is None:
+        try:
+            _ = kwargs
+            if user_id is None:
+                return {
+                    "status": 0,
+                    "error_code": 400,
+                    "message": "Missing context: user_id. Open this page from a logged-in owner context.",
+                }
+            if user_id not in self.bot.owner_ids:
+                return {"status": 1, "message": "Not allowed."}
+
+            bot_setup = await self.config.bot_setup()
+            if method.upper() == "POST":
+                payload: Dict[str, Any] = {}
+                if data:
+                    payload.update(dict(data.get("json", {})))
+                    payload.update(dict(data.get("form", {})))
+
+                lang = str(payload.get("default_language", bot_setup.get("default_language", "de-DE"))).strip()
+                if lang not in ("de-DE", "en-US"):
+                    lang = "de-DE"
+                bot_setup["default_language"] = lang
+                bot_setup["default_region"] = str(
+                    payload.get("default_region", bot_setup.get("default_region", "eu"))
+                ).strip().lower()
+                bot_setup["default_version"] = str(
+                    payload.get("default_version", bot_setup.get("default_version", "retail"))
+                ).strip().lower()
+                raw_enabled = payload.get("dashboard_enabled", bot_setup.get("dashboard_enabled", True))
+                if isinstance(raw_enabled, str):
+                    bot_setup["dashboard_enabled"] = raw_enabled.lower() in ("1", "true", "yes", "on")
+                else:
+                    bot_setup["dashboard_enabled"] = bool(raw_enabled)
+
+                await self.config.bot_setup.set(bot_setup)
+                return {
+                    "status": 0,
+                    "notifications": [{"message": "WoW master settings saved.", "category": "success"}],
+                }
+
             return {
                 "status": 0,
-                "error_code": 400,
-                "message": "Missing context: user_id. Open this page from a logged-in owner context.",
-            }
-        if user_id not in self.bot.owner_ids:
-            return {"status": 1, "message": "Not allowed."}
-
-        bot_setup = await self.config.bot_setup()
-        if method.upper() == "POST":
-            payload: Dict[str, Any] = {}
-            if data:
-                payload.update(dict(data.get("json", {})))
-                payload.update(dict(data.get("form", {})))
-
-            lang = str(payload.get("default_language", bot_setup.get("default_language", "de-DE"))).strip()
-            if lang not in ("de-DE", "en-US"):
-                lang = "de-DE"
-            bot_setup["default_language"] = lang
-            bot_setup["default_region"] = str(
-                payload.get("default_region", bot_setup.get("default_region", "eu"))
-            ).strip().lower()
-            bot_setup["default_version"] = str(
-                payload.get("default_version", bot_setup.get("default_version", "retail"))
-            ).strip().lower()
-            raw_enabled = payload.get("dashboard_enabled", bot_setup.get("dashboard_enabled", True))
-            if isinstance(raw_enabled, str):
-                bot_setup["dashboard_enabled"] = raw_enabled.lower() in ("1", "true", "yes", "on")
-            else:
-                bot_setup["dashboard_enabled"] = bool(raw_enabled)
-
-            await self.config.bot_setup.set(bot_setup)
-            return {
-                "status": 0,
-                "notifications": [{"message": "WoW master settings saved.", "category": "success"}],
-            }
-
-        return {
-            "status": 0,
-            "web_content": {
-                "title": "WoW Guild Automation - Master Settings",
-                "config": bot_setup,
-                "payload_example": {
-                    "default_language": "de-DE",
-                    "default_region": "eu",
-                    "default_version": "retail",
-                    "dashboard_enabled": True,
+                "web_content": {
+                    "title": "WoW Guild Automation - Master Settings",
+                    "config": bot_setup,
+                    "payload_example": {
+                        "default_language": "de-DE",
+                        "default_region": "eu",
+                        "default_version": "retail",
+                        "dashboard_enabled": True,
+                    },
                 },
-            },
-        }
+            }
+        except Exception as e:
+            return {
+                "status": 0,
+                "error_code": 500,
+                "message": f"Master page failed: {e}",
+                "error_message": traceback.format_exc(limit=2),
+            }
 
     @_dashboard_page(
         name="wowguild_automation",
@@ -683,98 +692,106 @@ class WowGuildAutomation(commands.Cog):
         data: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        _ = kwargs
-        if user_id is None or guild_id is None:
+        try:
+            _ = kwargs
+            if user_id is None or guild_id is None:
+                return {
+                    "status": 0,
+                    "error_code": 400,
+                    "message": "Missing context: user_id/guild_id. Open this page from a server context.",
+                }
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                return {"status": 1, "message": "Guild not found."}
+            member = guild.get_member(user_id)
+            if user_id not in self.bot.owner_ids and (
+                member is None or not (await self.bot.is_admin(member) or member.guild_permissions.manage_guild)
+            ):
+                return {"status": 1, "message": "Not allowed."}
+
+            cfg = await self._guild_config(guild)
+            if method.upper() == "POST":
+                payload: Dict[str, Any] = {}
+                if data:
+                    payload.update(dict(data.get("json", {})))
+                    payload.update(dict(data.get("form", {})))
+
+                def to_int(value: Any, default: int = 0) -> int:
+                    try:
+                        return int(value)
+                    except Exception:
+                        return default
+
+                language = str(payload.get("language", cfg.get("language", "de-DE"))).strip()
+                if language not in ("de-DE", "en-US"):
+                    language = "de-DE"
+                cfg["language"] = language
+
+                wow = cfg.get("wow", {})
+                wow["region"] = str(payload.get("region", wow.get("region", "eu"))).strip().lower()
+                wow["version"] = str(payload.get("version", wow.get("version", "retail"))).strip().lower()
+                wow["realm"] = str(payload.get("realm", wow.get("realm", ""))).strip()
+                wow["guild_name"] = str(payload.get("guild_name", wow.get("guild_name", ""))).strip()
+                cfg["wow"] = wow
+
+                roles = cfg.get("roles", {})
+                roles["guest_role_id"] = to_int(payload.get("guest_role_id", roles.get("guest_role_id", 0)))
+                roles["member_role_id"] = to_int(payload.get("member_role_id", roles.get("member_role_id", 0)))
+                roles["onboarding_new_role_id"] = to_int(
+                    payload.get("onboarding_new_role_id", roles.get("onboarding_new_role_id", 0))
+                )
+                roles["onboarding_complete_role_id"] = to_int(
+                    payload.get("onboarding_complete_role_id", roles.get("onboarding_complete_role_id", 0))
+                )
+                cfg["roles"] = roles
+
+                channels = cfg.get("channels", {})
+                channels["onboarding_channel_id"] = to_int(
+                    payload.get("onboarding_channel_id", channels.get("onboarding_channel_id", 0))
+                )
+                channels["manual_review_channel_id"] = to_int(
+                    payload.get("manual_review_channel_id", channels.get("manual_review_channel_id", 0))
+                )
+                channels["raid_guest_channel_id"] = to_int(
+                    payload.get("raid_guest_channel_id", channels.get("raid_guest_channel_id", 0))
+                )
+                cfg["channels"] = channels
+
+                await self.config.guild(guild).set(cfg)
+                await self._apply_onboarding_channel_permissions(guild)
+                return {"status": 0, "notifications": [{"message": "WoW settings saved.", "category": "success"}]}
+
             return {
                 "status": 0,
-                "error_code": 400,
-                "message": "Missing context: user_id/guild_id. Open this page from a server context.",
-            }
-        guild = self.bot.get_guild(guild_id)
-        if guild is None:
-            return {"status": 1, "message": "Guild not found."}
-        member = guild.get_member(user_id)
-        if user_id not in self.bot.owner_ids and (
-            member is None or not (await self.bot.is_admin(member) or member.guild_permissions.manage_guild)
-        ):
-            return {"status": 1, "message": "Not allowed."}
-
-        cfg = await self._guild_config(guild)
-        if method.upper() == "POST":
-            payload: Dict[str, Any] = {}
-            if data:
-                payload.update(dict(data.get("json", {})))
-                payload.update(dict(data.get("form", {})))
-
-            def to_int(value: Any, default: int = 0) -> int:
-                try:
-                    return int(value)
-                except Exception:
-                    return default
-
-            language = str(payload.get("language", cfg.get("language", "de-DE"))).strip()
-            if language not in ("de-DE", "en-US"):
-                language = "de-DE"
-            cfg["language"] = language
-
-            wow = cfg.get("wow", {})
-            wow["region"] = str(payload.get("region", wow.get("region", "eu"))).strip().lower()
-            wow["version"] = str(payload.get("version", wow.get("version", "retail"))).strip().lower()
-            wow["realm"] = str(payload.get("realm", wow.get("realm", ""))).strip()
-            wow["guild_name"] = str(payload.get("guild_name", wow.get("guild_name", ""))).strip()
-            cfg["wow"] = wow
-
-            roles = cfg.get("roles", {})
-            roles["guest_role_id"] = to_int(payload.get("guest_role_id", roles.get("guest_role_id", 0)))
-            roles["member_role_id"] = to_int(payload.get("member_role_id", roles.get("member_role_id", 0)))
-            roles["onboarding_new_role_id"] = to_int(
-                payload.get("onboarding_new_role_id", roles.get("onboarding_new_role_id", 0))
-            )
-            roles["onboarding_complete_role_id"] = to_int(
-                payload.get("onboarding_complete_role_id", roles.get("onboarding_complete_role_id", 0))
-            )
-            cfg["roles"] = roles
-
-            channels = cfg.get("channels", {})
-            channels["onboarding_channel_id"] = to_int(
-                payload.get("onboarding_channel_id", channels.get("onboarding_channel_id", 0))
-            )
-            channels["manual_review_channel_id"] = to_int(
-                payload.get("manual_review_channel_id", channels.get("manual_review_channel_id", 0))
-            )
-            channels["raid_guest_channel_id"] = to_int(
-                payload.get("raid_guest_channel_id", channels.get("raid_guest_channel_id", 0))
-            )
-            cfg["channels"] = channels
-
-            await self.config.guild(guild).set(cfg)
-            await self._apply_onboarding_channel_permissions(guild)
-            return {"status": 0, "notifications": [{"message": "WoW settings saved.", "category": "success"}]}
-
-        return {
-            "status": 0,
-            "web_content": {
-                "title": "WoW Guild Automation",
-                "description": "GET to read settings, POST to update settings.",
-                "config": cfg,
-                "available_roles": [{"id": r.id, "name": r.name} for r in guild.roles],
-                "available_channels": [{"id": c.id, "name": c.name} for c in guild.text_channels],
-                "payload_example": {
-                    "language": "de-DE",
-                    "region": "eu",
-                    "version": "retail",
-                    "realm": "my-realm",
-                    "guild_name": "my-guild",
-                    "guest_role_id": 0,
-                    "member_role_id": 0,
-                    "onboarding_new_role_id": 0,
-                    "onboarding_complete_role_id": 0,
-                    "onboarding_channel_id": 0,
-                    "manual_review_channel_id": 0,
-                    "raid_guest_channel_id": 0,
+                "web_content": {
+                    "title": "WoW Guild Automation",
+                    "description": "GET to read settings, POST to update settings.",
+                    "config": cfg,
+                    "available_roles": [{"id": r.id, "name": r.name} for r in guild.roles],
+                    "available_channels": [{"id": c.id, "name": c.name} for c in guild.text_channels],
+                    "payload_example": {
+                        "language": "de-DE",
+                        "region": "eu",
+                        "version": "retail",
+                        "realm": "my-realm",
+                        "guild_name": "my-guild",
+                        "guest_role_id": 0,
+                        "member_role_id": 0,
+                        "onboarding_new_role_id": 0,
+                        "onboarding_complete_role_id": 0,
+                        "onboarding_channel_id": 0,
+                        "manual_review_channel_id": 0,
+                        "raid_guest_channel_id": 0,
+                    },
                 },
-            },
-        }
+            }
+        except Exception as e:
+            return {
+                "status": 0,
+                "error_code": 500,
+                "message": f"Guild page failed: {e}",
+                "error_message": traceback.format_exc(limit=2),
+            }
 
 
 async def setup(bot: commands.Bot) -> None:
