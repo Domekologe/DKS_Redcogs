@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+import json
 import traceback
 
 import discord
@@ -659,14 +660,22 @@ class WowGuildAutomation(commands.Cog):
             return {
                 "status": 0,
                 "web_content": {
-                    "title": "WoW Guild Automation - Master Settings",
-                    "config": bot_setup,
-                    "payload_example": {
-                        "default_language": "de-DE",
-                        "default_region": "eu",
-                        "default_version": "retail",
-                        "dashboard_enabled": True,
-                    },
+                    "source": (
+                        "<div style='padding:12px;'>"
+                        "<h2>WoW Master Settings</h2>"
+                        "<p>Use POST on this page endpoint to update values.</p>"
+                        "<h3>Current Config</h3>"
+                        f"<pre>{json.dumps(bot_setup, indent=2)}</pre>"
+                        "<h3>Payload Example</h3>"
+                        "<pre>{\n"
+                        '  "default_language": "de-DE",\n'
+                        '  "default_region": "eu",\n'
+                        '  "default_version": "retail",\n'
+                        '  "dashboard_enabled": true\n'
+                        "}</pre>"
+                        "</div>"
+                    ),
+                    "standalone": True,
                 },
             }
         except Exception as e:
@@ -764,25 +773,30 @@ class WowGuildAutomation(commands.Cog):
             return {
                 "status": 0,
                 "web_content": {
-                    "title": "WoW Guild Automation",
-                    "description": "GET to read settings, POST to update settings.",
-                    "config": cfg,
-                    "available_roles": [{"id": r.id, "name": r.name} for r in guild.roles],
-                    "available_channels": [{"id": c.id, "name": c.name} for c in guild.text_channels],
-                    "payload_example": {
-                        "language": "de-DE",
-                        "region": "eu",
-                        "version": "retail",
-                        "realm": "my-realm",
-                        "guild_name": "my-guild",
-                        "guest_role_id": 0,
-                        "member_role_id": 0,
-                        "onboarding_new_role_id": 0,
-                        "onboarding_complete_role_id": 0,
-                        "onboarding_channel_id": 0,
-                        "manual_review_channel_id": 0,
-                        "raid_guest_channel_id": 0,
-                    },
+                    "source": (
+                        "<div style='padding:12px;'>"
+                        "<h2>WoW Guild Settings</h2>"
+                        "<p>Use POST on this page endpoint to update values.</p>"
+                        "<h3>Current Config</h3>"
+                        f"<pre>{json.dumps(cfg, indent=2)}</pre>"
+                        "<h3>Payload Example</h3>"
+                        "<pre>{\n"
+                        '  "language": "de-DE",\n'
+                        '  "region": "eu",\n'
+                        '  "version": "retail",\n'
+                        '  "realm": "my-realm",\n'
+                        '  "guild_name": "my-guild",\n'
+                        '  "guest_role_id": 0,\n'
+                        '  "member_role_id": 0,\n'
+                        '  "onboarding_new_role_id": 0,\n'
+                        '  "onboarding_complete_role_id": 0,\n'
+                        '  "onboarding_channel_id": 0,\n'
+                        '  "manual_review_channel_id": 0,\n'
+                        '  "raid_guest_channel_id": 0\n'
+                        "}</pre>"
+                        "</div>"
+                    ),
+                    "standalone": True,
                 },
             }
         except Exception as e:
