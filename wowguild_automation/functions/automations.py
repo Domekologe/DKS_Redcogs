@@ -26,10 +26,14 @@ class RankSyncService:
         if not result:
             return None
 
-        rank_titles = guild_config.get("rank_titles", {})
+        wow = guild_config.get("wow", {})
+        profile_key = wow.get("version", "retail")
+        rank_titles_by_profile = guild_config.get("rank_titles_by_profile", {})
+        rank_titles = rank_titles_by_profile.get(profile_key) or guild_config.get("rank_titles", {})
         rank_title = rank_titles.get(str(result.rank_index), result.rank_name)
 
-        rank_mapping = guild_config.get("rank_mapping", {})
+        rank_mapping_by_profile = guild_config.get("rank_mapping_by_profile", {})
+        rank_mapping = rank_mapping_by_profile.get(profile_key) or guild_config.get("rank_mapping", {})
         mapped_role_id = rank_mapping.get(rank_title) or rank_mapping.get(result.rank_name)
         member_role_id = guild_config.get("roles", {}).get("member_role_id", 0)
         target_role_id = mapped_role_id or member_role_id

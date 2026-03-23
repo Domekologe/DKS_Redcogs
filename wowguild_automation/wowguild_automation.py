@@ -111,6 +111,8 @@ class WowGuildAutomation(commands.Cog):
             },
             rank_mapping={},
             rank_titles={},
+            rank_mapping_by_profile={},
+            rank_titles_by_profile={},
             channels={
                 "onboarding_channel_id": 0,
                 "manual_review_channel_id": 0,
@@ -533,9 +535,12 @@ class WowGuildAutomation(commands.Cog):
             await ctx.send(await self._t(ctx, "server_only"))
             return
         cfg = await self._guild_config(ctx.guild)
-        rank_mapping = cfg.get("rank_mapping", {})
-        rank_titles = cfg.get("rank_titles", {})
-        lines = ["Rank Titles:"]
+        active = cfg.get("active_profile_key", "retail")
+        rank_titles_by_profile = cfg.get("rank_titles_by_profile", {})
+        rank_mapping_by_profile = cfg.get("rank_mapping_by_profile", {})
+        rank_titles = rank_titles_by_profile.get(active, cfg.get("rank_titles", {}))
+        rank_mapping = rank_mapping_by_profile.get(active, cfg.get("rank_mapping", {}))
+        lines = [f"Active profile: `{active}`", "Rank Titles:"]
         if rank_titles:
             for idx, title in sorted(rank_titles.items(), key=lambda kv: int(kv[0])):
                 lines.append(f"- `{idx}` -> `{title}`")
@@ -776,6 +781,24 @@ class WowGuildAutomation(commands.Cog):
     async def wow_registrations_direct(self, ctx: commands.Context) -> None:
         """Slash-style alias for registration list."""
         await self.wow_registrations(ctx)
+
+    @wow.command(name="delregistration")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_delregistration(self, ctx: commands.Context, member: discord.Member) -> None:
+        if not ctx.guild:
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        await self.config.member(member).registration.clear()
+        await self.config.member(member).selected_game.clear()
+        await ctx.send(f"Registrierung von {member.mention} wurde entfernt.")
+
+    @commands.hybrid_command(name="wow-delregistration")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def wow_delregistration_direct(self, ctx: commands.Context, member: discord.Member) -> None:
+        """Slash-style alias for deleting one registration entry."""
+        await self.wow_delregistration(ctx, member)
 
     @wow.command(name="dashboard-status")
     @commands.is_owner()
@@ -1065,7 +1088,15 @@ class WowGuildAutomation(commands.Cog):
                     onboarding_channel_name = wtforms.StringField("Create Onboarding Channel Name")
                     manual_review_channel_name = wtforms.StringField("Create Manual Review Channel Name")
                     raid_guest_channel_name = wtforms.StringField("Create Raid Guest Channel Name")
+                    map_rank_index = wtforms.SelectField("Guild Rank Index (0-9)")
+                    map_rank_title = wtforms.StringField("Rank Title (optional)")
+                    map_role_id = wtforms.SelectField("Discord Role for this rank")
+                    remove_rank_index = wtforms.SelectField("Remove mapping by rank index")
+                    remove_registration_user_id = wtforms.SelectField("Remove registration entry")
                     load_profile = wtforms.SubmitField("Load Selected Profile")
+                    apply_rank_mapping = wtforms.SubmitField("Apply Rank Mapping")
+                    remove_rank_mapping = wtforms.SubmitField("Remove Rank Mapping")
+                    remove_registration = wtforms.SubmitField("Remove Registration Entry")
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
@@ -1105,6 +1136,23 @@ class WowGuildAutomation(commands.Cog):
                 form.raid_guest_channel_id.choices = channel_choices
                 form.rule_channel_id.choices = channel_choices
                 form.target_category_id.choices = category_choices
+                form.map_role_id.choices = role_choices
+                form.map_rank_index.choices = [(str(i), str(i)) for i in range(10)]
+                form.remove_rank_index.choices = [("__none__", "-- select --")] + [
+                    (str(i), str(i)) for i in range(10)
+                ]
+                all_members = await self.config.all_members(guild)
+                reg_choices = [("0", "-- none --")]
+                for member_id, payload in all_members.items():
+                    if payload.get("registration"):
+                        m_obj = guild.get_member(int(member_id))
+                        label = (
+                            f"{m_obj.display_name} ({m_obj.id})"
+                            if m_obj is not None
+                            else f"{member_id}"
+                        )
+                        reg_choices.append((str(member_id), label))
+                form.remove_registration_user_id.choices = reg_choices
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
                     form.profile_key.data = active_key
@@ -1142,6 +1190,11 @@ class WowGuildAutomation(commands.Cog):
                     form.onboarding_channel_name.data = "onboarding-private"
                     form.manual_review_channel_name.data = "wow-manual-review"
                     form.raid_guest_channel_name.data = "wow-raid-guests"
+                    form.map_rank_index.data = "0"
+                    form.map_rank_title.data = ""
+                    form.map_role_id.data = "0"
+                    form.remove_rank_index.data = "__none__"
+                    form.remove_registration_user_id.data = "0"
 
                 if form.load_profile.data:
                     selected_key = str(form.profile_key.data or "").strip().lower()
@@ -1163,6 +1216,92 @@ class WowGuildAutomation(commands.Cog):
                                 "message": "Select an existing profile to load.",
                                 "category": "warning",
                             }
+                        ],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
+                if form.apply_rank_mapping.data:
+                    profile_key_for_map = cfg.get("active_profile_key", active_key) or "retail"
+                    rank_titles_by_profile = cfg.get("rank_titles_by_profile", {})
+                    rank_mapping_by_profile = cfg.get("rank_mapping_by_profile", {})
+                    profile_titles = rank_titles_by_profile.get(profile_key_for_map, {})
+                    profile_mapping = rank_mapping_by_profile.get(profile_key_for_map, {})
+                    rank_idx = str(form.map_rank_index.data or "0")
+                    role_id = int(form.map_role_id.data or 0)
+                    if role_id == 0:
+                        return {
+                            "status": 0,
+                            "notifications": [{"message": "Please select a role for mapping.", "category": "warning"}],
+                            "redirect_url": kwargs.get("request_url"),
+                        }
+                    rank_title = str(form.map_rank_title.data or "").strip()
+                    if not rank_title:
+                        rank_title = f"Rank {rank_idx}"
+                    profile_titles[rank_idx] = rank_title
+                    profile_mapping[rank_title] = role_id
+                    rank_titles_by_profile[profile_key_for_map] = profile_titles
+                    rank_mapping_by_profile[profile_key_for_map] = profile_mapping
+                    cfg["rank_titles_by_profile"] = rank_titles_by_profile
+                    cfg["rank_mapping_by_profile"] = rank_mapping_by_profile
+                    await self.config.guild(guild).set(cfg)
+                    role = guild.get_role(role_id)
+                    role_name = role.mention if role else f"`{role_id}`"
+                    return {
+                        "status": 0,
+                        "notifications": [
+                            {
+                                "message": f"Rank mapping set for {profile_key_for_map}: {rank_title} -> {role_name}",
+                                "category": "success",
+                            }
+                        ],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
+                if form.remove_rank_mapping.data:
+                    profile_key_for_map = cfg.get("active_profile_key", active_key) or "retail"
+                    rank_idx = str(form.remove_rank_index.data or "__none__")
+                    if rank_idx == "__none__":
+                        return {
+                            "status": 0,
+                            "notifications": [{"message": "Select a rank index to remove.", "category": "warning"}],
+                            "redirect_url": kwargs.get("request_url"),
+                        }
+                    rank_titles_by_profile = cfg.get("rank_titles_by_profile", {})
+                    rank_mapping_by_profile = cfg.get("rank_mapping_by_profile", {})
+                    profile_titles = rank_titles_by_profile.get(profile_key_for_map, {})
+                    profile_mapping = rank_mapping_by_profile.get(profile_key_for_map, {})
+                    rank_title = profile_titles.pop(rank_idx, f"Rank {rank_idx}")
+                    profile_mapping.pop(rank_title, None)
+                    profile_mapping.pop(f"Rank {rank_idx}", None)
+                    rank_titles_by_profile[profile_key_for_map] = profile_titles
+                    rank_mapping_by_profile[profile_key_for_map] = profile_mapping
+                    cfg["rank_titles_by_profile"] = rank_titles_by_profile
+                    cfg["rank_mapping_by_profile"] = rank_mapping_by_profile
+                    await self.config.guild(guild).set(cfg)
+                    return {
+                        "status": 0,
+                        "notifications": [
+                            {"message": f"Removed rank mapping for index {rank_idx}.", "category": "success"}
+                        ],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
+                if form.remove_registration.data:
+                    target_member_id = int(form.remove_registration_user_id.data or 0)
+                    if target_member_id == 0:
+                        return {
+                            "status": 0,
+                            "notifications": [{"message": "Select a registration entry to remove.", "category": "warning"}],
+                            "redirect_url": kwargs.get("request_url"),
+                        }
+                    m_obj = guild.get_member(target_member_id)
+                    if m_obj is not None:
+                        await self.config.member(m_obj).registration.clear()
+                        await self.config.member(m_obj).selected_game.clear()
+                    return {
+                        "status": 0,
+                        "notifications": [
+                            {"message": f"Removed registration for {target_member_id}.", "category": "success"}
                         ],
                         "redirect_url": kwargs.get("request_url"),
                     }
@@ -1365,6 +1504,19 @@ class WowGuildAutomation(commands.Cog):
     <p><label>Onboarding Channel Name</label><br>{form.onboarding_channel_name()}</p>
     <p><label>Manual Review Channel Name</label><br>{form.manual_review_channel_name()}</p>
     <p><label>Raid Guest Channel Name</label><br>{form.raid_guest_channel_name()}</p>
+    <hr>
+    <h3>Rank Mapping (per active profile)</h3>
+    <p><small>Active profile: <b>{cfg.get("active_profile_key", active_key)}</b>. WoW guild has max 10 ranks (0-9).</small></p>
+    <p><label>Rank Index</label><br>{form.map_rank_index()}</p>
+    <p><label>Rank Title (optional)</label><br>{form.map_rank_title()}<br><small>If empty, `Rank X` is used.</small></p>
+    <p><label>Discord Role</label><br>{form.map_role_id()}</p>
+    <p>{form.apply_rank_mapping()}</p>
+    <p><label>Remove by Rank Index</label><br>{form.remove_rank_index()}</p>
+    <p>{form.remove_rank_mapping()}</p>
+    <hr>
+    <h3>Registration Cleanup</h3>
+    <p><label>Registration Entry</label><br>{form.remove_registration_user_id()}</p>
+    <p>{form.remove_registration()}</p>
     <p>{form.submit()}</p>
   </form>
 </div>

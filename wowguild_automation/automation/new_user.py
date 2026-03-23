@@ -276,7 +276,7 @@ async def handle_new_member_onboarding(
         if manual_channel:
             await manual_channel.send(
                 f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
-                f"Automatisch verifiziert (Rang: {rank})."
+                f"Spieltyp: {selected_game}. Automatisch verifiziert (Rang: {rank})."
             )
     else:
         template = guild_config.get("templates", {}).get(
@@ -287,7 +287,7 @@ async def handle_new_member_onboarding(
             await manual_channel.send(template.format(username=member.display_name, charname=main_char))
             await manual_channel.send(
                 f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
-                "Char nicht gefunden - manuelle Verifizierung noetig."
+                f"Spieltyp: {selected_game}. Char nicht gefunden - manuelle Verifizierung noetig."
             )
         await destination.send(t["manual"])
 
