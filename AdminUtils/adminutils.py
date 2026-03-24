@@ -74,6 +74,19 @@ class AdminUtils(commands.Cog):
         except Exception:
             self._dashboard_attached = False
 
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        # Compatibility path for Dashboard variants that do not dispatch `dashboard_cog_add`.
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        try:
+            cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
+
     # kleiner Helper, damit ephemeral nur bei Slash benutzt wird
     async def _reply(self, ctx: commands.Context, content: str, **kwargs):
         if getattr(ctx, "interaction", None) is not None:
