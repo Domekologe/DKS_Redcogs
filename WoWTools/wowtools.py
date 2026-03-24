@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Literal, Mapping, Optional
+from typing import Any, Dict, Literal, Mapping, Optional
 
 import aiohttp
 import discord
@@ -32,6 +32,15 @@ from .comparechars import CompareChars
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
+
+try:
+    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+except Exception:
+    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+        def decorator(func: Any) -> Any:
+            func.__dashboard_decorator_params__ = (args, kwargs)
+            return func
+        return decorator
 
 
 @cog_i18n(_)
@@ -86,6 +95,10 @@ class WoWTools(
             "sb_image": False,
             "on_message": False,
             "countdown_channel": None,
+            "dashboard_texts": {
+                "welcome_note": "Welcome to {guild_name}. Configure your region/realm/guild in WoWTools dashboard.",
+                "status_note": "Current setup: {region}/{realm}/{guild_name}",
+            },
         }
         default_user = {
             "wow_character_name": None,
@@ -111,6 +124,7 @@ class WoWTools(
         log.info("Bot status updater started.")
 
         self.current_raid = "manaforge-omega"
+        self._dashboard_attached = False
 
         # For countdown channels
         self.early_access_time: dict[str, datetime.datetime] = {}
@@ -134,6 +148,13 @@ class WoWTools(
         raiderio_api_key = await self.bot.get_shared_api_tokens("raiderio")
         self.raiderio_api = RaiderIO(api_key=raiderio_api_key.get("api_key"))
         await self.create_bnet_objs()
+        dashboard = self.bot.get_cog("Dashboard")
+        if dashboard is not None:
+            try:
+                dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+                self._dashboard_attached = True
+            except Exception:
+                self._dashboard_attached = False
 
     async def create_bnet_objs(self):
         blizzard_api = await self.bot.get_shared_api_tokens("blizzard")
@@ -487,6 +508,101 @@ class WoWTools(
         self.update_countdown_channels.cancel()
         self.update_bot_status.cancel()
         log.info("All tasks cancelled.")
+
+    @commands.Cog.listener()
+    async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
+
+    @_dashboard_page(
+        name="wowtools",
+        description="Guild-side WoWTools settings and text defaults.",
+        methods=("GET", "POST"),
+        context_ids=["user_id", "guild_id"],
+        hidden=False,
+    )
+    async def dashboard_wowtools(
+        self,
+        user_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
+        method: str = "GET",
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if user_id is None or guild_id is None:
+            return {"status": 0, "error_code": 400, "message": "Missing context user_id/guild_id."}
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return {"status": 1, "message": "Guild not found."}
+        member = guild.get_member(user_id)
+        if member is None or not member.guild_permissions.manage_guild:
+            if user_id not in self.bot.owner_ids:
+                return {"status": 1, "message": "Not allowed."}
+
+        gconf = self.config.guild(guild)
+        region = await gconf.region()
+        realm = await gconf.realm()
+        gname = await gconf.real_guild_name()
+        on_message = await gconf.on_message()
+        texts = await gconf.dashboard_texts()
+
+        if method.upper() == "POST" and data:
+            form = dict(data.get("form", {}))
+            new_region = str(form.get("region", region or "")).lower().strip()
+            if new_region in ("eu", "us", "kr"):
+                await gconf.region.set(new_region)
+            await gconf.realm.set(str(form.get("realm", realm or "")).strip() or None)
+            await gconf.real_guild_name.set(str(form.get("guild_name", gname or "")).strip() or None)
+            await gconf.on_message.set(str(form.get("on_message", "off")).lower() in ("on", "true", "1", "yes"))
+            texts["welcome_note"] = str(form.get("welcome_note", texts.get("welcome_note", "")))
+            texts["status_note"] = str(form.get("status_note", texts.get("status_note", "")))
+            await gconf.dashboard_texts.set(texts)
+            return {
+                "status": 0,
+                "notifications": [{"message": "WoWTools dashboard settings saved.", "category": "success"}],
+                "redirect_url": kwargs.get("request_url"),
+            }
+
+        source = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+* {{ font-family: 'Inter', sans-serif; box-sizing: border-box; }}
+.card {{ background: rgba(18, 23, 33, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 24px; color: #e8eefc; transition: all 0.3s ease; }}
+.card:hover {{ box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.12); }}
+h2, h3 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }}
+p {{ color: #a0aec0; font-size: 14px; line-height: 1.5; margin-top: 0; margin-bottom: 16px; }}
+code {{ background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 13px; color: #63b3ed; font-family: monospace; }}
+label {{ font-size: 13.5px; font-weight: 500; color: #cbd5e0; margin-bottom: 8px; display: inline-block; }}
+input, textarea, select {{ width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 14px; transition: all 0.2s ease; margin-bottom: 16px; }}
+input:focus, textarea:focus, select:focus {{ outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25); background: rgba(0, 0, 0, 0.35); }}
+button {{ padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); font-size: 14px; }}
+button:hover {{ transform: translateY(-1px); box-shadow: 0 7px 14px rgba(50, 50, 93, 0.15), 0 3px 6px rgba(0, 0, 0, 0.1); background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%); }}
+button:active {{ transform: translateY(1px); }}
+</style>
+<div class='card'>
+<h2>WoWTools - Guild Dashboard</h2>
+<p><b>Variables:</b> <code>{{guild_name}}</code> <code>{{region}}</code> <code>{{realm}}</code></p>
+<form method='post'>
+<label>Region</label><select name='region'>
+<option value='eu' {'selected' if (region or 'eu') == 'eu' else ''}>eu</option>
+<option value='us' {'selected' if region == 'us' else ''}>us</option>
+<option value='kr' {'selected' if region == 'kr' else ''}>kr</option>
+</select><br><br>
+<label>Realm</label><input name='realm' value='{(realm or '').replace("'", "&#39;")}'><br><br>
+<label>Guild Name</label><input name='guild_name' value='{(gname or '').replace("'", "&#39;")}'><br><br>
+<label><input type='checkbox' name='on_message' {'checked' if on_message else ''}> Enable on_message feature</label><br><br>
+<label>Welcome note template</label><textarea rows='2' name='welcome_note'>{texts.get('welcome_note','')}</textarea><br><br>
+<label>Status note template</label><textarea rows='2' name='status_note'>{texts.get('status_note','')}</textarea><br><br>
+<button type='submit'>Save</button>
+</form>
+</div>
+"""
+        return {"status": 0, "web_content": {"source": source, "standalone": True}}
 
     async def red_delete_data_for_user(
         self,

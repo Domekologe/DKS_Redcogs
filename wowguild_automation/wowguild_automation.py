@@ -930,21 +930,37 @@ class WowGuildAutomation(commands.Cog):
 
                 source = f"""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 .wow-wrap {{
-  background: linear-gradient(180deg, #15110c 0%, #1f160f 100%);
-  border: 1px solid #8a6a3a;
-  border-radius: 10px;
-  padding: 14px;
+  font-family: 'Inter', sans-serif;
+  background: rgba(18, 23, 33, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 24px;
   color: #f3e9d2;
+  box-shadow: 0 8px 32px 0 rgba(0,0,0,.3);
 }}
-.wow-wrap h2 {{ color: #ffcc66; }}
+.wow-wrap h2, .wow-wrap h3 {{ color: #ffffff; margin: 4px 0 16px 0; font-weight: 600; letter-spacing: -0.02em; }}
+.wow-wrap p {{ margin-top: 0; margin-bottom: 14px; line-height: 1.5; color: #a0aec0; }}
+.wow-wrap label {{ color: #cbd5e0; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; display: inline-block; }}
 .wow-wrap input, .wow-wrap select {{
-  background: #2b1f14;
-  color: #f5e7c8;
-  border: 1px solid #7d5b2b;
-  border-radius: 6px;
-  padding: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
   min-width: 360px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}}
+.wow-wrap input:focus, .wow-wrap select:focus {{
+  outline: none;
+  border-color: #4299e1;
+  box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25);
+  background: rgba(0, 0, 0, 0.35);
 }}
 </style>
 <div class="wow-wrap">
@@ -1485,59 +1501,95 @@ class WowGuildAutomation(commands.Cog):
 
                 source = f"""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 .wow-wrap {{
-  background: linear-gradient(180deg, #16120d 0%, #20160f 100%);
-  border: 1px solid #8a6a3a;
-  border-radius: 10px;
-  padding: 16px;
+  font-family: 'Inter', sans-serif;
+  background: rgba(18, 23, 33, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 24px;
   color: #f3e9d2;
-  box-shadow: 0 0 20px rgba(0,0,0,.35);
+  box-shadow: 0 8px 32px 0 rgba(0,0,0,.3);
 }}
-.wow-wrap h2, .wow-wrap h3 {{ color: #ffcc66; margin: 4px 0 10px 0; }}
-.wow-wrap label {{ color: #ffe7b0; font-weight: 600; }}
+.wow-wrap h2, .wow-wrap h3 {{ color: #ffffff; margin: 4px 0 16px 0; font-weight: 600; letter-spacing: -0.02em; }}
+.wow-wrap p {{ margin-top: 0; margin-bottom: 14px; line-height: 1.5; color: #a0aec0; }}
+.wow-wrap label {{ color: #cbd5e0; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; display: inline-block; }}
 .wow-wrap input, .wow-wrap select {{
-  background: #2b1f14;
-  color: #f5e7c8;
-  border: 1px solid #7d5b2b;
-  border-radius: 6px;
-  padding: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
   min-width: 360px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
 }}
-.wow-wrap hr {{ border-color: #6f5129; opacity: .6; }}
+.wow-wrap input:focus, .wow-wrap select:focus {{
+  outline: none;
+  border-color: #4299e1;
+  box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25);
+  background: rgba(0, 0, 0, 0.35);
+}}
+.wow-wrap hr {{ border-color: rgba(255,255,255,0.08); opacity: 1; margin: 24px 0; }}
 .wow-grid {{
   display: grid;
-  grid-template-columns: repeat(2, minmax(360px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 20px;
 }}
 .wow-card {{
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 18px;
+  transition: all 0.3s ease;
+}}
+.wow-card:hover {{
   background: rgba(0, 0, 0, 0.2);
-  border: 1px solid #6f5129;
-  border-radius: 8px;
-  padding: 12px;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }}
 .wow-meta {{
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 20px;
 }}
 .wow-badge {{
-  background: #2b1f14;
-  border: 1px solid #7d5b2b;
+  background: rgba(66, 153, 225, 0.15);
+  border: 1px solid rgba(66, 153, 225, 0.3);
+  color: #63b3ed;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }}
 .wow-table {{
   width: 100%;
-  border-collapse: collapse;
-  margin-top: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.06);
 }}
 .wow-table th, .wow-table td {{
-  border-bottom: 1px solid #6f5129;
-  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 14px;
   text-align: left;
-  font-size: 13px;
+  font-size: 13.5px;
+  background: rgba(0,0,0,0.15);
+}}
+.wow-table th {{
+  background: rgba(0,0,0,0.25);
+  font-weight: 600;
+  color: #a0aec0;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.05em;
 }}
 </style>
 <div class="wow-wrap">

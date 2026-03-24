@@ -1,5 +1,15 @@
 import discord
 from redbot.core import Config, app_commands, commands
+from typing import Any, Dict, Optional
+
+try:
+    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+except Exception:
+    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+        def decorator(func: Any) -> Any:
+            func.__dashboard_decorator_params__ = (args, kwargs)
+            return func
+        return decorator
 
 EVENTS = [
     "join",
@@ -18,6 +28,15 @@ class EventMessages(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=981273598123)
 
+        default_templates = {
+            "join": "🎉 **{display_name}** ist dem Server beigetreten!",
+            "leave": "👋 **{display_name}** (`{username}`) hat den Server verlassen.",
+            "kick": "👢 **{display_name}** (`{username}`) wurde gekickt. Moderator: {moderator} | Grund: {reason}",
+            "ban": "⛔ **{display_name}** (`{username}`) wurde gebannt. Moderator: {moderator} | Grund: {reason}",
+            "unban": "🔓 **{display_name}** (`{username}`) wurde entbannt. Moderator: {moderator}",
+            "timeout": "⛔ **{display_name}** (`{username}`) erhielt Timeout. Moderator: {moderator} | Grund: {reason} | Bis: {duration}",
+            "timeout_end": "⏱️ Timeout für **{display_name}** (`{username}`) ist abgelaufen.",
+        }
         default_guild = {
             "events": {
                 ev: {
@@ -25,10 +44,22 @@ class EventMessages(commands.Cog):
                     "channel": None
                 }
                 for ev in EVENTS
-            }
+            },
+            "templates": default_templates,
         }
 
         self.config.register_guild(**default_guild)
+        self._dashboard_attached = False
+
+    async def cog_load(self) -> None:
+        dashboard = self.bot.get_cog("Dashboard")
+        if dashboard is None:
+            return
+        try:
+            dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
 
     # ------------------------------------------------------------
     # Autocomplete
@@ -167,17 +198,31 @@ class EventMessages(commands.Cog):
         if channel:
             await channel.send(message)
 
+    async def _render_template(self, guild: discord.Guild, event: str, **kwargs: str) -> str:
+        templates = await self.config.guild(guild).templates()
+        template = templates.get(event, "{display_name}")
+        safe = {
+            "display_name": kwargs.get("display_name", ""),
+            "username": kwargs.get("username", ""),
+            "moderator": kwargs.get("moderator", "Unbekannt"),
+            "reason": kwargs.get("reason", "Kein Grund angegeben"),
+            "duration": kwargs.get("duration", "-"),
+        }
+        try:
+            return template.format(**safe)
+        except Exception:
+            return template
+
     # ------------------------------------------------------------
     # Events
     # ------------------------------------------------------------
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        await self._post(
-            member.guild,
-            "join",
-            f"🎉 **{member.display_name}** ist dem Server beigetreten!"
+        msg = await self._render_template(
+            member.guild, "join", display_name=member.display_name, username=str(member)
         )
+        await self._post(member.guild, "join", msg)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -199,11 +244,14 @@ class EventMessages(commands.Cog):
             await self._post(
                 guild,
                 "kick",
-                (
-                    f"👢 **{member.display_name}** (`{member}`) wurde vom Server gekickt.\n"
-                    f"👤 Moderator: {moderator}\n"
-                    f"📄 Grund: {reason}"
-                )
+                await self._render_template(
+                    guild,
+                    "kick",
+                    display_name=member.display_name,
+                    username=str(member),
+                    moderator=moderator,
+                    reason=reason,
+                ),
             )
             return
 
@@ -211,7 +259,9 @@ class EventMessages(commands.Cog):
         await self._post(
             guild,
             "leave",
-            f"👋 **{member.display_name}** (`{member}`) hat den Server verlassen."
+            await self._render_template(
+                guild, "leave", display_name=member.display_name, username=str(member)
+            ),
         )
 
 
@@ -227,9 +277,14 @@ class EventMessages(commands.Cog):
         await self._post(
             guild,
             "ban",
-            f"⛔ **{user.display_name}** (`{user}`) wurde gebannt.\n"
-            f"👤 Moderator: {moderator}\n"
-            f"📄 Grund: {reason}"
+            await self._render_template(
+                guild,
+                "ban",
+                display_name=getattr(user, "display_name", str(user)),
+                username=str(user),
+                moderator=moderator,
+                reason=reason,
+            ),
         )
 
     @commands.Cog.listener()
@@ -243,8 +298,13 @@ class EventMessages(commands.Cog):
         await self._post(
             guild,
             "unban",
-            f"🔓 **{user.display_name}** (`{user}`) wurde entbannt.\n"
-            f"👤 Moderator: {moderator}"
+            await self._render_template(
+                guild,
+                "unban",
+                display_name=getattr(user, "display_name", str(user)),
+                username=str(user),
+                moderator=moderator,
+            ),
         )
 
     @commands.Cog.listener()
@@ -256,7 +316,12 @@ class EventMessages(commands.Cog):
                 await self._post(
                     after.guild,
                     "timeout_end",
-                    f"⏱️ Timeout für **{after.display_name}** (`{after}`) ist abgelaufen."
+                    await self._render_template(
+                        after.guild,
+                        "timeout_end",
+                        display_name=after.display_name,
+                        username=str(after),
+                    ),
                 )
                 return
 
@@ -275,11 +340,122 @@ class EventMessages(commands.Cog):
                 await self._post(
                     after.guild,
                     "timeout",
-                    f"⛔ **{after.display_name}** (`{after}`) erhielt einen Timeout.\n"
-                    f"👤 Moderator: {moderator}\n"
-                    f"📄 Grund: {reason}\n"
-                    f"⏳ Dauer bis: {duration}"
+                    await self._render_template(
+                        after.guild,
+                        "timeout",
+                        display_name=after.display_name,
+                        username=str(after),
+                        moderator=moderator,
+                        reason=reason,
+                        duration=duration,
+                    ),
                 )
+
+    @commands.Cog.listener()
+    async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except TypeError:
+            try:
+                dashboard_cog.rpc.third_parties_handler.add_third_party(self)  # type: ignore[attr-defined]
+                self._dashboard_attached = True
+            except Exception:
+                self._dashboard_attached = False
+        except Exception:
+            self._dashboard_attached = False
+
+    @_dashboard_page(
+        name="eventmessages",
+        description="Configure event messages, templates and variables.",
+        methods=("GET", "POST"),
+        context_ids=["user_id", "guild_id"],
+        hidden=False,
+    )
+    async def dashboard_eventmessages(
+        self,
+        user_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
+        method: str = "GET",
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        _ = kwargs
+        if user_id is None or guild_id is None:
+            return {"status": 0, "error_code": 400, "message": "Missing context user_id/guild_id."}
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return {"status": 1, "message": "Guild not found."}
+        member = guild.get_member(user_id)
+        if member is None or not member.guild_permissions.manage_guild:
+            if user_id not in self.bot.owner_ids:
+                return {"status": 1, "message": "Not allowed."}
+
+        events = await self.config.guild(guild).events()
+        templates = await self.config.guild(guild).templates()
+
+        if method.upper() == "POST" and data:
+            form = dict(data.get("form", {}))
+            for ev in EVENTS:
+                templates[ev] = str(form.get(f"tpl_{ev}", templates.get(ev, "")))
+                events[ev]["enabled"] = str(form.get(f"enabled_{ev}", "off")).lower() in ("on", "true", "1", "yes")
+                ch_raw = form.get(f"channel_{ev}", "")
+                events[ev]["channel"] = int(ch_raw) if str(ch_raw).isdigit() else None
+            await self.config.guild(guild).events.set(events)
+            await self.config.guild(guild).templates.set(templates)
+            return {
+                "status": 0,
+                "notifications": [{"message": "EventMessages dashboard settings saved.", "category": "success"}],
+                "redirect_url": kwargs.get("request_url"),
+            }
+
+        channel_options = "".join(
+            [f"<option value=''>-- none --</option>"]
+            + [f"<option value='{c.id}'>#{c.name} ({c.id})</option>" for c in guild.text_channels]
+        )
+        rows = []
+        for ev in EVENTS:
+            enabled_checked = "checked" if events[ev]["enabled"] else ""
+            channel_id = events[ev]["channel"] or ""
+            tpl_val = str(templates.get(ev, "")).replace("<", "&lt;").replace(">", "&gt;")
+            rows.append(
+                f"""
+<div class='card'>
+<h3>{ev}</h3>
+<label><input type='checkbox' name='enabled_{ev}' {enabled_checked}> enabled</label><br>
+<label>channel id</label><br><input name='channel_{ev}' value='{channel_id}'><br>
+<label>template</label><br><textarea name='tpl_{ev}' rows='3'>{tpl_val}</textarea>
+</div>
+"""
+            )
+        content = "".join(rows)
+        source = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+* {{ font-family: 'Inter', sans-serif; box-sizing: border-box; }}
+.card {{ background: rgba(18, 23, 33, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 24px; color: #e8eefc; transition: all 0.3s ease; }}
+.card:hover {{ box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.12); }}
+h2, h3 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }}
+p {{ color: #a0aec0; font-size: 14px; line-height: 1.5; margin-top: 0; margin-bottom: 16px; }}
+code {{ background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 13px; color: #63b3ed; font-family: monospace; }}
+label {{ font-size: 13.5px; font-weight: 500; color: #cbd5e0; margin-bottom: 8px; display: inline-block; }}
+input, textarea, select {{ width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 14px; transition: all 0.2s ease; margin-bottom: 16px; }}
+input:focus, textarea:focus, select:focus {{ outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25); background: rgba(0, 0, 0, 0.35); }}
+button {{ padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); font-size: 14px; }}
+button:hover {{ transform: translateY(-1px); box-shadow: 0 7px 14px rgba(50, 50, 93, 0.15), 0 3px 6px rgba(0, 0, 0, 0.1); background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%); }}
+button:active {{ transform: translateY(1px); }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }}
+</style>
+<div class='card'>
+<h2>EventMessages Dashboard</h2>
+<p><b>Variables:</b> <code>{{display_name}}</code> <code>{{username}}</code> <code>{{moderator}}</code> <code>{{reason}}</code> <code>{{duration}}</code></p>
+<p>Use channel ID values from your server channels.</p>
+<form method='post'><div class='grid'>{content}</div><br><button type='submit'>Save all</button></form>
+</div>
+"""
+        return {"status": 0, "web_content": {"source": source, "standalone": True}}
 
     
 

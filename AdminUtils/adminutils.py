@@ -2,8 +2,8 @@ import discord
 import asyncio
 from discord import app_commands
 from datetime import timedelta
-from typing import Optional, List
-from redbot.core import commands
+from typing import Any, Dict, Optional, List
+from redbot.core import commands, Config
 from typing import Union
 import re
 from discord.app_commands import Transform
@@ -26,11 +26,50 @@ def _parse_message_id(raw: str) -> Optional[int]:
     except ValueError:
         return None
 
+try:
+    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+except Exception:
+    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+        def decorator(func: Any) -> Any:
+            func.__dashboard_decorator_params__ = (args, kwargs)
+            return func
+        return decorator
+
 class AdminUtils(commands.Cog):
     """Admin-Utilities als Slash/Hybrid-Commands"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.config = Config.get_conf(self, identifier=708921553001, force_registration=True)
+        self.config.register_guild(
+            templates={
+                "kick_success": "✅ {member} wurde gekickt. Grund: {reason}",
+                "ban_success": "✅ {member} wurde gebannt. Grund: {reason} | Nachrichten: {delete_days} Tage",
+                "timeout_success": "✅ {member} ist {minutes} Minuten im Timeout. Grund: {reason}",
+                "purge_success": "✅ {deleted} Nachrichten gelöscht. Ausnahmen: {exceptions}",
+            }
+        )
+        self._dashboard_attached = False
+
+    async def cog_load(self) -> None:
+        dashboard = self.bot.get_cog("Dashboard")
+        if dashboard is None:
+            return
+        try:
+            dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
+
+    @commands.Cog.listener()
+    async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
 
     # kleiner Helper, damit ephemeral nur bei Slash benutzt wird
     async def _reply(self, ctx: commands.Context, content: str, **kwargs):
@@ -53,7 +92,11 @@ class AdminUtils(commands.Cog):
         reason: Optional[str] = None
     ):
         await member.kick(reason=reason or f"Kicked by {ctx.author}")
-        await self._reply(ctx, f"✅ {member.mention} wurde gekickt. Grund: {reason or '—'}")
+        templates = await self.config.guild(ctx.guild).templates()
+        await self._reply(
+            ctx,
+            templates["kick_success"].format(member=member.mention, reason=reason or "—"),
+        )
 
     # ---- BAN ----
     @commands.hybrid_command(name="ban", description="Bannt ein Mitglied.")
@@ -77,10 +120,14 @@ class AdminUtils(commands.Cog):
             reason=reason or f"Banned by {ctx.author}",
             delete_message_seconds=delete_message_days * 24 * 3600
         )
+        templates = await self.config.guild(ctx.guild).templates()
         await self._reply(
             ctx,
-            f"✅ {member.mention} wurde gebannt. Grund: {reason or '—'} | "
-            f"Nachrichten: {delete_message_days} Tage"
+            templates["ban_success"].format(
+                member=member.mention,
+                reason=reason or "—",
+                delete_days=delete_message_days,
+            ),
         )
 
     # ---- TIMEOUT ----
@@ -102,7 +149,15 @@ class AdminUtils(commands.Cog):
     ):
         until = discord.utils.utcnow() + timedelta(minutes=minutes)
         await member.timeout(until, reason=reason or f"Timeout by {ctx.author}")
-        await self._reply(ctx, f"✅ {member.mention} ist {minutes} Minuten im Timeout. Grund: {reason or '—'}")
+        templates = await self.config.guild(ctx.guild).templates()
+        await self._reply(
+            ctx,
+            templates["timeout_success"].format(
+                member=member.mention,
+                minutes=minutes,
+                reason=reason or "—",
+            ),
+        )
 
 
     # ---- PURGE (mit Ausnahmen) ----
@@ -254,7 +309,11 @@ class AdminUtils(commands.Cog):
 
         # Falls wir nie eine Followup-Msg geschickt haben (Prefix oder kein progress_msg):
         if progress_msg is None:
-            await self._reply(ctx, f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
+            templates = await self.config.guild(ctx.guild).templates()
+            await self._reply(
+                ctx,
+                templates["purge_success"].format(deleted=total_deleted, exceptions=len(except_ids)),
+            )
 
 
 
@@ -622,3 +681,70 @@ class AdminUtils(commands.Cog):
             f"✅ Rechte von {source_role.mention} wurden für {channel.mention} → {dest_role.mention} kopiert.",
             ephemeral=True
         )
+
+    @_dashboard_page(
+        name="adminutils",
+        description="Guild-side AdminUtils templates and quick settings.",
+        methods=("GET", "POST"),
+        context_ids=["user_id", "guild_id"],
+        hidden=False,
+    )
+    async def dashboard_adminutils(
+        self,
+        user_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
+        method: str = "GET",
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if user_id is None or guild_id is None:
+            return {"status": 0, "error_code": 400, "message": "Missing context user_id/guild_id."}
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return {"status": 1, "message": "Guild not found."}
+        member = guild.get_member(user_id)
+        if member is None or not member.guild_permissions.manage_guild:
+            if user_id not in self.bot.owner_ids:
+                return {"status": 1, "message": "Not allowed."}
+
+        templates = await self.config.guild(guild).templates()
+        if method.upper() == "POST" and data:
+            form = dict(data.get("form", {}))
+            for key in list(templates.keys()):
+                templates[key] = str(form.get(key, templates[key]))
+            await self.config.guild(guild).templates.set(templates)
+            return {
+                "status": 0,
+                "notifications": [{"message": "AdminUtils dashboard settings saved.", "category": "success"}],
+                "redirect_url": kwargs.get("request_url"),
+            }
+
+        source = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+* {{ font-family: 'Inter', sans-serif; box-sizing: border-box; }}
+.card {{ background: rgba(18, 23, 33, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 24px; color: #e8eefc; transition: all 0.3s ease; }}
+.card:hover {{ box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.12); }}
+h2, h3 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }}
+p {{ color: #a0aec0; font-size: 14px; line-height: 1.5; margin-top: 0; margin-bottom: 16px; }}
+code {{ background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 13px; color: #63b3ed; font-family: monospace; }}
+label {{ font-size: 13.5px; font-weight: 500; color: #cbd5e0; margin-bottom: 8px; display: inline-block; }}
+input, textarea, select {{ width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 14px; transition: all 0.2s ease; margin-bottom: 16px; }}
+input:focus, textarea:focus, select:focus {{ outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25); background: rgba(0, 0, 0, 0.35); }}
+button {{ padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); font-size: 14px; }}
+button:hover {{ transform: translateY(-1px); box-shadow: 0 7px 14px rgba(50, 50, 93, 0.15), 0 3px 6px rgba(0, 0, 0, 0.1); background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%); }}
+button:active {{ transform: translateY(1px); }}
+</style>
+<div class='card'>
+<h2>AdminUtils - Guild Dashboard</h2>
+<p><b>Variables:</b> <code>{{member}}</code> <code>{{reason}}</code> <code>{{minutes}}</code> <code>{{delete_days}}</code> <code>{{deleted}}</code> <code>{{exceptions}}</code></p>
+<form method='post'>
+<label>kick_success</label><textarea rows='2' name='kick_success'>{templates.get("kick_success","")}</textarea><br>
+<label>ban_success</label><textarea rows='2' name='ban_success'>{templates.get("ban_success","")}</textarea><br>
+<label>timeout_success</label><textarea rows='2' name='timeout_success'>{templates.get("timeout_success","")}</textarea><br>
+<label>purge_success</label><textarea rows='2' name='purge_success'>{templates.get("purge_success","")}</textarea><br><br>
+<button type='submit'>Save</button>
+</form>
+</div>
+"""
+        return {"status": 0, "web_content": {"source": source, "standalone": True}}
