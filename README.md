@@ -6,8 +6,42 @@ As you can read from my grammar, you see the reason why :D
 
 ## Status Information
 
-<table><tbody><tr><td>Status</td><td>Description</td></tr><tr><td>Alpha</td><td>Alpha Release. Most Commands can not work</td></tr><tr><td>Beta</td><td>Beta Release. Most Commands should work</td></tr><tr><td>Info</td><td>Not for Production!</td></tr><tr><td>Release</td><td>All Commands should work</td></tr><tr><td>Stopped</td><td>Stopped work on it for different reasons</td></tr><tr><td>… / On Work</td><td>Currently working on it.</td></tr></tbody></table>
+| Status | Description |
+|---|---|
+| Alpha | Alpha Release. Most Commands cannot work |
+| Beta | Beta Release. Most Commands should work |
+| Info | Not for Production! |
+| Release | All Commands should work |
+| Stopped | Stopped work on it for different reasons |
+| … / On Work | Currently working on it. |
 
 ## About Cogs
 
-<table><tbody><tr><td>Cog</td><td>Status / Version</td><td>Description</td><td>Commands</td><td>Author</td></tr><tr><td>AdminUtils</td><td>Beta 0.2.0</td><td>Commands for Admins and Moderators.&nbsp;</td><td>kick (Mod Only)<br>ban (Mod Only)<br>timeout (Mod Only)<br>purge (Mod Only)<br>purgefast (Mod Only)<br>messagemove (Mod Only)<br>move-memberall (Mod Only)<br>move-member (Mod Only)<br>copyrole (Mod only)</td><td>Domekologe</td></tr><tr><td>eventmessages</td><td>Release 0.0.1</td><td><p>Set Notifications for Channels if someone</p><ul><li>Leave the Server</li><li>Kicked from the Server</li><li>Banned from the Server</li><li>Got an timeout</li><li>Unbanned from the server</li><li>Timeout ends</li></ul></td><td>em-enabled<br>em-channel<br>em-status</td><td>Domekologe</td></tr><tr><td>GuildTools</td><td>Beta 0.1.1</td><td>Some tools for Guilds</td><td>whois<br>setblizzard (admin only)<br>set-wow-defaults (Admin Only)<br>get-absence<br>list-absence<br>add-absence<br>export-userlist<br>export-poll<br>get-readytimes<br>set-readytimes</td><td>Domekologe</td></tr><tr><td>Misc</td><td>Info 0.0.1</td><td>Contains only a ping :D Was my first Cog to test</td><td>ping</td><td>Domekologe</td></tr><tr><td>neko</td><td>Release 0.0.1</td><td>Connects to Nekos.best API, get a Picture and post it (also with Categories)</td><td>neko<br>neko-cat</td><td>Domekologe</td></tr><tr><td>nekoapi</td><td>Release 0.0.1</td><td>Connects to Nekosapi.com, get a Picture and post it (also with Ratings (incl. NSFW))</td><td>nekoapi<br>nekoapi-rating</td><td>Domekologe</td></tr><tr><td>WarcraftlogsClassic</td><td>Beta 0.2.2</td><td>Some Information from Warcraftlogs Classic</td><td>warcraftlogs</td><td>Karlo (Original) / Domekologe</td></tr><tr><td>WoWTools</td><td>Beta 0.1.2</td><td>Get Ingame Stats, Information, etc from WoW Chars</td><td>charinfo<br>charstats<br>comparechars<br>cvar<br>gearcheck<br>raiderio (not working)<br>raidinfo<br>rating (not working)<br>sbset (not working)<br>serverset (Admin Only)<br>talentcheck<br>wowscoreboard (not working)<br>wowtoken</td><td>Karlo (Original) / Domekologe</td></tr><tr><td>wowguild-automation</td><td>Info / On Work</td><td><p>This will be an automation Cog, to full automate New Members and Guests when they join the server.</p><p>This should be helpful that many of manual work will be done automatically.</p><p>&nbsp;</p><p>Currently only planning phase</p></td><td>– No Commands currently available –&nbsp;</td><td>Domekologe</td></tr></tbody></table>
+| Cog | Status / Version | Description | Commands | Author |
+|---|---|---|---|---|
+| AdminUtils | Beta 0.2.0 | Commands for Admins and Moderators. | `kick`, `ban`, `timeout`, `purge`, `purgefast`, `messagemove`, `move-memberall`, `move-member`, `copyrole` | Domekologe |
+| eventmessages | Release 0.0.1 | Notifications for join, leave, kick, ban, timeout. | `em-enabled`, `em-channel`, `em-status` | Domekologe |
+| GuildTools | Beta 0.1.1 | Some tools for Guilds | `whois`, `setblizzard`, `set-wow-defaults`, `get-absence`, `list-absence`, `add-absence`, `export-userlist`, `export-poll`, `get-readytimes`, `set-readytimes` | Domekologe |
+| Misc | Info 0.0.1 | Contains only a ping :D Was my first Cog to test | `ping` | Domekologe |
+| neko | Release 0.0.1 | Connects to Nekos.best API | `neko`, `neko-cat` | Domekologe |
+| nekoapi | Release 0.0.1 | Connects to Nekosapi.com (incl. NSFW ratings) | `nekoapi`, `nekoapi-rating` | Domekologe |
+| reactionrole | Release 0.0.1 | Feature-rich Reaction Roles cog with Dashboard support. | See `help RR` | Domekologe |
+| WarcraftlogsClassic | Beta 0.2.2 | Information from Warcraftlogs Classic | `warcraftlogs` | Karlo (Original) / Domekologe |
+| WoWTools | Beta 0.1.2 | Get Ingame Stats, Information, etc from WoW Characters | `charinfo`, `charstats`, `comparechars`, `cvar`, `gearcheck`, `raiderio`, `raidinfo`, `rating`, `sbset`, `serverset`, `talentcheck`, `wowscoreboard`, `wowtoken` | Karlo (Original) / Domekologe |
+| wowguild_automation | Info / On Work | WoW Guild automation for new members/guests. | *No Commands yet* | Domekologe |
+
+## 🌐 Web Dashboard Integration
+
+Several cogs in this repository feature **native integration with AAA3A's Red-Web-Dashboard**! 
+Instead of configuring everything strictly via Discord commands, you can manage them seamlessly through your browser:
+
+- **AdminUtils** (Templates & Settings)
+- **eventmessages** (Channel routing & Custom Event Texts)
+- **reactionrole** (Easily add and map reaction roles visually)
+- **WoWTools** (Guild-profile setup & API config)
+- **wowguild_automation** (Full Dashboard based role & channel mapping setup)
+
+**Modern UI Details:** 
+These dashboard pages have been styled with a custom, premium *glassmorphism* aesthetic that provides a highly modern, sleek experience while remaining 100% compatible with the AAA3A Argon Dashboard native layout!
+
+I am Using the Original Dashboard from AAA3A with some customizations for me

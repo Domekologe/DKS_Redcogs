@@ -506,26 +506,27 @@ class ReactionRole(commands.Cog):
         source = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-* {{ font-family: 'Inter', sans-serif; box-sizing: border-box; }}
-.card {{ background: rgba(18, 23, 33, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 24px; color: #e8eefc; transition: all 0.3s ease; }}
-.card:hover {{ box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.12); }}
-h2, h3 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }}
-p {{ color: #a0aec0; font-size: 14px; line-height: 1.5; margin-top: 0; margin-bottom: 16px; }}
-code {{ background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 13px; color: #63b3ed; font-family: monospace; }}
-label {{ font-size: 13.5px; font-weight: 500; color: #cbd5e0; margin-bottom: 8px; display: inline-block; }}
-input, textarea, select {{ width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 14px; transition: all 0.2s ease; margin-bottom: 16px; }}
-input:focus, textarea:focus, select:focus {{ outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25); background: rgba(0, 0, 0, 0.35); }}
-button {{ padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); font-size: 14px; margin-right: 8px; }}
-button:hover {{ transform: translateY(-1px); box-shadow: 0 7px 14px rgba(50, 50, 93, 0.15), 0 3px 6px rgba(0, 0, 0, 0.1); background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%); }}
-button:active {{ transform: translateY(1px); }}
-table {{ width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 12px; margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }}
-td, th {{ padding: 14px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.15); font-size: 13.5px; }}
-th {{ background: rgba(0,0,0,0.25); font-weight: 600; color: #a0aec0; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; }}
-.row {{ display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; margin-bottom: 12px; align-items: center; }}
-.row input, .row select {{ margin-bottom: 0; }}
-.row button {{ margin-bottom: 0; padding: 12px; background: rgba(255, 50, 50, 0.2); border: 1px solid rgba(255, 50, 50, 0.3); color: #ff6b6b; }}
-.row button:hover {{ background: rgba(255, 50, 50, 0.3); transform: none; box-shadow: none; }}
+.dks-dashboard * {{ font-family: 'Inter', sans-serif; box-sizing: border-box; }}
+.dks-dashboard .card {{ background: rgba(18, 23, 33, 0.6); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 24px; color: #e8eefc; transition: all 0.3s ease; }}
+.dks-dashboard .card:hover {{ box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4); border-color: rgba(255, 255, 255, 0.12); }}
+.dks-dashboard h2, .dks-dashboard h3 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.02em; }}
+.dks-dashboard p {{ color: #a0aec0; font-size: 14px; line-height: 1.5; margin-top: 0; margin-bottom: 16px; }}
+.dks-dashboard code {{ background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 13px; color: #63b3ed; font-family: monospace; }}
+.dks-dashboard label {{ font-size: 13.5px; font-weight: 500; color: #cbd5e0; margin-bottom: 8px; display: inline-block; }}
+.dks-dashboard input, .dks-dashboard textarea, .dks-dashboard select {{ width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 14px; transition: all 0.2s ease; margin-bottom: 16px; }}
+.dks-dashboard input:focus, .dks-dashboard textarea:focus, .dks-dashboard select:focus {{ outline: none; border-color: #4299e1; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25); background: rgba(0, 0, 0, 0.35); }}
+.dks-dashboard button {{ padding: 12px 24px; border-radius: 8px; border: none; background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); font-size: 14px; margin-right: 8px; }}
+.dks-dashboard button:hover {{ transform: translateY(-1px); box-shadow: 0 7px 14px rgba(50, 50, 93, 0.15), 0 3px 6px rgba(0, 0, 0, 0.1); background: linear-gradient(135deg, #3182ce 0%, #2b6cb0 100%); }}
+.dks-dashboard button:active {{ transform: translateY(1px); }}
+.dks-dashboard table {{ width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 12px; margin-bottom: 24px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }}
+.dks-dashboard td, .dks-dashboard th {{ padding: 14px 16px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.15); font-size: 13.5px; }}
+.dks-dashboard th {{ background: rgba(0,0,0,0.25); font-weight: 600; color: #a0aec0; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em; }}
+.dks-dashboard .row {{ display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; margin-bottom: 12px; align-items: center; }}
+.dks-dashboard .row input, .dks-dashboard .row select {{ margin-bottom: 0; }}
+.dks-dashboard .row button {{ margin-bottom: 0; padding: 12px; background: rgba(255, 50, 50, 0.2); border: 1px solid rgba(255, 50, 50, 0.3); color: #ff6b6b; }}
+.dks-dashboard .row button:hover {{ background: rgba(255, 50, 50, 0.3); transform: none; box-shadow: none; }}
 </style>
+<div class="dks-dashboard">
 <div class="card">
 <h2>ReactionRole Dashboard</h2>
 <p><b>Variables:</b> <code>{'{id}'}</code> <code>{'{emoji}'}</code> <code>{'{role}'}</code> <code>{'{message_id}'}</code> <code>{'{channel}'}</code></p>
@@ -557,6 +558,7 @@ th {{ background: rgba(0,0,0,0.25); font-weight: 600; color: #a0aec0; text-trans
 </form>
 <h3>Current ReactionRoles</h3>
 <table><thead><tr><th>Panel ID</th><th>Channel</th><th>Message</th><th>Mappings</th></tr></thead><tbody>{table}</tbody></table>
+</div>
 </div>
 <script>
 const panelData = JSON.parse("{panel_json}");
