@@ -10,14 +10,17 @@ from redbot.core.bot import Red
 
 try:
     # Late-bound by Dashboard when registering third-party pages.
-    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
 except Exception:
-    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
-        def decorator(func: Any) -> Any:
-            # Dashboard detects this marker and wraps it with its own decorator.
-            func.__dashboard_decorator_params__ = (args, kwargs)
-            return func
-        return decorator
+    try:
+        from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    except Exception:
+        def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+            def decorator(func: Any) -> Any:
+                # Dashboard detects this marker and wraps it with its own decorator.
+                func.__dashboard_decorator_params__ = (args, kwargs)
+                return func
+            return decorator
 
 from .automation.new_user import handle_new_member_onboarding
 from .functions.automations import RankSyncService
@@ -149,16 +152,19 @@ class WowGuildAutomation(commands.Cog):
         except Exception:
             return False
 
+    def _get_dashboard_cog(self) -> Optional[commands.Cog]:
+        return self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
+
     async def cog_load(self) -> None:
         bot_setup = await self.config.bot_setup()
         self.blizzard.client_id = bot_setup.get("client_id", "")
         self.blizzard.client_secret = bot_setup.get("client_secret", "")
-        dashboard_cog = self.bot.get_cog("Dashboard")
+        dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
 
     async def cog_unload(self) -> None:
-        dashboard_cog = self.bot.get_cog("Dashboard")
+        dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             try:
                 dashboard_cog.rpc.third_parties_handler.remove_third_party(self)  # type: ignore[attr-defined]
@@ -803,7 +809,7 @@ class WowGuildAutomation(commands.Cog):
     @wow.command(name="dashboard-status")
     @commands.is_owner()
     async def wow_dashboard_status(self, ctx: commands.Context) -> None:
-        dashboard_cog = self.bot.get_cog("Dashboard")
+        dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is None:
             await ctx.send("Dashboard cog is not loaded.")
             return

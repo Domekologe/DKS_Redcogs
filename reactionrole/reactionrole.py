@@ -6,13 +6,16 @@ import json
 import html
 
 try:
-    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
 except Exception:
-    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
-        def decorator(func: Any) -> Any:
-            func.__dashboard_decorator_params__ = (args, kwargs)
-            return func
-        return decorator
+    try:
+        from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    except Exception:
+        def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+            def decorator(func: Any) -> Any:
+                func.__dashboard_decorator_params__ = (args, kwargs)
+                return func
+            return decorator
 
 class ReactionRole(commands.Cog):
     """Simple ReactionRole Cog"""
@@ -31,7 +34,7 @@ class ReactionRole(commands.Cog):
         self._dashboard_attached = False
 
     async def cog_load(self) -> None:
-        dashboard = self.bot.get_cog("Dashboard")
+        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is None:
             return
         try:

@@ -34,13 +34,16 @@ log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
 
 try:
-    from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
 except Exception:
-    def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
-        def decorator(func: Any) -> Any:
-            func.__dashboard_decorator_params__ = (args, kwargs)
-            return func
-        return decorator
+    try:
+        from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    except Exception:
+        def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+            def decorator(func: Any) -> Any:
+                func.__dashboard_decorator_params__ = (args, kwargs)
+                return func
+            return decorator
 
 
 @cog_i18n(_)
@@ -148,7 +151,7 @@ class WoWTools(
         raiderio_api_key = await self.bot.get_shared_api_tokens("raiderio")
         self.raiderio_api = RaiderIO(api_key=raiderio_api_key.get("api_key"))
         await self.create_bnet_objs()
-        dashboard = self.bot.get_cog("Dashboard")
+        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is not None:
             try:
                 dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
