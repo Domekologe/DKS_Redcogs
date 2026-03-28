@@ -1,4 +1,8 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+
+# Slash: Literal erzwingt Auswahllisten (Zuverlässiger als nur @app_commands.choices bei Hybrid-Subcommands).
+WowCharsAction = Literal["list", "add", "remove"]
+WowCharsSpiel = Literal["retail", "mop_classic"]
 import html
 import json
 import traceback
@@ -103,11 +107,11 @@ class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
     wow_char_grp = app_commands.Group(
-        name="wowchar",
+        name="wow-char",
         description="WoW-Charaktere mit der Gilde verknüpfen (Retail / MoP Classic)",
     )
     wow_char_officer_grp = app_commands.Group(
-        name="wowcharofficer",
+        name="wow-char-officer",
         description="Officer: Charakterlisten und Entfernen",
     )
 
@@ -527,14 +531,20 @@ class WowGuildAutomation(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         await self._run_onboarding_flow(member, simulated=False)
 
-    @commands.hybrid_group(name="wow")
+    @commands.hybrid_group(
+        name="wow",
+        description="WoW-Gilde: Onboarding, Charaktere, Ränge und Server-Einstellungen.",
+    )
     @commands.guild_only()
     async def wow(self, ctx: commands.Context) -> None:
         """WoW guild automation commands."""
         if ctx.invoked_subcommand is None:
             await ctx.send(await self._t(ctx, "wow_help"))
 
-    @wow.command(name="readytimes-manage")
+    @wow.command(
+        name="readytimes-manage",
+        description="Bereitschaftszeiten ansehen (Editor folgt).",
+    )
     async def wow_readytimes_manage(self, ctx: commands.Context) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
@@ -555,14 +565,29 @@ class WowGuildAutomation(commands.Cog):
             await member_conf.ready_times.set(current)
         await ctx.send(await self._t(ctx, "readytimes_init"))
 
-    @commands.hybrid_command(name="wow-readytimes-manage")
+    @commands.hybrid_command(
+        name="wow-readytimes-manage",
+        description="Bereitschaftszeiten ansehen (Editor folgt).",
+    )
     @commands.guild_only()
     async def wow_readytimes_manage_direct(self, ctx: commands.Context) -> None:
-        """Slash-style alias for readytimes."""
+        """Bereitschaftszeiten ansehen (Editor folgt)."""
         await self.wow_readytimes_manage(ctx)
 
-    @wow.command(name="guildsettings")
+    @wow.command(
+        name="guildsettings",
+        description="Gilden-API: Region, Spielversion, Realm und Gildenname setzen.",
+    )
+    @commands.guild_only()
+    @app_commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        region="Blizzard-Region, z. B. eu oder us",
+        version="Profil-Version, z. B. retail oder mop_classic",
+        realm="Realm-Slug, z. B. tarren-mill",
+        guildname="Gildenname (exakt wie in WoW)",
+        language="Bot-Sprache für diesen Server: de-DE oder en-US",
+    )
     async def wow_guildsettings(
         self,
         ctx: commands.Context,
@@ -600,9 +625,19 @@ class WowGuildAutomation(commands.Cog):
             )
         )
 
-    @commands.hybrid_command(name="wow-guildsettings")
+    @commands.hybrid_command(
+        name="wow-guildsettings",
+        description="Gilden-API: Region, Spielversion, Realm und Gildenname setzen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        region="Blizzard-Region, z. B. eu oder us",
+        version="Profil-Version, z. B. retail oder mop_classic",
+        realm="Realm-Slug, z. B. tarren-mill",
+        guildname="Gildenname (exakt wie in WoW)",
+        language="Bot-Sprache für diesen Server: de-DE oder en-US",
+    )
     async def wow_guildsettings_direct(
         self,
         ctx: commands.Context,
@@ -612,32 +647,26 @@ class WowGuildAutomation(commands.Cog):
         guildname: str,
         language: str = "de-DE",
     ) -> None:
-        """Slash-style alias for guild settings."""
+        """Gilden-API: Region, Spielversion, Realm und Gildenname setzen."""
         await self.wow_guildsettings(ctx, region, version, realm, guildname, language)
 
-    @wow.command(name="chars")
-    @app_commands.describe(
-        action="Was tun?",
-        charname="Charaktername (nur bei Hinzufügen/Entfernen)",
-        spiel="Spielversion — bei Entfernen nötig, wenn der Name in Retail und MoP existiert",
+    @wow.command(
+        name="chars",
+        description="Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster).",
     )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Liste anzeigen", value="list"),
-            app_commands.Choice(name="Charakter hinzufügen", value="add"),
-            app_commands.Choice(name="Charakter entfernen", value="remove"),
-        ],
-        spiel=[
-            app_commands.Choice(name="Retail", value=GAME_RETAIL),
-            app_commands.Choice(name="MoP Classic", value=GAME_MOP),
-        ],
+    @commands.guild_only()
+    @app_commands.guild_only()
+    @app_commands.describe(
+        action="Liste anzeigen, Char hinzufügen oder Char entfernen",
+        charname="Name des Charakters (nur bei Hinzufügen/Entfernen)",
+        spiel="Retail oder MoP — bei Entfernen nötig, wenn Name in beiden Spielen existiert",
     )
     async def wow_chars(
         self,
         ctx: commands.Context,
-        action: str,
+        action: WowCharsAction,
         charname: Optional[str] = None,
-        spiel: Optional[str] = None,
+        spiel: Optional[WowCharsSpiel] = None,
     ) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
@@ -706,35 +735,35 @@ class WowGuildAutomation(commands.Cog):
         else:
             await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
 
-    @commands.hybrid_command(name="wowchars")
+    @commands.hybrid_command(
+        name="wow-chars",
+        description="Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster).",
+    )
     @commands.guild_only()
     @app_commands.describe(
-        action="Was tun?",
-        charname="Charaktername (nur bei Hinzufügen/Entfernen)",
-        spiel="Bei Entfernen nötig, wenn der Name in Retail und MoP existiert",
-    )
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="Liste anzeigen", value="list"),
-            app_commands.Choice(name="Charakter hinzufügen", value="add"),
-            app_commands.Choice(name="Charakter entfernen", value="remove"),
-        ],
-        spiel=[
-            app_commands.Choice(name="Retail", value=GAME_RETAIL),
-            app_commands.Choice(name="MoP Classic", value=GAME_MOP),
-        ],
+        action="Liste anzeigen, Char hinzufügen oder Char entfernen",
+        charname="Name des Charakters (nur bei Hinzufügen/Entfernen)",
+        spiel="Retail oder MoP — bei Entfernen nötig, wenn Name in beiden Spielen existiert",
     )
     async def wow_chars_direct(
         self,
         ctx: commands.Context,
-        action: str,
+        action: WowCharsAction,
         charname: Optional[str] = None,
-        spiel: Optional[str] = None,
+        spiel: Optional[WowCharsSpiel] = None,
     ) -> None:
-        """Zeigt, fügt hinzu oder entfernt verknüpfte Gildenchars (Slash: Auswahlmenüs)."""
+        """Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster)."""
         await self.wow_chars(ctx, action, charname, spiel)
 
-    @wow.command(name="syncrank")
+    @wow.command(
+        name="syncrank",
+        description="WoW-Gildenrang mit der passenden Discord-Rolle abgleichen.",
+    )
+    @commands.guild_only()
+    @app_commands.guild_only()
+    @app_commands.describe(
+        mainchar="Optional: Charaktername; leer = gespeicherter Main zum aktiven Profil",
+    )
     async def wow_syncrank(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
@@ -762,7 +791,7 @@ class WowGuildAutomation(commands.Cog):
                     await self._send_private_ack(
                         ctx,
                         "Dieser Name existiert in **Retail** und **MoP** — bitte Main setzen oder "
-                        "`selected_game` durch einen der Chars setzen lassen (`/wowchar panel`).",
+                        "`selected_game` durch einen der Chars setzen lassen (`/wow-char panel`).",
                     )
                     return
                 mainchar = pick[0]["name"]
@@ -776,7 +805,7 @@ class WowGuildAutomation(commands.Cog):
             if not main_entry or not main_entry.get("name"):
                 await self._send_private_ack(
                     ctx,
-                    "Kein Main gesetzt. Nutze `/wowchar panel` oder `wow syncrank <Charname>`.",
+                    "Kein Main gesetzt. Nutze `/wow-char panel` oder `wow syncrank <Charname>`.",
                 )
                 return
             mainchar = str(main_entry["name"]).strip()
@@ -790,15 +819,28 @@ class WowGuildAutomation(commands.Cog):
             return
         await self._send_private_ack(ctx, await self._t(ctx, "rank_failed"))
 
-    @commands.hybrid_command(name="wow-syncrank")
+    @commands.hybrid_command(
+        name="wow-syncrank",
+        description="WoW-Gildenrang mit der passenden Discord-Rolle abgleichen.",
+    )
     @commands.guild_only()
+    @app_commands.describe(
+        mainchar="Optional: Charaktername; leer = gespeicherter Main zum aktiven Profil",
+    )
     async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
-        """Slash-style alias for rank syncing."""
+        """WoW-Gildenrang mit der passenden Discord-Rolle abgleichen."""
         await self.wow_syncrank(ctx, mainchar)
 
-    @wow.command(name="setrankmap")
+    @wow.command(
+        name="setrankmap",
+        description="Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        rank_name="Rangbezeichnung wie im Mapping (z. B. aus wow listrankmap)",
+        role="Discord-Rolle für diesen Rang",
+    )
     async def wow_setrankmap(self, ctx: commands.Context, rank_name: str, role: discord.Role) -> None:
         if not ctx.guild:
             await ctx.send(await self._t(ctx, "server_only"))
@@ -810,18 +852,32 @@ class WowGuildAutomation(commands.Cog):
         await self.config.guild(ctx.guild).set(cfg)
         await ctx.send(f"Mapping gesetzt: `{rank_name}` -> {role.mention}")
 
-    @commands.hybrid_command(name="wow-setrankmap")
+    @commands.hybrid_command(
+        name="wow-setrankmap",
+        description="Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        rank_name="Rangbezeichnung wie im Mapping (z. B. aus wow listrankmap)",
+        role="Discord-Rolle für diesen Rang",
+    )
     async def wow_setrankmap_direct(
         self, ctx: commands.Context, rank_name: str, role: discord.Role
     ) -> None:
-        """Slash-style alias for rank mapping set."""
+        """Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen."""
         await self.wow_setrankmap(ctx, rank_name, role)
 
-    @wow.command(name="setranktitle")
+    @wow.command(
+        name="setranktitle",
+        description="Anzeigetitel für einen Gildenrang-Index (0–9) setzen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        rank_index="Gildenrang-Index von 0 bis 9",
+        title="Freier Titeltext für diesen Index",
+    )
     async def wow_setranktitle(self, ctx: commands.Context, rank_index: int, title: str) -> None:
         if not ctx.guild:
             await ctx.send(await self._t(ctx, "server_only"))
@@ -833,16 +889,26 @@ class WowGuildAutomation(commands.Cog):
         await self.config.guild(ctx.guild).set(cfg)
         await ctx.send(f"Rangtitel gesetzt: Index `{rank_index}` -> `{title}`")
 
-    @commands.hybrid_command(name="wow-setranktitle")
+    @commands.hybrid_command(
+        name="wow-setranktitle",
+        description="Anzeigetitel für einen Gildenrang-Index (0–9) setzen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(
+        rank_index="Gildenrang-Index von 0 bis 9",
+        title="Freier Titeltext für diesen Index",
+    )
     async def wow_setranktitle_direct(
         self, ctx: commands.Context, rank_index: int, title: str
     ) -> None:
-        """Slash-style alias for rank title set."""
+        """Anzeigetitel für einen Gildenrang-Index (0–9) setzen."""
         await self.wow_setranktitle(ctx, rank_index, title)
 
-    @wow.command(name="listrankmap")
+    @wow.command(
+        name="listrankmap",
+        description="Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_listrankmap(self, ctx: commands.Context) -> None:
@@ -871,15 +937,25 @@ class WowGuildAutomation(commands.Cog):
             lines.append("- none")
         await ctx.send("\n".join(lines))
 
-    @commands.hybrid_command(name="wow-listrankmap")
+    @commands.hybrid_command(
+        name="wow-listrankmap",
+        description="Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_listrankmap_direct(self, ctx: commands.Context) -> None:
-        """Slash-style alias for listing rank titles/mapping."""
+        """Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen."""
         await self.wow_listrankmap(ctx)
 
-    @wow.command(name="botsetup")
+    @wow.command(
+        name="botsetup",
+        description="Blizzard API: Client-ID und Secret (nur Bot-Besitzer).",
+    )
     @commands.is_owner()
+    @app_commands.describe(
+        client_id="Blizzard Developer Portal Client-ID",
+        client_secret="Blizzard Developer Portal Client Secret",
+    )
     async def wow_botsetup(
         self,
         ctx: commands.Context,
@@ -897,8 +973,17 @@ class WowGuildAutomation(commands.Cog):
         self.blizzard.client_secret = client_secret
         await ctx.send(await self._t(ctx, "botsetup_saved"))
 
-    @wow.command(name="mastersetup")
+    @wow.command(
+        name="mastersetup",
+        description="Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer).",
+    )
     @commands.is_owner()
+    @app_commands.describe(
+        default_language="Standard de-DE oder en-US für neue Servereinträge",
+        default_region="Standard-API-Region, z. B. eu",
+        default_version="Standard-Spielversion, z. B. retail",
+        dashboard_enabled="Web-Dashboard für WoW-Cog aktivieren",
+    )
     async def wow_mastersetup(
         self,
         ctx: commands.Context,
@@ -917,19 +1002,35 @@ class WowGuildAutomation(commands.Cog):
         await self.config.bot_setup.set(data)
         await ctx.send(await self._t(ctx, "master_saved"))
 
-    @commands.hybrid_command(name="wow-botsetup")
+    @commands.hybrid_command(
+        name="wow-botsetup",
+        description="Blizzard API: Client-ID und Secret (nur Bot-Besitzer).",
+    )
     @commands.is_owner()
+    @app_commands.describe(
+        client_id="Blizzard Developer Portal Client-ID",
+        client_secret="Blizzard Developer Portal Client Secret",
+    )
     async def wow_botsetup_direct(
         self,
         ctx: commands.Context,
         client_id: str,
         client_secret: str,
     ) -> None:
-        """Slash-style alias for bot owner setup."""
+        """Blizzard API: Client-ID und Secret (nur Bot-Besitzer)."""
         await self.wow_botsetup(ctx, client_id, client_secret)
 
-    @commands.hybrid_command(name="wow-mastersetup")
+    @commands.hybrid_command(
+        name="wow-mastersetup",
+        description="Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer).",
+    )
     @commands.is_owner()
+    @app_commands.describe(
+        default_language="Standard de-DE oder en-US für neue Servereinträge",
+        default_region="Standard-API-Region, z. B. eu",
+        default_version="Standard-Spielversion, z. B. retail",
+        dashboard_enabled="Web-Dashboard für WoW-Cog aktivieren",
+    )
     async def wow_mastersetup_direct(
         self,
         ctx: commands.Context,
@@ -938,7 +1039,7 @@ class WowGuildAutomation(commands.Cog):
         default_version: str = "retail",
         dashboard_enabled: bool = True,
     ) -> None:
-        """Slash-style alias for master setup."""
+        """Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer)."""
         await self.wow_mastersetup(
             ctx,
             default_language=default_language,
@@ -947,7 +1048,10 @@ class WowGuildAutomation(commands.Cog):
             dashboard_enabled=dashboard_enabled,
         )
 
-    @wow.command(name="onboarding-setup")
+    @wow.command(
+        name="onboarding-setup",
+        description="Onboarding-Kanal und Rollen per Chat-Wizard einrichten.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_onboarding_setup(self, ctx: commands.Context) -> None:
@@ -1039,29 +1143,43 @@ class WowGuildAutomation(commands.Cog):
             )
         )
 
-    @commands.hybrid_command(name="wow-onboarding-setup")
+    @commands.hybrid_command(
+        name="wow-onboarding-setup",
+        description="Onboarding-Kanal und Rollen per Chat-Wizard einrichten.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_onboarding_setup_direct(self, ctx: commands.Context) -> None:
-        """Slash-style alias for onboarding setup wizard."""
+        """Onboarding-Kanal und Rollen per Chat-Wizard einrichten."""
         await self.wow_onboarding_setup(ctx)
 
-    @wow.command(name="simulate-join")
+    @wow.command(
+        name="simulate-join",
+        description="Onboarding-Flow für ein Mitglied testen (ohne echten Join).",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(member="Mitglied, für das die Simulation läuft")
     async def wow_simulate_join(self, ctx: commands.Context, member: discord.Member) -> None:
         await self._send_private_ack(ctx, f"Simuliere Join-Onboarding fuer {member.mention}...")
         await self._run_onboarding_flow(member, simulated=True)
         await self._send_private_ack(ctx, "Simulation abgeschlossen.")
 
-    @commands.hybrid_command(name="wow-simulate-join")
+    @commands.hybrid_command(
+        name="wow-simulate-join",
+        description="Onboarding-Flow für ein Mitglied testen (ohne echten Join).",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(member="Mitglied, für das die Simulation läuft")
     async def wow_simulate_join_direct(self, ctx: commands.Context, member: discord.Member) -> None:
-        """Slash-style alias to simulate a member join onboarding."""
+        """Onboarding-Flow für ein Mitglied testen (ohne echten Join)."""
         await self.wow_simulate_join(ctx, member)
 
-    @wow.command(name="registrations")
+    @wow.command(
+        name="registrations",
+        description="Alle gespeicherten Onboarding-Registrierungen dieses Servers listen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_registrations(self, ctx: commands.Context) -> None:
@@ -1090,16 +1208,23 @@ class WowGuildAutomation(commands.Cog):
         message = "Registrierungen:\n" + "\n".join(f"- {line}" for line in lines[:100])
         await ctx.send(message)
 
-    @commands.hybrid_command(name="wow-registrations")
+    @commands.hybrid_command(
+        name="wow-registrations",
+        description="Alle gespeicherten Onboarding-Registrierungen dieses Servers listen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def wow_registrations_direct(self, ctx: commands.Context) -> None:
-        """Slash-style alias for registration list."""
+        """Alle gespeicherten Onboarding-Registrierungen dieses Servers listen."""
         await self.wow_registrations(ctx)
 
-    @wow.command(name="delregistration")
+    @wow.command(
+        name="delregistration",
+        description="Onboarding-Registrierung und Spielwahl eines Mitglieds löschen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(member="Mitglied, dessen Registrierung gelöscht wird")
     async def wow_delregistration(self, ctx: commands.Context, member: discord.Member) -> None:
         if not ctx.guild:
             await ctx.send(await self._t(ctx, "server_only"))
@@ -1108,14 +1233,21 @@ class WowGuildAutomation(commands.Cog):
         await self.config.member(member).selected_game.clear()
         await ctx.send(f"Registrierung von {member.mention} wurde entfernt.")
 
-    @commands.hybrid_command(name="wow-delregistration")
+    @commands.hybrid_command(
+        name="wow-delregistration",
+        description="Onboarding-Registrierung und Spielwahl eines Mitglieds löschen.",
+    )
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
+    @app_commands.describe(member="Mitglied, dessen Registrierung gelöscht wird")
     async def wow_delregistration_direct(self, ctx: commands.Context, member: discord.Member) -> None:
-        """Slash-style alias for deleting one registration entry."""
+        """Onboarding-Registrierung und Spielwahl eines Mitglieds löschen."""
         await self.wow_delregistration(ctx, member)
 
-    @wow.command(name="dashboard-status")
+    @wow.command(
+        name="dashboard-status",
+        description="Prüfen, ob Dashboard-Cog und WoW-Webseiten erreichbar sind (Bot-Besitzer).",
+    )
     @commands.is_owner()
     async def wow_dashboard_status(self, ctx: commands.Context) -> None:
         dashboard_cog = self._get_dashboard_cog()
@@ -1154,7 +1286,7 @@ class WowGuildAutomation(commands.Cog):
             view=CharMainMenuView(self, interaction.guild, interaction.user),
         )
 
-    @wow_char_grp.command(name="meinechars", description="Deine verknüpften Chars (nur du siehst das)")
+    @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
     @app_commands.guild_only()
     async def slash_wow_char_mine(self, interaction: discord.Interaction) -> None:
         if not isinstance(interaction.user, discord.Member):
@@ -1181,7 +1313,7 @@ class WowGuildAutomation(commands.Cog):
         )
 
     @wow_char_officer_grp.command(
-        name="meinechars",
+        name="meine-chars",
         description="Zeigt deine eigenen verknüpften Chars (zum Abgleich)",
     )
     @app_commands.guild_only()
@@ -1198,7 +1330,7 @@ class WowGuildAutomation(commands.Cog):
         await interaction.response.send_message(text, ephemeral=True)
 
     @wow_char_officer_grp.command(
-        name="charentfernen",
+        name="char-entfernen",
         description="Chars eines Mitglieds entfernen (User erhält DM mit Grund)",
     )
     @app_commands.guild_only()
@@ -2095,7 +2227,7 @@ class WowGuildAutomation(commands.Cog):
 
       <div class="wow-card">
         <h3>Character linking messages</h3>
-        <p><small>Slash <code>/wowchar</code> / <code>/wowcharofficer</code> und interaktives Panel.</small></p>
+        <p><small>Slash <code>/wow-char</code> / <code>/wow-char-officer</code> und interaktives Panel.</small></p>
         <p><label>Duplicate / already linked (use &#123;detail&#125;)</label><br>{form.duplicate_character_message(rows=4)}</p>
         <p><label>Member left notice (&#123;user&#125;, &#123;username&#125;, &#123;chars&#125;)</label><br>{form.member_left_characters_notice(rows=3)}</p>
         <p><label>Officer removal DM (&#123;chars&#125;, &#123;reason&#125;, &#123;officer&#125;)</label><br>{form.admin_removed_char_dm(rows=3)}</p>

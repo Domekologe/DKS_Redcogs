@@ -147,7 +147,7 @@ async def merge_onboarding_character_into_linked(
 ) -> bool:
     """
     Persist onboarding main character into linked_characters without a roster API check
-    (needed for manual verification and parity with /wowchar panel).
+    (needed for manual verification and parity with /wow-char panel).
 
     Returns True if the member has this name+game linked after the call (added, or already present).
     Returns False if another member already owns this char+game on the server.

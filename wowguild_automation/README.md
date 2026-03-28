@@ -39,7 +39,7 @@ Two styles are available:
 - Slash-style aliases:
   - `/wow-guildsettings`
   - `/wow-readytimes-manage`
-  - `/wowchars` (Aktion per Auswahlmenü) bzw. Prefix `wow chars …`
+  - `/wow-chars` (Aktion per Auswahlmenü) bzw. Prefix `wow chars …`
   - `/wow-syncrank`
   - `/wow-botsetup`
   - `/wow-onboarding-setup`
