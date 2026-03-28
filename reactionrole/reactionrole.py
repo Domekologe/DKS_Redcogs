@@ -483,8 +483,14 @@ class ReactionRole(commands.Cog):
             panel_rows.append(
                 f"<tr><td>{html.escape(str(p['panel_id']))}</td><td>{channel_obj.mention if channel_obj else 'deleted'}</td><td>{p['message_id']}</td><td>{html.escape(mappings_text)}</td></tr>"
             )
+            ch_label = (
+                f"#{channel_obj.name}"
+                if isinstance(channel_obj, discord.TextChannel)
+                else "deleted channel"
+            )
             panel_options.append(
-                f"<option value='{html.escape(str(p['panel_id']))}'>{html.escape(str(p['panel_id']))} - msg {p['message_id']}</option>"
+                f"<option value='{html.escape(str(p['panel_id']))}'>"
+                f"{html.escape(ch_label)} — msg {html.escape(str(p.get('message_id', '')))}</option>"
             )
             panel_data_for_js.append(
                 {
@@ -499,10 +505,10 @@ class ReactionRole(commands.Cog):
         table = "".join(panel_rows) if panel_rows else "<tr><td colspan='4'><em>No entries</em></td></tr>"
 
         role_options = ["<option value=''>-- select role --</option>"] + [
-            f"<option value='{r.id}'>{html.escape(r.name)} ({r.id})</option>" for r in guild.roles if not r.is_default()
+            f"<option value='{r.id}'>{html.escape(r.name)}</option>" for r in guild.roles if not r.is_default()
         ]
         channel_options = ["<option value=''>-- select channel --</option>"] + [
-            f"<option value='{c.id}'>{html.escape('#' + c.name)} ({c.id})</option>" for c in guild.text_channels
+            f"<option value='{c.id}'>{html.escape('#' + c.name)}</option>" for c in guild.text_channels
         ]
         panel_json = html.escape(json.dumps(panel_data_for_js))
 

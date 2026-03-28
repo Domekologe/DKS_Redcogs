@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import base64
 import re
 import time
@@ -103,6 +103,30 @@ class BlizzardService:
                     rank_index=rank_index,
                 )
         return None
+
+    async def roster_character_names(
+        self, region: str, version: str, realm: str, guild_name: str
+    ) -> List[str]:
+        """Sorted unique character names on the guild roster for the given game version."""
+        if not (region and realm and guild_name):
+            return []
+        roster = await self._get_roster(region, version, realm, guild_name)
+        if not roster:
+            return []
+        names: List[str] = []
+        seen: Set[str] = set()
+        for entry in roster.get("members", []):
+            char = entry.get("character", {})
+            name = str(char.get("name", "")).strip()
+            if not name:
+                continue
+            low = name.lower()
+            if low in seen:
+                continue
+            seen.add(low)
+            names.append(name)
+        names.sort(key=str.lower)
+        return names
 
     async def get_member_characters(
         self, region: str, version: str, realm: str, guild_name: str, character_name: str

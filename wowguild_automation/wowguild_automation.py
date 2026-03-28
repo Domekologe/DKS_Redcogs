@@ -1,10 +1,12 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+import html
 import json
 import traceback
 import asyncio
 from datetime import datetime, timezone
 
 import discord
+from discord import app_commands
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 
@@ -23,6 +25,24 @@ except Exception:
             return decorator
 
 from .automation.new_user import handle_new_member_onboarding
+from .character_helpers import (
+    GAME_MOP,
+    GAME_RETAIL,
+    char_tuple_key,
+    find_char_owner_guild_wide,
+    format_char_line,
+    game_label,
+    get_linked_list,
+    normalize_linked_characters,
+    set_linked_list,
+    wow_profile_for_game,
+)
+from .character_ui import (
+    CharMainMenuView,
+    OfficerListMenuView,
+    OfficerRemoveCharView,
+    officer_can_manage_characters,
+)
 from .functions.automations import RankSyncService
 from .functions.blizzard import BlizzardService
 
@@ -75,6 +95,15 @@ I18N = {
 class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
+    wow_char_grp = app_commands.Group(
+        name="wow-char",
+        description="WoW-Charaktere mit der Gilde verknüpfen (Retail / MoP Classic)",
+    )
+    wow_char_officer_grp = app_commands.Group(
+        name="wow-char-officer",
+        description="Officer tools: character lists and removals",
+    )
+
     def __init__(self, bot: Red) -> None:
         self.bot = bot
         self.config = Config.get_conf(self, identifier=980231234, force_registration=True)
@@ -120,14 +149,20 @@ class WowGuildAutomation(commands.Cog):
                 "onboarding_channel_id": 0,
                 "manual_review_channel_id": 0,
                 "raid_guest_channel_id": 0,
+                "officer_character_notify_channel_id": 0,
             },
             rules={"rule_channel_id": 0, "rule_emoji": "✅"},
             templates={
-                "manual_verification": "Manuelle Verifizierung nötig! User {username} hat sich gemeldet als Char {charname} und möchte Gildenrechte erhalten. Bitte bestätigen sie dies manuell."
+                "manual_verification": "Manuelle Verifizierung nötig! User {username} hat sich gemeldet als Char {charname} und möchte Gildenrechte erhalten. Bitte bestätigen sie dies manuell.",
+                "duplicate_character_message": "Dieser Charakter ist bereits verknüpft oder ungültig. Wende dich an einen Offizier. ({detail})",
+                "member_left_characters_notice": "Mitglied {user} hat den Server verlassen. Verknüpfte Chars: {chars}",
+                "admin_removed_char_dm": "Ein Offizier hat folgende WoW-Chars von dir entfernt: {chars}\nGrund: {reason}",
             },
         )
         self.config.register_member(
             chars=[],
+            linked_characters=[],
+            main_character=None,
             ready_times={},
             onboarding_language="de-DE",
             selected_game="retail",
@@ -224,6 +259,136 @@ class WowGuildAutomation(commands.Cog):
             await ctx.author.send(message)
         except Exception:
             await ctx.send(message)
+
+    async def _try_add_characters_for_member(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        game_type: str,
+        names: List[str],
+    ) -> tuple:
+        cfg = await self._guild_config(guild)
+        templates = cfg.get("templates", {})
+        dup_tpl = templates.get(
+            "duplicate_character_message",
+            "Dieser Charakter ist bereits verknüpft ({detail})",
+        )
+        prof = await wow_profile_for_game(cfg, game_type)
+        if not prof or not prof.get("realm") or not prof.get("guild_name"):
+            return (
+                f"Profil für **{game_label(game_type)}** ist unvollständig (Realm/Gilde im Dashboard setzen).",
+                False,
+            )
+        roster = await self.blizzard.roster_character_names(
+            prof.get("region", "eu"),
+            prof.get("version", game_type),
+            prof.get("realm", ""),
+            prof.get("guild_name", ""),
+        )
+        roster_l = {n.lower() for n in roster}
+        linked = await get_linked_list(self.config.member(member))
+        to_add: List[Dict[str, str]] = []
+        for raw_name in names:
+            name = (raw_name or "").strip()
+            if not name:
+                continue
+            if name.lower() not in roster_l:
+                return (
+                    f"`{name}` ist im **{game_label(game_type)}**-Gildenroster nicht (oder API-Fehler).",
+                    False,
+                )
+            key = char_tuple_key(name, game_type)
+            owner = await find_char_owner_guild_wide(
+                self.config, guild, name, game_type, exclude_user_id=member.id
+            )
+            if owner is not None:
+                return (dup_tpl.format(detail=f"bereits mit <@{owner}> verknüpft"), False)
+            if any(char_tuple_key(e["name"], e["game_type"]) == key for e in linked):
+                return (dup_tpl.format(detail="bereits bei dir verknüpft"), False)
+            if any(char_tuple_key(e["name"], e["game_type"]) == key for e in to_add):
+                continue
+            to_add.append({"name": name, "game_type": game_type})
+        merged = linked + to_add
+        await set_linked_list(self.config.member(member), merged)
+        labels = ", ".join(f"{x['name']} ({game_label(x['game_type'])})" for x in to_add)
+        return (f"Verknüpft: {labels}" if labels else "Nichts hinzugefügt.", True)
+
+    async def _format_user_char_list_ephemeral(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        *,
+        header_user: bool = False,
+    ) -> str:
+        _ = guild
+        linked = await get_linked_list(self.config.member(member))
+        main = await self.config.member(member).main_character()
+        main_d = main if isinstance(main, dict) else None
+        if not linked:
+            head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
+            return head + "Keine Chars verknüpft."
+        lines = [format_char_line(e, main_d) for e in linked]
+        head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
+        return head + "\n".join(lines)
+
+    async def _officer_format_all_linked_chars(self, guild: discord.Guild) -> str:
+        data = await self.config.all_members(guild)
+        lines: List[str] = []
+        for uid_str, payload in data.items():
+            linked = normalize_linked_characters(
+                payload.get("linked_characters") or payload.get("chars")
+            )
+            if not linked:
+                continue
+            try:
+                uid = int(uid_str)
+            except (TypeError, ValueError):
+                continue
+            mem = guild.get_member(uid)
+            label = mem.mention if mem else f"<@{uid}>"
+            main_d = payload.get("main_character")
+            main_d = main_d if isinstance(main_d, dict) else None
+            parts = [format_char_line(e, main_d) for e in linked]
+            lines.append(f"{label}: {', '.join(parts)}")
+        return "\n".join(lines) if lines else "Keine verknüpften Chars auf diesem Server."
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        linked = await get_linked_list(self.config.member(member))
+        main = await self.config.member(member).main_character()
+        had_chars = bool(linked)
+        await self.config.member(member).linked_characters.clear()
+        await self.config.member(member).chars.clear()
+        await self.config.member(member).main_character.clear()
+        await self.config.member(member).selected_game.clear()
+        await self.config.member(member).registration.clear()
+        if not had_chars:
+            return
+        guild = member.guild
+        cfg = await self._guild_config(guild)
+        ch_id = int(cfg.get("channels", {}).get("officer_character_notify_channel_id", 0) or 0)
+        channel = guild.get_channel(ch_id) if ch_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return
+        tpl = cfg.get("templates", {}).get(
+            "member_left_characters_notice",
+            "{user} hat den Server verlassen. Chars: {chars}",
+        )
+        char_lines = []
+        for e in linked:
+            char_lines.append(f"{e['name']} ({game_label(e['game_type'])})")
+        chars_str = ", ".join(char_lines)
+        try:
+            await channel.send(
+                tpl.format(
+                    user=f"{member} ({member.id})",
+                    username=str(member),
+                    chars=chars_str,
+                    main=str(main) if main else "",
+                )
+            )
+        except discord.HTTPException:
+            pass
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
@@ -433,24 +598,34 @@ class WowGuildAutomation(commands.Cog):
             return
 
         member_conf = self.config.member(ctx.author)
-        chars = await member_conf.chars()
+        linked = await get_linked_list(member_conf)
+        main = await member_conf.main_character()
+        main_d = main if isinstance(main, dict) else None
 
         action = action.lower().strip()
         if action == "list":
-            msg = ", ".join(chars) if chars else await self._t(ctx, "chars_none")
-            await ctx.send(msg)
+            if not linked:
+                await self._send_private_ack(ctx, await self._t(ctx, "chars_none"))
+                return
+            msg = "\n".join(format_char_line(e, main_d) for e in linked)
+            await self._send_private_ack(ctx, msg)
         elif action == "add" and charname:
-            if charname not in chars:
-                chars.append(charname)
-                await member_conf.chars.set(chars)
-            await ctx.send(await self._t(ctx, "char_added", char=charname))
+            msg, ok = await self._try_add_characters_for_member(
+                ctx.guild, ctx.author, GAME_RETAIL, [charname]
+            )
+            await self._send_private_ack(ctx, msg)
         elif action == "remove" and charname:
-            if charname in chars:
-                chars.remove(charname)
-                await member_conf.chars.set(chars)
-            await ctx.send(await self._t(ctx, "char_removed", char=charname))
+            target = charname.strip().lower()
+            new_list = [e for e in linked if e["name"].lower() != target]
+            if len(new_list) == len(linked):
+                await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
+                return
+            await set_linked_list(member_conf, new_list)
+            if main_d and main_d.get("name", "").lower() == target:
+                await member_conf.main_character.clear()
+            await self._send_private_ack(ctx, await self._t(ctx, "char_removed", char=charname))
         else:
-            await ctx.send(await self._t(ctx, "chars_invalid"))
+            await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
 
     @commands.hybrid_command(name="wow-chars")
     @commands.guild_only()
@@ -464,26 +639,40 @@ class WowGuildAutomation(commands.Cog):
         await self.wow_chars(ctx, action, charname)
 
     @wow.command(name="syncrank")
-    async def wow_syncrank(self, ctx: commands.Context, mainchar: str) -> None:
+    async def wow_syncrank(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
             return
 
         cfg = await self._guild_config(ctx.guild)
-        selected_game = await self.config.member(ctx.author).selected_game()
         wow_profiles = cfg.get("wow_profiles", {})
-        if selected_game in wow_profiles:
+        game: str
+        if mainchar and mainchar.strip():
+            mainchar = mainchar.strip()
+            game = await self.config.member(ctx.author).selected_game() or GAME_RETAIL
+        else:
+            main_d = await self.config.member(ctx.author).main_character()
+            if isinstance(main_d, dict) and main_d.get("name"):
+                mainchar = str(main_d["name"]).strip()
+                game = str(main_d.get("game_type", GAME_RETAIL)).lower()
+            else:
+                await self._send_private_ack(
+                    ctx,
+                    "Kein Main gesetzt. Nutze `/wow-char panel` oder `wow syncrank <Charname>`.",
+                )
+                return
+        if game in wow_profiles:
             cfg = dict(cfg)
-            cfg["wow"] = wow_profiles[selected_game]
+            cfg["wow"] = wow_profiles[game]
         rank = await self.rank_sync.sync_member_rank(ctx.author, cfg, mainchar)
         if rank:
-            await ctx.send(await self._t(ctx, "rank_synced", rank=rank))
+            await self._send_private_ack(ctx, await self._t(ctx, "rank_synced", rank=rank))
             return
-        await ctx.send(await self._t(ctx, "rank_failed"))
+        await self._send_private_ack(ctx, await self._t(ctx, "rank_failed"))
 
     @commands.hybrid_command(name="wow-syncrank")
     @commands.guild_only()
-    async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: str) -> None:
+    async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
         """Slash-style alias for rank syncing."""
         await self.wow_syncrank(ctx, mainchar)
 
@@ -833,6 +1022,93 @@ class WowGuildAutomation(commands.Cog):
         except Exception as e:
             await ctx.send(f"Dashboard status check failed: {e}")
 
+    @wow_char_grp.command(name="panel", description="Interaktives Menü: Chars hinzufügen, Main, Liste, entfernen")
+    @app_commands.guild_only()
+    async def slash_wow_char_panel(self, interaction: discord.Interaction) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Verknüpfe nur Charaktere, die auf eurer **Gildenroster**-API stehen.",
+            ephemeral=True,
+            view=CharMainMenuView(self, interaction.guild, interaction.user),
+        )
+
+    @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
+    @app_commands.guild_only()
+    async def slash_wow_char_mine(self, interaction: discord.Interaction) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        text = await self._format_user_char_list_ephemeral(
+            interaction.guild, interaction.user, header_user=False
+        )
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @wow_char_officer_grp.command(name="liste", description="Übersicht: alle oder ausgewählte Mitglieder")
+    @app_commands.guild_only()
+    async def slash_wow_char_officer_list(self, interaction: discord.Interaction) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        if not officer_can_manage_characters(interaction.user):
+            await interaction.response.send_message("Keine Berechtigung (Manage Server).", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Wähle eine Option:",
+            ephemeral=True,
+            view=OfficerListMenuView(self, interaction.guild, interaction.user),
+        )
+
+    @wow_char_officer_grp.command(
+        name="meine-chars",
+        description="Zeigt deine eigenen verknüpften Chars (zum Abgleich)",
+    )
+    @app_commands.guild_only()
+    async def slash_wow_char_officer_self(self, interaction: discord.Interaction) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        if not officer_can_manage_characters(interaction.user):
+            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+            return
+        text = await self._format_user_char_list_ephemeral(
+            interaction.guild, interaction.user, header_user=True
+        )
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @wow_char_officer_grp.command(
+        name="char-entfernen",
+        description="Chars eines Mitglieds entfernen (User erhält DM mit Grund)",
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(mitglied="Discord-Mitglied")
+    async def slash_wow_char_officer_remove(
+        self,
+        interaction: discord.Interaction,
+        mitglied: discord.Member,
+    ) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        if not officer_can_manage_characters(interaction.user):
+            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+            return
+        linked = await get_linked_list(self.config.member(mitglied))
+        if not linked:
+            await interaction.response.send_message(
+                f"{mitglied.mention} hat keine verknüpften Chars.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            "Wähle die Charaktere, dann öffnet sich die Begründung:",
+            ephemeral=True,
+            view=OfficerRemoveCharView(
+                self, interaction.guild, interaction.user, mitglied, linked
+            ),
+        )
+
     @_dashboard_page(name=None, description="WoW Guild Automation Dashboard")
     async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
         _ = kwargs
@@ -1122,6 +1398,18 @@ class WowGuildAutomation(commands.Cog):
                     apply_rank_mapping = wtforms.SubmitField("Apply Rank Mapping")
                     remove_rank_mapping = wtforms.SubmitField("Remove Rank Mapping")
                     remove_registration = wtforms.SubmitField("Remove Registration Entry")
+                    officer_character_notify_channel_id = wtforms.SelectField(
+                        "Officer channel (member left + linked chars notice)"
+                    )
+                    duplicate_character_message = wtforms.TextAreaField(
+                        "Message: character already linked / invalid"
+                    )
+                    member_left_characters_notice = wtforms.TextAreaField(
+                        "Message: member left (vars: {user}, {username}, {chars})"
+                    )
+                    admin_removed_char_dm = wtforms.TextAreaField(
+                        "DM text after officer removed chars (vars: {chars}, {reason}, {officer})"
+                    )
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
@@ -1134,11 +1422,11 @@ class WowGuildAutomation(commands.Cog):
                 channels = cfg.get("channels", {})
                 onboarding = cfg.get("onboarding", {})
                 role_choices = [("0", "-- none --")] + [
-                    (str(role.id), f"{role.name} ({role.id})")
+                    (str(role.id), role.name[:80])
                     for role in sorted(guild.roles, key=lambda r: r.position, reverse=True)
                 ]
                 channel_choices = [("0", "-- none --")] + [
-                    (str(channel.id), f"#{channel.name} ({channel.id})") for channel in guild.text_channels
+                    (str(channel.id), f"#{channel.name}") for channel in guild.text_channels
                 ]
                 category_choices = [("0", "-- no category --")] + [
                     (str(category.id), f"{category.name} ({category.id})") for category in guild.categories
@@ -1178,6 +1466,8 @@ class WowGuildAutomation(commands.Cog):
                         )
                         reg_choices.append((str(member_id), label))
                 form.remove_registration_user_id.choices = reg_choices
+                form.officer_character_notify_channel_id.choices = channel_choices
+                tmpl = cfg.get("templates", {})
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
                     form.profile_key.data = active_key
@@ -1221,6 +1511,18 @@ class WowGuildAutomation(commands.Cog):
                     form.remove_rank_index.data = "__none__"
                     form.remove_registration_user_id.data = "0"
                     form.confirm_remove_registration.data = False
+                    form.officer_character_notify_channel_id.data = str(
+                        channels.get("officer_character_notify_channel_id", 0)
+                    )
+                    form.duplicate_character_message.data = tmpl.get(
+                        "duplicate_character_message",
+                        "",
+                    )
+                    form.member_left_characters_notice.data = tmpl.get(
+                        "member_left_characters_notice",
+                        "",
+                    )
+                    form.admin_removed_char_dm.data = tmpl.get("admin_removed_char_dm", "")
 
                 if form.load_profile.data:
                     selected_key = str(form.profile_key.data or "").strip().lower()
@@ -1391,11 +1693,24 @@ class WowGuildAutomation(commands.Cog):
                         "onboarding_channel_id": int(form.onboarding_channel_id.data or 0),
                         "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
                         "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
+                        "officer_character_notify_channel_id": int(
+                            form.officer_character_notify_channel_id.data or 0
+                        ),
                     }
                     cfg["rules"] = {
                         "rule_channel_id": int(form.rule_channel_id.data or 0),
                         "rule_emoji": str(form.rule_emoji.data or "✅").strip() or "✅",
                     }
+                    cfg.setdefault("templates", {})
+                    cfg["templates"]["duplicate_character_message"] = str(
+                        form.duplicate_character_message.data or ""
+                    ).strip()
+                    cfg["templates"]["member_left_characters_notice"] = str(
+                        form.member_left_characters_notice.data or ""
+                    ).strip()
+                    cfg["templates"]["admin_removed_char_dm"] = str(
+                        form.admin_removed_char_dm.data or ""
+                    ).strip()
                     notifications = []
                     category = None
                     try:
@@ -1491,11 +1806,13 @@ class WowGuildAutomation(commands.Cog):
                     mapped_id = profile_mapping_ui.get(title) or profile_mapping_ui.get(f"Rank {idx}")
                     if mapped_id:
                         role_obj = guild.get_role(int(mapped_id))
-                        mapped_label = role_obj.mention if role_obj else f"`{mapped_id}`"
+                        mapped_label = (
+                            html.escape(role_obj.name) if role_obj else f"`{mapped_id}`"
+                        )
                     else:
                         mapped_label = "<em>fallback: member default role</em>"
                     current_rank_rows.append(
-                        f"<tr><td>{idx}</td><td>{title}</td><td>{mapped_label}</td></tr>"
+                        f"<tr><td>{idx}</td><td>{html.escape(str(title))}</td><td>{mapped_label}</td></tr>"
                     )
                 current_rank_table = "".join(current_rank_rows)
 
@@ -1644,6 +1961,15 @@ class WowGuildAutomation(commands.Cog):
         <p><label>Onboarding Channel</label><br>{form.onboarding_channel_id()}<br><label>{form.create_onboarding_channel()} Auto-create</label></p>
         <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create</label></p>
         <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create</label></p>
+        <p><label>Officer notify channel</label><br>{form.officer_character_notify_channel_id()}<br><small>Leave / member quit: notice if linked WoW chars existed</small></p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Character linking messages</h3>
+        <p><small>Slash <code>/wow-char</code> / <code>/wow-char-officer</code> and interactive panel.</small></p>
+        <p><label>Duplicate / already linked (use &#123;detail&#125;)</label><br>{form.duplicate_character_message(rows=4)}</p>
+        <p><label>Member left notice (&#123;user&#125;, &#123;username&#125;, &#123;chars&#125;)</label><br>{form.member_left_characters_notice(rows=3)}</p>
+        <p><label>Officer removal DM (&#123;chars&#125;, &#123;reason&#125;, &#123;officer&#125;)</label><br>{form.admin_removed_char_dm(rows=3)}</p>
       </div>
 
       <div class="wow-card">
