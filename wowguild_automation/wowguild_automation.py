@@ -114,6 +114,11 @@ class WowGuildAutomation(commands.Cog):
         name="wow-char-officer",
         description="Officer: Charakterlisten und Entfernen",
     )
+    # Top-level Slash: /wow-chars list|add|remove — keine generische „action“-Option
+    wow_chars_slash_grp = app_commands.Group(
+        name="wow-chars",
+        description="Gildenchars: Liste, hinzufügen oder entfernen (nur Gildenroster).",
+    )
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -650,6 +655,84 @@ class WowGuildAutomation(commands.Cog):
         """Gilden-API: Region, Spielversion, Realm und Gildenname setzen."""
         await self.wow_guildsettings(ctx, region, version, realm, guildname, language)
 
+    async def _wow_chars_execute(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        action: str,
+        charname: Optional[str] = None,
+        spiel: Optional[str] = None,
+        *,
+        chars_none_msg: str,
+        chars_invalid_msg: str,
+    ) -> str:
+        """Gibt die Nutzer-Nachricht zurück (für Prefix und Slash)."""
+        member_conf = self.config.member(member)
+        linked = await get_linked_list(member_conf)
+        mains = await get_main_characters(member_conf)
+
+        action = (action or "").lower().strip()
+        if action == "list":
+            if not linked:
+                return chars_none_msg
+            return "\n".join(format_char_line(e, mains) for e in linked)
+        if action == "add":
+            if not charname or not str(charname).strip():
+                return "Bitte einen Charakternamen angeben (Prefix: `wow chars add Meinchar retail`)."
+            game = (spiel or GAME_RETAIL).lower()
+            if game not in (GAME_RETAIL, GAME_MOP):
+                game = GAME_RETAIL
+            msg, _ok = await self._try_add_characters_for_member(
+                guild, member, game, [str(charname).strip()]
+            )
+            return msg
+        if action == "remove":
+            if not charname or not str(charname).strip():
+                return "Bitte einen Charakternamen angeben (optional: Spielversion)."
+            raw_name = str(charname).strip()
+            matches = [e for e in linked if e["name"].lower() == raw_name.lower()]
+            if not matches:
+                return chars_invalid_msg
+            if len(matches) > 1 and not spiel:
+                return (
+                    "Dieser Name ist in **Retail** und **MoP** verknüpft — bitte `spiel` wählen (Slash) oder "
+                    f"`wow chars remove {raw_name} retail` / `mop_classic` nutzen."
+                )
+            if spiel:
+                spiel_l = str(spiel).lower()
+                matches = [e for e in matches if e["game_type"].lower() == spiel_l]
+            if len(matches) != 1:
+                return chars_invalid_msg
+            victim = matches[0]
+            rkey = (victim["name"].lower(), victim["game_type"].lower())
+            new_list = [
+                e for e in linked if (e["name"].lower(), e["game_type"].lower()) != rkey
+            ]
+            await set_linked_list(member_conf, new_list)
+            cur = mains.get(victim["game_type"])
+            if cur and char_tuple_key(cur["name"], victim["game_type"]) == char_tuple_key(
+                victim["name"], victim["game_type"]
+            ):
+                await clear_main_for_game(member_conf, victim["game_type"])
+            return await self._t_from_guild(guild, member, "char_removed", char=victim["name"])
+        return chars_invalid_msg
+
+    async def _t_from_guild(
+        self, guild: discord.Guild, member: discord.Member, key: str, **kwargs: Any
+    ) -> str:
+        """Resolve I18N wie _t, ohne Context."""
+        member_lang = await self.config.member(member).onboarding_language()
+        if member_lang in ("de-DE", "en-US"):
+            lang = member_lang
+        else:
+            guild_lang = await self.config.guild(guild).language()
+            lang = guild_lang if guild_lang in ("de-DE", "en-US") else "de-DE"
+        tpl = I18N.get(lang, I18N["de-DE"]).get(key, key)
+        try:
+            return tpl.format(**kwargs)
+        except Exception:
+            return tpl
+
     @wow.command(
         name="chars",
         description="Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster).",
@@ -672,88 +755,103 @@ class WowGuildAutomation(commands.Cog):
             await ctx.send(await self._t(ctx, "server_only"))
             return
 
-        member_conf = self.config.member(ctx.author)
-        linked = await get_linked_list(member_conf)
-        mains = await get_main_characters(member_conf)
+        text = await self._wow_chars_execute(
+            ctx.guild,
+            ctx.author,
+            action,
+            charname,
+            spiel,
+            chars_none_msg=await self._t(ctx, "chars_none"),
+            chars_invalid_msg=await self._t(ctx, "chars_invalid"),
+        )
+        await self._send_private_ack(ctx, text)
 
-        action = (action or "").lower().strip()
-        if action == "list":
-            if not linked:
-                await self._send_private_ack(ctx, await self._t(ctx, "chars_none"))
-                return
-            msg = "\n".join(format_char_line(e, mains) for e in linked)
-            await self._send_private_ack(ctx, msg)
-        elif action == "add":
-            if not charname or not str(charname).strip():
-                await self._send_private_ack(
-                    ctx, "Bitte einen Charakternamen angeben (Prefix: `wow chars add Meinchar retail`)."
-                )
-                return
-            game = (spiel or GAME_RETAIL).lower()
-            if game not in (GAME_RETAIL, GAME_MOP):
-                game = GAME_RETAIL
-            msg, ok = await self._try_add_characters_for_member(
-                ctx.guild, ctx.author, game, [str(charname).strip()]
-            )
-            await self._send_private_ack(ctx, msg)
-        elif action == "remove":
-            if not charname or not str(charname).strip():
-                await self._send_private_ack(
-                    ctx, "Bitte einen Charakternamen angeben (optional: Spielversion)."
-                )
-                return
-            raw_name = str(charname).strip()
-            matches = [e for e in linked if e["name"].lower() == raw_name.lower()]
-            if not matches:
-                await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
-                return
-            if len(matches) > 1 and not spiel:
-                await self._send_private_ack(
-                    ctx,
-                    "Dieser Name ist in **Retail** und **MoP** verknüpft — bitte `spiel` wählen (Slash) oder "
-                    f"`wow chars remove {raw_name} retail` / `mop_classic` nutzen.",
-                )
-                return
-            if spiel:
-                spiel_l = str(spiel).lower()
-                matches = [e for e in matches if e["game_type"].lower() == spiel_l]
-            if len(matches) != 1:
-                await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
-                return
-            victim = matches[0]
-            rkey = (victim["name"].lower(), victim["game_type"].lower())
-            new_list = [
-                e for e in linked if (e["name"].lower(), e["game_type"].lower()) != rkey
-            ]
-            await set_linked_list(member_conf, new_list)
-            cur = mains.get(victim["game_type"])
-            if cur and char_tuple_key(cur["name"], victim["game_type"]) == char_tuple_key(
-                victim["name"], victim["game_type"]
-            ):
-                await clear_main_for_game(member_conf, victim["game_type"])
-            await self._send_private_ack(ctx, await self._t(ctx, "char_removed", char=victim["name"]))
-        else:
-            await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
+    @wow_chars_slash_grp.command(name="list", description="Deine verknüpften Gildenchars anzeigen")
+    @app_commands.guild_only()
+    async def slash_wow_chars_list(self, interaction: discord.Interaction) -> None:
+        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        text = await self._wow_chars_execute(
+            interaction.guild,
+            interaction.user,
+            "list",
+            None,
+            None,
+            chars_none_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_none"
+            ),
+            chars_invalid_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_invalid"
+            ),
+        )
+        await interaction.response.send_message(text, ephemeral=True)
 
-    @commands.hybrid_command(
-        name="wow-chars",
-        description="Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster).",
+    @wow_chars_slash_grp.command(
+        name="add",
+        description="Einen Char vom Gildenroster mit deinem Account verknüpfen",
     )
-    @commands.guild_only()
+    @app_commands.guild_only()
     @app_commands.describe(
-        action="Liste anzeigen, Char hinzufügen oder Char entfernen",
-        charname="Name des Charakters (nur bei Hinzufügen/Entfernen)",
-        spiel="Retail oder MoP — bei Entfernen nötig, wenn Name in beiden Spielen existiert",
+        charname="Charaktername (wie im Gildenroster)",
+        spiel="Retail oder MoP Classic (optional, Standard: Retail)",
     )
-    async def wow_chars_direct(
+    async def slash_wow_chars_add(
         self,
-        ctx: commands.Context,
-        action: WowCharsAction,
-        charname: Optional[str] = None,
+        interaction: discord.Interaction,
+        charname: str,
         spiel: Optional[WowCharsSpiel] = None,
     ) -> None:
-        """Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster)."""
-        await self.wow_chars(ctx, action, charname, spiel)
+        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        text = await self._wow_chars_execute(
+            interaction.guild,
+            interaction.user,
+            "add",
+            charname,
+            spiel,
+            chars_none_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_none"
+            ),
+            chars_invalid_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_invalid"
+            ),
+        )
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @wow_chars_slash_grp.command(
+        name="remove",
+        description="Einen verknüpften Char von deinem Account entfernen",
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        charname="Charaktername",
+        spiel="Bei gleichem Namen in Retail und MoP: Version angeben",
+    )
+    async def slash_wow_chars_remove(
+        self,
+        interaction: discord.Interaction,
+        charname: str,
+        spiel: Optional[WowCharsSpiel] = None,
+    ) -> None:
+        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        text = await self._wow_chars_execute(
+            interaction.guild,
+            interaction.user,
+            "remove",
+            charname,
+            spiel,
+            chars_none_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_none"
+            ),
+            chars_invalid_msg=await self._t_from_guild(
+                interaction.guild, interaction.user, "chars_invalid"
+            ),
+        )
+        await interaction.response.send_message(text, ephemeral=True)
 
     @wow.command(
         name="syncrank",
