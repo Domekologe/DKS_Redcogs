@@ -37,21 +37,29 @@ from .character_helpers import (
     ensure_main_for_game_if_empty,
     find_char_owner_guild_wide,
     format_char_line,
+    format_mains_summary,
+    format_rank_sync_summary,
     game_label,
     get_linked_list,
     get_main_characters,
     mains_from_member_data,
     merge_onboarding_character_into_linked,
+    merge_rank_sync_game_state,
     normalize_linked_characters,
     profile_key_to_link_game,
     set_linked_list,
+    set_rank_sync_lock,
     wow_profile_for_game,
 )
+from .officer_notifications import send_protected_rank_officer_notice
 from .character_ui import (
     CharMainMenuView,
     LinkedRemovePageView,
     OfficerListMenuView,
     PANEL_INTRO,
+    SlashWowAdminListView,
+    SlashWowAdminMemberPickView,
+    SlashWowAdminSyncAllConfirmView,
     officer_can_manage_characters,
 )
 from .functions.automations import RankSyncService
@@ -68,7 +76,12 @@ I18N = {
         "char_removed": "Char `{char}` entfernt.",
         "chars_invalid": "Ungültig. Benutze action: `list`, `add`, `remove`.",
         "rank_synced": "Rang erfolgreich synchronisiert: `{rank}`",
+        "rank_synced_multi": "Rang-Sync:\n{lines}",
         "rank_failed": "Mainchar nicht gefunden oder API nicht konfiguriert.",
+        "rank_sync_locked": "Rang-Sync für **{game}** ist eingefroren — Discord-Rolle unverändert.",
+        "rank_sync_no_profile": "Kein WoW-Profil für **{game}** auf diesem Server.",
+        "rank_freeze_ok": "Rang-Sync für **{game}** ist eingefroren. Manuelle Rollen bleiben erhalten bis `wow rank-unfreeze`.",
+        "rank_unfreeze_ok": "Rang-Sync für **{game}** wieder aktiv.",
         "botsetup_saved": "Bot-Setup gespeichert.",
         "master_saved": "Master-Setup gespeichert.",
         "onboarding_setup_intro": "Onboarding-Setup gestartet. Antworte pro Schritt im Chat.",
@@ -89,7 +102,12 @@ I18N = {
         "char_removed": "Character `{char}` removed.",
         "chars_invalid": "Invalid action. Use: `list`, `add`, `remove`.",
         "rank_synced": "Rank synchronized successfully: `{rank}`",
+        "rank_synced_multi": "Rank sync:\n{lines}",
         "rank_failed": "Main character not found or API not configured.",
+        "rank_sync_locked": "Rank sync for **{game}** is frozen — Discord role unchanged.",
+        "rank_sync_no_profile": "No WoW profile configured for **{game}** on this server.",
+        "rank_freeze_ok": "Rank sync for **{game}** is frozen. Manual roles stay until `wow rank-unfreeze`.",
+        "rank_unfreeze_ok": "Rank sync for **{game}** is active again.",
         "botsetup_saved": "Bot setup saved.",
         "master_saved": "Master setup saved.",
         "onboarding_setup_intro": "Onboarding setup started. Reply to each step in this channel.",
@@ -161,11 +179,13 @@ class WowGuildAutomation(commands.Cog):
             rank_titles={},
             rank_mapping_by_profile={},
             rank_titles_by_profile={},
+            protected_rank_titles_by_profile={},
             channels={
                 "onboarding_channel_id": 0,
                 "manual_review_channel_id": 0,
                 "raid_guest_channel_id": 0,
                 "officer_character_notify_channel_id": 0,
+                "rank_protected_notify_channel_id": 0,
             },
             rules={"rule_channel_id": 0, "rule_emoji": "✅"},
             templates={
@@ -173,6 +193,10 @@ class WowGuildAutomation(commands.Cog):
                 "duplicate_character_message": "Dieser Charakter ist bereits verknüpft oder ungültig. Wende dich an einen Offizier. ({detail})",
                 "member_left_characters_notice": "Mitglied {user} hat den Server verlassen. Verknüpfte Chars: {chars}",
                 "admin_removed_char_dm": "Ein Offizier hat folgende WoW-Chars von dir entfernt: {chars}\nGrund: {reason}",
+                "protected_rank_sync_notice": (
+                    "{member} — **{game}**, Main `{char}`: Ingame-Rang **{rank}** ist geschützt; "
+                    "kein automatischer Discord-Rang-Sync."
+                ),
             },
         )
         self.config.register_member(
@@ -186,6 +210,7 @@ class WowGuildAutomation(commands.Cog):
             selected_game="retail",
             registration={},
             onboarding_session_id="",
+            rank_sync_by_game={},
         )
         self.blizzard = BlizzardService()
         self.rank_sync = RankSyncService(self.blizzard)
@@ -331,6 +356,157 @@ class WowGuildAutomation(commands.Cog):
         labels = ", ".join(f"{x['name']} ({game_label(x['game_type'])})" for x in to_add)
         return (f"Verknüpft: {labels}" if labels else "Nichts hinzugefügt.", True)
 
+    async def _guild_has_sync_rank(self, guild: discord.Guild) -> bool:
+        cfg = await self._guild_config(guild)
+        return bool(cfg.get("features", {}).get("sync_rank", True))
+
+    async def _sync_rank_for_main(
+        self,
+        member: discord.Member,
+        guild: discord.Guild,
+        profile_key: str,
+        main_name: str,
+    ):
+        raw = await self.config.member(member).rank_sync_by_game()
+        locked = False
+        if isinstance(raw, dict):
+            st = raw.get(profile_key)
+            if isinstance(st, dict):
+                locked = bool(st.get("locked"))
+        cfg = await self._guild_config(guild)
+        profiles = cfg.get("wow_profiles") or {}
+        if profile_key not in profiles:
+            return None, "no_profile", 0
+        selected_cfg = dict(cfg)
+        selected_cfg["wow"] = profiles.get(profile_key, {})
+        rank_title, reason, role_id = await self.rank_sync.sync_member_rank(
+            member,
+            selected_cfg,
+            main_name.strip(),
+            profile_key=profile_key,
+            locked=locked,
+        )
+        if reason == "protected" and rank_title:
+            await merge_rank_sync_game_state(
+                self.config.member(member),
+                profile_key,
+                last_title=str(rank_title),
+            )
+            await send_protected_rank_officer_notice(
+                guild,
+                cfg,
+                member,
+                profile_key,
+                main_name.strip(),
+                rank_title,
+            )
+        return rank_title, reason, role_id
+
+    async def _schedule_rank_sync_after_main(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        profile_key: str,
+        main_name: str,
+    ) -> None:
+        try:
+            if not await self._guild_has_sync_rank(guild):
+                return
+            rank_title, reason, role_id = await self._sync_rank_for_main(
+                member, guild, profile_key, main_name
+            )
+            if reason == "ok" and rank_title and role_id:
+                await merge_rank_sync_game_state(
+                    self.config.member(member),
+                    profile_key,
+                    last_title=str(rank_title),
+                    last_role_id=int(role_id),
+                )
+        except Exception:
+            pass
+
+    async def _slash_admin_sync_report_for_member(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+    ) -> str:
+        if not await self._guild_has_sync_rank(guild):
+            return "Rang-Sync ist auf diesem Server deaktiviert (`features.sync_rank`)."
+        cfg = await self._guild_config(guild)
+        wow_profiles = cfg.get("wow_profiles") or {}
+        main_map = await get_main_characters(self.config.member(member))
+        conf = self.config.member(member)
+        jobs: List[tuple[str, str]] = []
+        for g in (GAME_RETAIL, GAME_MOP):
+            if g not in wow_profiles:
+                continue
+            m = main_map.get(g)
+            if m and str(m.get("name", "")).strip():
+                jobs.append((g, str(m["name"]).strip()))
+        if not jobs:
+            return "Kein Main für ein konfiguriertes Profil bei diesem Mitglied."
+        lines: List[str] = []
+        for game, name in jobs:
+            rank_title, reason, role_id = await self._sync_rank_for_main(member, guild, game, name)
+            gl = game_label(game)
+            if reason == "ok" and rank_title and role_id:
+                await merge_rank_sync_game_state(
+                    conf,
+                    game,
+                    last_title=str(rank_title),
+                    last_role_id=int(role_id),
+                )
+                lines.append(f"• **{gl}:** `{rank_title}` synchronisiert.")
+            elif reason == "locked":
+                lines.append(f"• **{gl}:** eingefroren — keine Rollenänderung.")
+            elif reason == "protected":
+                lines.append(f"• **{gl}:** geschützter Rang (Hinweis ggf. im Offizierskanal).")
+            elif reason == "no_profile":
+                lines.append(f"• **{gl}:** kein Profil konfiguriert.")
+            elif reason in ("not_found", "no_role"):
+                lines.append(f"• **{gl}:** nicht im Roster / kein Rollen-Mapping.")
+            elif reason == "no_perms":
+                lines.append(f"• **{gl}:** Bot darf Rollen nicht setzen.")
+            elif reason == "http":
+                lines.append(f"• **{gl}:** Discord-API-Fehler.")
+            else:
+                lines.append(f"• **{gl}:** {reason}")
+        return f"**{member.display_name}** — Rang-Sync:\n" + "\n".join(lines)
+
+    async def _slash_admin_sync_all_members_report(self, guild: discord.Guild) -> str:
+        if not await self._guild_has_sync_rank(guild):
+            return "Rang-Sync ist deaktiviert."
+        data = await self.config.all_members(guild)
+        blocks: List[str] = []
+        for uid_str, payload in data.items():
+            try:
+                uid = int(uid_str)
+            except (TypeError, ValueError):
+                continue
+            mem = guild.get_member(uid)
+            if mem is None:
+                continue
+            linked = normalize_linked_characters(payload.get("linked_characters") or payload.get("chars"))
+            if not linked:
+                continue
+            main_map = mains_from_member_data(payload)
+            has_main = any(
+                main_map.get(g) and str((main_map.get(g) or {}).get("name", "")).strip()
+                for g in (GAME_RETAIL, GAME_MOP)
+            )
+            if not has_main:
+                continue
+            block = await self._slash_admin_sync_report_for_member(guild, mem)
+            if "Kein Main für ein konfiguriertes Profil" in block:
+                continue
+            blocks.append(block)
+        if not blocks:
+            return "Keine Mitglieder mit verknüpften Chars und gesetztem Main."
+        out = "\n\n".join(blocks[:15])
+        if len(blocks) > 15:
+            out += f"\n\n… gekürzt: **{len(blocks) - 15}** weitere Mitglieder — erneut ausführen oder einzeln syncen."
+        return out[:3900]
+
     async def _format_user_char_list_ephemeral(
         self,
         guild: discord.Guild,
@@ -338,15 +514,21 @@ class WowGuildAutomation(commands.Cog):
         *,
         header_user: bool = False,
     ) -> str:
-        _ = guild
         linked = await get_linked_list(self.config.member(member))
         mains = await get_main_characters(self.config.member(member))
-        if not linked:
-            head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
-            return head + "Keine Chars verknüpft."
-        lines = [format_char_line(e, mains) for e in linked]
+        rs_raw = await self.config.member(member).rank_sync_by_game()
+        rank_line = format_rank_sync_summary(guild, rs_raw)
         head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
-        return head + "\n".join(lines)
+        if not linked:
+            extra = format_mains_summary(mains)
+            if rank_line:
+                extra += f"\n**Letzter Rang-Sync:** {rank_line}"
+            return head + "Keine Chars verknüpft.\n" + extra
+        lines = [format_char_line(e, mains) for e in linked]
+        block = format_mains_summary(mains)
+        if rank_line:
+            block += f"\n**Letzter Rang-Sync:** {rank_line}"
+        return head + block + "\n\n" + "\n".join(lines)
 
     async def _officer_format_all_linked_chars(self, guild: discord.Guild) -> str:
         data = await self.config.all_members(guild)
@@ -365,7 +547,9 @@ class WowGuildAutomation(commands.Cog):
             label = mem.mention if mem else f"<@{uid}>"
             mains = mains_from_member_data(payload)
             parts = [format_char_line(e, mains) for e in linked]
-            lines.append(f"{label}: {', '.join(parts)}")
+            rank_snip = format_rank_sync_summary(guild, payload.get("rank_sync_by_game"))
+            suffix = f" | {rank_snip}" if rank_snip else ""
+            lines.append(f"{label}: {', '.join(parts)}{suffix}")
         return "\n".join(lines) if lines else "Keine verknüpften Chars auf diesem Server."
 
     @commands.Cog.listener()
@@ -382,6 +566,7 @@ class WowGuildAutomation(commands.Cog):
         await self.config.member(member).chars.clear()
         await self.config.member(member).main_character.clear()
         await self.config.member(member).main_characters.clear()
+        await self.config.member(member).rank_sync_by_game.clear()
         await self.config.member(member).selected_game.clear()
         await self.config.member(member).registration.clear()
         if not had_chars:
@@ -473,6 +658,7 @@ class WowGuildAutomation(commands.Cog):
             rank_sync=self.rank_sync,
             manual_channel=manual_channel,  # type: ignore[arg-type]
             onboarding_channel=onboarding_channel,  # type: ignore[arg-type]
+            member_config=self.config.member(member),
         )
         chosen_lang = onboarding_result.get("language", "de-DE")
         selected_game = onboarding_result.get("selected_game", "retail")
@@ -861,19 +1047,57 @@ class WowGuildAutomation(commands.Cog):
     @commands.guild_only()
     @app_commands.guild_only()
     @app_commands.describe(
-        mainchar="Optional: Charaktername; leer = gespeicherter Main zum aktiven Profil",
+        mainchar="Optional: Charaktername; leer = alle Mains (pro konfiguriertem Profil)",
     )
     async def wow_syncrank(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
             return
 
+        if not await self._guild_has_sync_rank(ctx.guild):
+            await self._send_private_ack(
+                ctx,
+                "Rang-Sync ist auf diesem Server deaktiviert (`features.sync_rank`).",
+            )
+            return
+
         cfg = await self._guild_config(ctx.guild)
-        wow_profiles = cfg.get("wow_profiles", {})
-        game: str
+        wow_profiles = cfg.get("wow_profiles") or {}
+        member_conf = self.config.member(ctx.author)
+
+        async def _run_one(game: str, char_name: str):
+            rank_title, reason, role_id = await self._sync_rank_for_main(
+                ctx.author, ctx.guild, game, char_name
+            )
+            gl = game_label(game)
+            if reason == "ok" and rank_title and role_id:
+                await merge_rank_sync_game_state(
+                    member_conf,
+                    game,
+                    last_title=str(rank_title),
+                    last_role_id=int(role_id),
+                )
+                return f"• **{gl}:** `{rank_title}` synchronisiert.", rank_title
+            if reason == "locked":
+                return f"• **{gl}:** eingefroren — keine Rollenänderung.", None
+            if reason == "protected":
+                return (
+                    f"• **{gl}:** Rang `{rank_title}` ist geschützt — kein Auto-Sync; Offiziere wurden benachrichtigt.",
+                    None,
+                )
+            if reason == "no_profile":
+                return f"• **{gl}:** kein Profil konfiguriert.", None
+            if reason in ("not_found", "no_role"):
+                return f"• **{gl}:** Char nicht im Roster oder kein Rollen-Mapping.", None
+            if reason == "no_perms":
+                return f"• **{gl}:** Bot darf Rollen nicht setzen.", None
+            if reason == "http":
+                return f"• **{gl}:** Discord-API-Fehler.", None
+            return f"• **{gl}:** fehlgeschlagen ({reason}).", None
+
         if mainchar and mainchar.strip():
             mainchar = mainchar.strip()
-            linked = await get_linked_list(self.config.member(ctx.author))
+            linked = await get_linked_list(member_conf)
             name_matches = [e for e in linked if e["name"].lower() == mainchar.lower()]
             if not name_matches:
                 await self._send_private_ack(
@@ -883,40 +1107,52 @@ class WowGuildAutomation(commands.Cog):
                 return
             if len(name_matches) == 1:
                 game = name_matches[0]["game_type"]
+                mainchar = name_matches[0]["name"]
             else:
-                game = await self.config.member(ctx.author).selected_game() or GAME_RETAIL
+                game = await member_conf.selected_game() or GAME_RETAIL
                 pick = [e for e in name_matches if e["game_type"] == game]
                 if len(pick) != 1:
                     await self._send_private_ack(
                         ctx,
                         "Dieser Name existiert in **Retail** und **MoP** — bitte Main setzen oder "
-                        "`selected_game` durch einen der Chars setzen lassen (`/wow-chars-panel`).",
+                        "Spiel im Panel wählen (`/wow-chars-panel`).",
                     )
                     return
                 mainchar = pick[0]["name"]
                 game = pick[0]["game_type"]
-        else:
-            main_map = await get_main_characters(self.config.member(ctx.author))
-            active_key = str(cfg.get("active_profile_key", "retail")).lower()
-            main_entry = main_map.get(active_key)
-            if not main_entry or not main_entry.get("name"):
-                main_entry = main_map.get(GAME_RETAIL) or main_map.get(GAME_MOP)
-            if not main_entry or not main_entry.get("name"):
+            line, synced_rank = await _run_one(game, mainchar)
+            if synced_rank:
                 await self._send_private_ack(
                     ctx,
-                    "Kein Main gesetzt. Nutze `/wow-chars-panel` oder `wow syncrank <Charname>`.",
+                    await self._t(ctx, "rank_synced", rank=synced_rank),
                 )
-                return
-            mainchar = str(main_entry["name"]).strip()
-            game = str(main_entry.get("game_type", GAME_RETAIL)).lower()
-        if game in wow_profiles:
-            cfg = dict(cfg)
-            cfg["wow"] = wow_profiles[game]
-        rank = await self.rank_sync.sync_member_rank(ctx.author, cfg, mainchar)
-        if rank:
-            await self._send_private_ack(ctx, await self._t(ctx, "rank_synced", rank=rank))
+            else:
+                await self._send_private_ack(ctx, line)
             return
-        await self._send_private_ack(ctx, await self._t(ctx, "rank_failed"))
+
+        main_map = await get_main_characters(member_conf)
+        jobs: List[tuple[str, str]] = []
+        for g in (GAME_RETAIL, GAME_MOP):
+            if g not in wow_profiles:
+                continue
+            m = main_map.get(g)
+            if m and str(m.get("name", "")).strip():
+                jobs.append((g, str(m["name"]).strip()))
+        if not jobs:
+            await self._send_private_ack(
+                ctx,
+                "Kein Main für ein konfiguriertes Profil gesetzt. Nutze `/wow-chars-panel` "
+                "oder `wow syncrank <Charname>`.",
+            )
+            return
+        out_lines: List[str] = []
+        for g, n in jobs:
+            line, _ = await _run_one(g, n)
+            out_lines.append(line)
+        await self._send_private_ack(
+            ctx,
+            await self._t(ctx, "rank_synced_multi", lines="\n".join(out_lines)),
+        )
 
     @commands.hybrid_command(
         name="wow-syncrank",
@@ -924,11 +1160,63 @@ class WowGuildAutomation(commands.Cog):
     )
     @commands.guild_only()
     @app_commands.describe(
-        mainchar="Optional: Charaktername; leer = gespeicherter Main zum aktiven Profil",
+        mainchar="Optional: Charaktername; leer = alle Mains (pro konfiguriertem Profil)",
     )
     async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
         """WoW-Gildenrang mit der passenden Discord-Rolle abgleichen."""
         await self.wow_syncrank(ctx, mainchar)
+
+    @wow.command(
+        name="rank-freeze",
+        description="Rang-Sync für ein Spiel anhalten — manuelle Discord-Rolle wird nicht überschrieben.",
+    )
+    @commands.guild_only()
+    @app_commands.guild_only()
+    @app_commands.describe(spiel="Retail oder MoP Classic")
+    async def wow_rank_freeze(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        await set_rank_sync_lock(self.config.member(ctx.author), spiel, True)
+        await self._send_private_ack(
+            ctx,
+            await self._t(ctx, "rank_freeze_ok", game=game_label(spiel)),
+        )
+
+    @commands.hybrid_command(
+        name="wow-rank-freeze",
+        description="Rang-Sync für ein Spiel anhalten (manuelle Rolle bleibt).",
+    )
+    @commands.guild_only()
+    @app_commands.describe(spiel="Retail oder MoP Classic")
+    async def wow_rank_freeze_direct(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
+        await self.wow_rank_freeze(ctx, spiel)
+
+    @wow.command(
+        name="rank-unfreeze",
+        description="Rang-Sync für ein Spiel wieder aktivieren.",
+    )
+    @commands.guild_only()
+    @app_commands.guild_only()
+    @app_commands.describe(spiel="Retail oder MoP Classic")
+    async def wow_rank_unfreeze(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            await ctx.send(await self._t(ctx, "server_only"))
+            return
+        await set_rank_sync_lock(self.config.member(ctx.author), spiel, False)
+        await self._send_private_ack(
+            ctx,
+            await self._t(ctx, "rank_unfreeze_ok", game=game_label(spiel)),
+        )
+
+    @commands.hybrid_command(
+        name="wow-rank-unfreeze",
+        description="Rang-Sync für ein Spiel wieder aktivieren.",
+    )
+    @commands.guild_only()
+    @app_commands.describe(spiel="Retail oder MoP Classic")
+    async def wow_rank_unfreeze_direct(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
+        await self.wow_rank_unfreeze(ctx, spiel)
 
     @wow.command(
         name="setrankmap",
@@ -1399,6 +1687,126 @@ class WowGuildAutomation(commands.Cog):
                 "DM nicht möglich — nutze bitte **`/wow-chars-panel`** auf dem Server (ephemerales Menü)."
             )
 
+    @app_commands.command(name="wow-user", description="WoW: Panel, deine Char-Liste und Rang-Sync.")
+    @app_commands.guild_only()
+    @app_commands.describe(action="Aktion")
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Panel (interaktives Menü)", value="panel"),
+            app_commands.Choice(name="Meine Chars (Liste)", value="list_my"),
+            app_commands.Choice(name="Rang-Sync (meine Mains)", value="sync_my_profile"),
+        ]
+    )
+    async def slash_wow_user(self, interaction: discord.Interaction, action: str) -> None:
+        if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        if action == "panel":
+            await interaction.response.send_message(
+                PANEL_INTRO,
+                ephemeral=True,
+                view=CharMainMenuView(self, interaction.guild, interaction.user),
+            )
+            return
+        if action == "list_my":
+            await interaction.response.defer(ephemeral=True)
+            text = await self._format_user_char_list_ephemeral(
+                interaction.guild,
+                interaction.user,
+                header_user=False,
+            )
+            chars_none = await self._t_from_guild(interaction.guild, interaction.user, "chars_none")
+            display = text if text else chars_none
+            for chunk in [display[i : i + 1900] for i in range(0, len(display), 1900)] or ["—"]:
+                await interaction.followup.send(chunk, ephemeral=True)
+            return
+        if action == "sync_my_profile":
+            await interaction.response.defer(ephemeral=True)
+            report = await self._slash_admin_sync_report_for_member(interaction.guild, interaction.user)
+            await interaction.followup.send(report[:1900], ephemeral=True)
+            return
+        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+
+    @app_commands.command(
+        name="wow-admin",
+        description="Officer: Charaktere listen, verwalten und Rang-Sync (Manage Server).",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(action="Aktion — bei Bedarf folgt eine zweite Auswahl (Dropdown).")
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Übersicht (alle / Mitglieder wählen)", value="list"),
+            app_commands.Choice(name="Char von Mitglied entfernen", value="remove_char_member"),
+            app_commands.Choice(name="Char für Mitglied hinzufügen (Roster)", value="add_char_member"),
+            app_commands.Choice(name="Main für Mitglied setzen (Panel)", value="set_main_member"),
+            app_commands.Choice(name="Rang-Sync für ein Mitglied", value="sync_specific_member"),
+            app_commands.Choice(name="Rang-Sync für alle (mit Main)", value="sync_all_members"),
+        ]
+    )
+    async def slash_wow_admin(self, interaction: discord.Interaction, action: str) -> None:
+        if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            return
+        if not officer_can_manage_characters(interaction.user):
+            await interaction.response.send_message(
+                "Nur für Mitglieder mit **Server verwalten** (oder Administrator).",
+                ephemeral=True,
+            )
+            return
+        if action == "list":
+            await interaction.response.send_message(
+                "Listen-Art wählen:",
+                ephemeral=True,
+                view=SlashWowAdminListView(self, interaction.guild, interaction.user),
+            )
+            return
+        if action == "remove_char_member":
+            await interaction.response.send_message(
+                "Welches Mitglied? (Dropdown)",
+                ephemeral=True,
+                view=SlashWowAdminMemberPickView(
+                    self, interaction.guild, interaction.user, mode="remove_char_member"
+                ),
+            )
+            return
+        if action == "add_char_member":
+            await interaction.response.send_message(
+                "Für welches Mitglied soll ein Char aus dem Roster verknüpft werden?",
+                ephemeral=True,
+                view=SlashWowAdminMemberPickView(
+                    self, interaction.guild, interaction.user, mode="add_char_member"
+                ),
+            )
+            return
+        if action == "set_main_member":
+            await interaction.response.send_message(
+                "Für welches Mitglied soll der Main gesetzt werden?",
+                ephemeral=True,
+                view=SlashWowAdminMemberPickView(
+                    self, interaction.guild, interaction.user, mode="set_main_member"
+                ),
+            )
+            return
+        if action == "sync_specific_member":
+            await interaction.response.send_message(
+                "Welches Mitglied synchronisieren?",
+                ephemeral=True,
+                view=SlashWowAdminMemberPickView(
+                    self, interaction.guild, interaction.user, mode="sync_specific_member"
+                ),
+            )
+            return
+        if action == "sync_all_members":
+            await interaction.response.send_message(
+                "Alle Mitglieder mit verknüpften Chars **und** gesetztem Main werden nacheinander synchronisiert "
+                "(kann bei großen Gilden lange dauern). Bitte bestätigen:",
+                ephemeral=True,
+                view=SlashWowAdminSyncAllConfirmView(self, interaction.guild, interaction.user),
+            )
+            return
+        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+
     @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
     @app_commands.guild_only()
     async def slash_wow_char_mine(self, interaction: discord.Interaction) -> None:
@@ -1784,6 +2192,16 @@ class WowGuildAutomation(commands.Cog):
                     admin_removed_char_dm = wtforms.TextAreaField(
                         "DM text after officer removed chars (vars: {chars}, {reason}, {officer})"
                     )
+                    rank_protected_notify_channel_id = wtforms.SelectField(
+                        "Channel: protected-rank notices (no auto Discord role)"
+                    )
+                    protected_rank_lines = wtforms.TextAreaField(
+                        "Protected WoW ranks for active profile (one per line: rank title or 0–9)"
+                    )
+                    protected_rank_sync_notice = wtforms.TextAreaField(
+                        "Template: protected rank notice ({member},{user},{username},{user_id},{game},{char},{rank},{profile})"
+                    )
+                    save_protected_ranks = wtforms.SubmitField("Save Protected Ranks + Notice")
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
@@ -1841,6 +2259,7 @@ class WowGuildAutomation(commands.Cog):
                         reg_choices.append((str(member_id), label))
                 form.remove_registration_user_id.choices = reg_choices
                 form.officer_character_notify_channel_id.choices = channel_choices
+                form.rank_protected_notify_channel_id.choices = channel_choices
                 tmpl = cfg.get("templates", {})
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
@@ -1897,6 +2316,16 @@ class WowGuildAutomation(commands.Cog):
                         "",
                     )
                     form.admin_removed_char_dm.data = tmpl.get("admin_removed_char_dm", "")
+                    form.rank_protected_notify_channel_id.data = str(
+                        channels.get("rank_protected_notify_channel_id", 0)
+                    )
+                    pr_lines = (cfg.get("protected_rank_titles_by_profile") or {}).get(active_key, [])
+                    if isinstance(pr_lines, str):
+                        pr_lines = [pr_lines]
+                    form.protected_rank_lines.data = (
+                        "\n".join(str(x) for x in pr_lines) if isinstance(pr_lines, (list, tuple)) else ""
+                    )
+                    form.protected_rank_sync_notice.data = tmpl.get("protected_rank_sync_notice", "")
 
                 if form.load_profile.data:
                     selected_key = str(form.profile_key.data or "").strip().lower()
@@ -1988,6 +2417,33 @@ class WowGuildAutomation(commands.Cog):
                         "redirect_url": kwargs.get("request_url"),
                     }
 
+                if form.save_protected_ranks.data:
+                    profile_key_for_prot = str(cfg.get("active_profile_key", active_key) or "retail")
+                    lines = str(form.protected_rank_lines.data or "").splitlines()
+                    cleaned = [ln.strip() for ln in lines if ln.strip()]
+                    pr = cfg.setdefault("protected_rank_titles_by_profile", {})
+                    pr[profile_key_for_prot] = cleaned
+                    cfg["protected_rank_titles_by_profile"] = pr
+                    ch = dict(cfg.get("channels") or {})
+                    ch["rank_protected_notify_channel_id"] = int(
+                        form.rank_protected_notify_channel_id.data or 0
+                    )
+                    cfg["channels"] = ch
+                    cfg.setdefault("templates", {})["protected_rank_sync_notice"] = str(
+                        form.protected_rank_sync_notice.data or ""
+                    ).strip()
+                    await self.config.guild(guild).set(cfg)
+                    return {
+                        "status": 0,
+                        "notifications": [
+                            {
+                                "message": f"Protected ranks saved for profile `{profile_key_for_prot}`.",
+                                "category": "success",
+                            }
+                        ],
+                        "redirect_url": kwargs.get("request_url"),
+                    }
+
                 if form.remove_registration.data:
                     target_member_id = int(form.remove_registration_user_id.data or 0)
                     if target_member_id == 0:
@@ -2063,14 +2519,21 @@ class WowGuildAutomation(commands.Cog):
                         "onboarding_new_role_id": int(form.onboarding_new_role_id.data or 0),
                         "onboarding_complete_role_id": int(form.onboarding_complete_role_id.data or 0),
                     }
-                    cfg["channels"] = {
-                        "onboarding_channel_id": int(form.onboarding_channel_id.data or 0),
-                        "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
-                        "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
-                        "officer_character_notify_channel_id": int(
-                            form.officer_character_notify_channel_id.data or 0
-                        ),
-                    }
+                    ch_merge = dict(cfg.get("channels") or {})
+                    ch_merge.update(
+                        {
+                            "onboarding_channel_id": int(form.onboarding_channel_id.data or 0),
+                            "manual_review_channel_id": int(form.manual_review_channel_id.data or 0),
+                            "raid_guest_channel_id": int(form.raid_guest_channel_id.data or 0),
+                            "officer_character_notify_channel_id": int(
+                                form.officer_character_notify_channel_id.data or 0
+                            ),
+                            "rank_protected_notify_channel_id": int(
+                                form.rank_protected_notify_channel_id.data or 0
+                            ),
+                        }
+                    )
+                    cfg["channels"] = ch_merge
                     cfg["rules"] = {
                         "rule_channel_id": int(form.rule_channel_id.data or 0),
                         "rule_emoji": str(form.rule_emoji.data or "✅").strip() or "✅",
@@ -2085,6 +2548,14 @@ class WowGuildAutomation(commands.Cog):
                     cfg["templates"]["admin_removed_char_dm"] = str(
                         form.admin_removed_char_dm.data or ""
                     ).strip()
+                    cfg["templates"]["protected_rank_sync_notice"] = str(
+                        form.protected_rank_sync_notice.data or ""
+                    ).strip()
+                    lines_prot = str(form.protected_rank_lines.data or "").splitlines()
+                    cleaned_prot = [ln.strip() for ln in lines_prot if ln.strip()]
+                    pr_save = cfg.setdefault("protected_rank_titles_by_profile", {})
+                    pr_save[profile_key] = cleaned_prot
+                    cfg["protected_rank_titles_by_profile"] = pr_save
                     notifications = []
                     category = None
                     try:
@@ -2336,6 +2807,7 @@ class WowGuildAutomation(commands.Cog):
         <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create</label></p>
         <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create</label></p>
         <p><label>Officer notify channel</label><br>{form.officer_character_notify_channel_id()}<br><small>Leave / member quit: notice if linked WoW chars existed</small></p>
+        <p><label>Protected-rank notify channel</label><br>{form.rank_protected_notify_channel_id()}<br><small>When a member’s ingame rank is protected, no auto role — post here</small></p>
       </div>
 
       <div class="wow-card">
@@ -2371,6 +2843,14 @@ class WowGuildAutomation(commands.Cog):
         <p>{form.apply_rank_mapping()}</p>
         <p><label>Remove by Rank Index</label><br>{form.remove_rank_index()}</p>
         <p>{form.remove_rank_mapping()}</p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Protected WoW ranks (active profile)</h3>
+        <p><small>Members with these ingame ranks (match rank title, API name, or guild rank index <b>0–9</b>) do <b>not</b> get automatic Discord rank roles. One entry per line. Load profile first if you edit another version.</small></p>
+        <p><label>Protected rank list</label><br>{form.protected_rank_lines(rows=8)}</p>
+        <p><label>Officer notice template</label><br>{form.protected_rank_sync_notice(rows=3)}</p>
+        <p>{form.save_protected_ranks()}</p>
       </div>
     </div>
     <hr>

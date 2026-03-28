@@ -229,8 +229,82 @@ def format_char_line(
         if m and m.get("name") and char_tuple_key(m["name"], m["game_type"]) == char_tuple_key(
             entry["name"], entry["game_type"]
         ):
-            return f"**{tag}** (Main)"
+            return f"**{tag}** ★ Main-Char"
     return tag
+
+
+def format_mains_summary(mains: Dict[str, Optional[Dict[str, str]]]) -> str:
+    """Eine Zeile: welcher Main pro Spiel gesetzt ist."""
+    parts: List[str] = []
+    for g in SUPPORTED_GAMES:
+        m = mains.get(g)
+        if m and str(m.get("name", "")).strip():
+            parts.append(f"{game_label(g)}: **{m['name']}**")
+    if not parts:
+        return "**Main:** — (noch keiner gesetzt)"
+    return "**Main:** " + " · ".join(parts)
+
+
+def format_rank_sync_summary(guild: Optional[discord.Guild], rank_sync_by_game: Any) -> str:
+    """Kurzinfo aus gespeichertem Rang-Sync-Zustand (für Listen)."""
+    if not isinstance(rank_sync_by_game, dict):
+        return ""
+    parts: List[str] = []
+    for g in SUPPORTED_GAMES:
+        st = rank_sync_by_game.get(g)
+        if not isinstance(st, dict):
+            continue
+        title = str(st.get("last_title") or "").strip()
+        rid = int(st.get("last_role_id") or 0)
+        locked = bool(st.get("locked"))
+        if not title and not rid and not locked:
+            continue
+        gl = game_label(g)
+        role_hint = ""
+        if guild is not None and rid:
+            role = guild.get_role(rid)
+            if role:
+                role_hint = f" → {role.name}"
+        lock_s = " [Rang-Sync aus]" if locked else ""
+        if title:
+            parts.append(f"{gl}: {title}{role_hint}{lock_s}")
+        elif role_hint:
+            parts.append(f"{gl}:{role_hint}{lock_s}")
+        elif locked:
+            parts.append(f"{gl}: —{lock_s}")
+    return " · ".join(parts)
+
+
+async def merge_rank_sync_game_state(
+    member_group: Config,
+    game: str,
+    *,
+    last_title: Optional[str] = None,
+    last_role_id: Optional[int] = None,
+    locked: Optional[bool] = None,
+) -> None:
+    """Aktualisiert rank_sync_by_game[game] ohne None-Blätter zu zerstören."""
+    if game not in SUPPORTED_GAMES:
+        return
+    try:
+        raw = await member_group.rank_sync_by_game()
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    cur: Dict[str, Any] = dict(raw.get(game) or {})
+    if last_title is not None:
+        cur["last_title"] = str(last_title)
+    if last_role_id is not None:
+        cur["last_role_id"] = int(last_role_id)
+    if locked is not None:
+        cur["locked"] = bool(locked)
+    raw[game] = cur
+    await member_group.rank_sync_by_game.set(raw)
+
+
+async def set_rank_sync_lock(member_group: Config, game: str, locked: bool) -> None:
+    await merge_rank_sync_game_state(member_group, game, locked=locked)
 
 
 async def find_char_owner_guild_wide(

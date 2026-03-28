@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import discord
@@ -43,47 +44,61 @@ def _truncate_for_message(body: str, footer: str, limit: int = PANEL_MESSAGE_CON
     return body[: max_body - 25].rstrip() + "\n… *(Liste gekürzt — `/wow-chars list`)*" + footer
 
 
-def _menu_view(cog: "WowGuildAutomation", guild: discord.Guild, member: discord.Member) -> CharMainMenuView:
-    return CharMainMenuView(cog, guild, member)
+def _menu_view(
+    cog: "WowGuildAutomation",
+    guild: discord.Guild,
+    member: discord.Member,
+    *,
+    actor: Optional[discord.Member] = None,
+) -> CharMainMenuView:
+    return CharMainMenuView(cog, guild, member, actor=actor)
 
 
 class CharMainMenuView(discord.ui.View):
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, member: discord.Member) -> None:
+    def __init__(
+        self,
+        cog: "WowGuildAutomation",
+        guild: discord.Guild,
+        member: discord.Member,
+        *,
+        actor: Optional[discord.Member] = None,
+    ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.member = member
+        self.actor = actor if actor is not None else member
 
     @discord.ui.button(label="Chars hinzufügen", style=discord.ButtonStyle.primary, row=0)
     async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         await interaction.response.edit_message(
             content="Welches Spiel?",
-            view=GamePickView(self.cog, self.guild, self.member, mode="add"),
+            view=GamePickView(self.cog, self.guild, self.member, mode="add", actor=self.actor),
         )
 
     @discord.ui.button(label="Main setzen", style=discord.ButtonStyle.secondary, row=0)
     async def main_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         linked = await get_linked_list(self.cog.config.member(self.member))
         if not linked:
             await interaction.response.edit_message(
                 content="Noch keine Chars verknüpft.",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         await interaction.response.edit_message(
             content="**Main pro Spiel** — zuerst Version wählen:",
-            view=MainGamePickView(self.cog, self.guild, self.member),
+            view=MainGamePickView(self.cog, self.guild, self.member, actor=self.actor),
         )
 
     @discord.ui.button(label="Meine Chars", style=discord.ButtonStyle.secondary, row=1)
     async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
@@ -94,7 +109,7 @@ class CharMainMenuView(discord.ui.View):
         except Exception:
             await interaction.edit_original_response(
                 content="Char-Liste konnte nicht geladen werden. Nutze `/wow-chars list`.",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         footer = "\n\n—\n" + PANEL_INTRO
@@ -102,7 +117,7 @@ class CharMainMenuView(discord.ui.View):
         try:
             await interaction.edit_original_response(
                 content=full,
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
         except discord.HTTPException:
             try:
@@ -113,21 +128,21 @@ class CharMainMenuView(discord.ui.View):
 
     @discord.ui.button(label="Chars entfernen", style=discord.ButtonStyle.danger, row=1)
     async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         linked = await get_linked_list(self.cog.config.member(self.member))
         if not linked:
             await interaction.response.edit_message(
                 content="Nichts zum Entfernen.",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
         await interaction.response.edit_message(
             content=self._remove_caption(ordered, 0),
             view=LinkedRemovePageView(
-                self.cog, self.guild, self.member, ordered, page=0, officer_mode=False
+                self.cog, self.guild, self.actor, ordered, page=0, officer_mode=False
             ),
         )
 
@@ -148,19 +163,24 @@ class GamePickView(discord.ui.View):
         member: discord.Member,
         *,
         mode: str,
+        actor: Optional[discord.Member] = None,
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.mode = mode
+        self.actor = actor if actor is not None else member
 
     @discord.ui.button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.member))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+        )
 
     @discord.ui.button(label="Retail", style=discord.ButtonStyle.primary, row=0)
     async def retail(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -171,7 +191,7 @@ class GamePickView(discord.ui.View):
         await self._open_roster(interaction, GAME_MOP)
 
     async def _open_roster(self, interaction: discord.Interaction, game: str) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         cfg = await self.cog._guild_config(self.guild)
@@ -182,7 +202,7 @@ class GamePickView(discord.ui.View):
                     f"Für **{game_label(game)}** fehlen Realm/Gildenname im Server-Setup "
                     "(Web-Dashboard / `wow guildsettings`)."
                 ),
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         names = await self.cog.blizzard.roster_character_names(
@@ -194,7 +214,7 @@ class GamePickView(discord.ui.View):
         if not names:
             await interaction.response.edit_message(
                 content="Gildenroster leer oder API-Fehler. Prüfe Client-ID/Secret und Profil.",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         total_pages = max(1, (len(names) + LINKED_PAGE_SIZE - 1) // LINKED_PAGE_SIZE)
@@ -203,7 +223,9 @@ class GamePickView(discord.ui.View):
                 f"Roster **{game_label(game)}** — Seite **1/{total_pages}**. "
                 "Mehrfachauswahl im Dropdown bestätigt den Eintrag."
             ),
-            view=RosterPageView(self.cog, self.guild, self.member, game, names, page=0),
+            view=RosterPageView(
+                self.cog, self.guild, self.member, game, names, page=0, actor=self.actor
+            ),
         )
 
 
@@ -216,11 +238,14 @@ class RosterPageView(discord.ui.View):
         game_type: str,
         all_names: List[str],
         page: int,
+        *,
+        actor: Optional[discord.Member] = None,
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.member = member
+        self.actor = actor if actor is not None else member
         self.game_type = game_type
         self.all_names = all_names
         self.page = max(0, page)
@@ -233,7 +258,15 @@ class RosterPageView(discord.ui.View):
 
             async def _select_cb(interaction: discord.Interaction) -> None:
                 await RosterPageView._handle_roster_select(
-                    interaction, cog, guild, member, game_type, all_names, page, self
+                    interaction,
+                    cog,
+                    guild,
+                    member,
+                    game_type,
+                    all_names,
+                    page,
+                    self,
+                    self.actor,
                 )
 
             select = discord.ui.Select(
@@ -257,14 +290,17 @@ class RosterPageView(discord.ui.View):
             self.add_item(b2)
 
     async def _back_menu(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         self.stop()
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.member))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+        )
 
     async def _prev_page(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         self.stop()
@@ -275,12 +311,18 @@ class RosterPageView(discord.ui.View):
                 f"Roster **{game_label(self.game_type)}** — Seite **{new_page + 1}/{tp}**."
             ),
             view=RosterPageView(
-                self.cog, self.guild, self.member, self.game_type, self.all_names, new_page
+                self.cog,
+                self.guild,
+                self.member,
+                self.game_type,
+                self.all_names,
+                new_page,
+                actor=self.actor,
             ),
         )
 
     async def _next_page(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         self.stop()
@@ -291,7 +333,13 @@ class RosterPageView(discord.ui.View):
                 f"Roster **{game_label(self.game_type)}** — Seite **{new_page + 1}/{tp}**."
             ),
             view=RosterPageView(
-                self.cog, self.guild, self.member, self.game_type, self.all_names, new_page
+                self.cog,
+                self.guild,
+                self.member,
+                self.game_type,
+                self.all_names,
+                new_page,
+                actor=self.actor,
             ),
         )
 
@@ -305,8 +353,9 @@ class RosterPageView(discord.ui.View):
         all_names: List[str],
         page: int,
         view: "RosterPageView",
+        actor: discord.Member,
     ) -> None:
-        if interaction.user.id != member.id:
+        if interaction.user.id != actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         selected = interaction.data.get("values") or []
@@ -317,23 +366,34 @@ class RosterPageView(discord.ui.View):
         view.stop()
         await interaction.response.edit_message(
             content=f"{msg}\n\n{PANEL_INTRO}",
-            view=_menu_view(cog, guild, member),
+            view=_menu_view(cog, guild, member, actor=actor),
         )
 
 
 class MainGamePickView(discord.ui.View):
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, member: discord.Member) -> None:
+    def __init__(
+        self,
+        cog: "WowGuildAutomation",
+        guild: discord.Guild,
+        member: discord.Member,
+        *,
+        actor: Optional[discord.Member] = None,
+    ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
+        self.actor = actor if actor is not None else member
 
     @discord.ui.button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.member))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+        )
 
     @discord.ui.button(label="Retail", style=discord.ButtonStyle.primary, row=0)
     async def retail(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -344,7 +404,7 @@ class MainGamePickView(discord.ui.View):
         await self._open(interaction, GAME_MOP)
 
     async def _open(self, interaction: discord.Interaction, game: str) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         linked = await get_linked_list(self.cog.config.member(self.member))
@@ -352,7 +412,7 @@ class MainGamePickView(discord.ui.View):
         if not subset:
             await interaction.response.edit_message(
                 content=f"Keine verknüpften Chars für **{game_label(game)}**.",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         ordered = sorted(subset, key=lambda e: e["name"].lower())
@@ -362,7 +422,9 @@ class MainGamePickView(discord.ui.View):
                 f"**Main für {game_label(game)}** — Seite **1/{tp}**. "
                 "Oder „Nach Namen suchen“."
             ),
-            view=LinkedMainPageView(self.cog, self.guild, self.member, game, ordered, page=0),
+            view=LinkedMainPageView(
+                self.cog, self.guild, self.member, game, ordered, page=0, actor=self.actor
+            ),
         )
 
 
@@ -375,11 +437,14 @@ class LinkedMainPageView(discord.ui.View):
         game_type: str,
         ordered: List[Dict[str, str]],
         page: int,
+        *,
+        actor: Optional[discord.Member] = None,
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
+        self.actor = actor if actor is not None else member
         self.game_type = game_type
         self.ordered = ordered
         self.page = max(0, page)
@@ -415,35 +480,44 @@ class LinkedMainPageView(discord.ui.View):
         return f"**Main für {game_label(self.game_type)}** — Seite **{self.page + 1}/{tp}**."
 
     async def _back_menu(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.member))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+        )
 
     async def _search(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        await interaction.response.send_modal(MainCharSearchModal(self.cog, self.guild, self.member, self.game_type))
+        await interaction.response.send_modal(
+            MainCharSearchModal(self.cog, self.guild, self.member, self.game_type, actor=self.actor)
+        )
 
     async def _prev(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         np = self.page - 1
-        nv = LinkedMainPageView(self.cog, self.guild, self.member, self.game_type, self.ordered, np)
+        nv = LinkedMainPageView(
+            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor
+        )
         await interaction.response.edit_message(content=nv._caption(), view=nv)
 
     async def _next(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         np = self.page + 1
-        nv = LinkedMainPageView(self.cog, self.guild, self.member, self.game_type, self.ordered, np)
+        nv = LinkedMainPageView(
+            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor
+        )
         await interaction.response.edit_message(content=nv._caption(), view=nv)
 
     async def _pick(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         raw = (interaction.data.get("values") or [""])[0]
@@ -455,10 +529,13 @@ class LinkedMainPageView(discord.ui.View):
             game = GAME_RETAIL
         await set_main_for_game(self.cog.config.member(self.member), game, name.strip())
         await self.cog.config.member(self.member).selected_game.set(game)
+        asyncio.create_task(
+            self.cog._schedule_rank_sync_after_main(self.guild, self.member, game, name.strip())
+        )
         self.stop()
         await interaction.response.edit_message(
             content=f"Main **{game_label(game)}** gesetzt: **{name.strip()}**.\n\n{PANEL_INTRO}",
-            view=_menu_view(self.cog, self.guild, self.member),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
         )
 
 
@@ -476,15 +553,18 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
         guild: discord.Guild,
         member: discord.Member,
         game_type: str,
+        *,
+        actor: Optional[discord.Member] = None,
     ) -> None:
         super().__init__()
         self.cog = cog
         self.guild = guild
         self.member = member
         self.game_type = game_type
+        self.actor = actor if actor is not None else member
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         q = str(self.query.value).strip().lower()
@@ -493,18 +573,23 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
         if not subset:
             await interaction.response.edit_message(
                 content=f"Kein Treffer für „{self.query.value}“ in **{game_label(self.game_type)}**.\n\n{PANEL_INTRO}",
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         if len(subset) == 1:
             e = subset[0]
             await set_main_for_game(self.cog.config.member(self.member), e["game_type"], e["name"])
             await self.cog.config.member(self.member).selected_game.set(e["game_type"])
+            asyncio.create_task(
+                self.cog._schedule_rank_sync_after_main(
+                    self.guild, self.member, e["game_type"], e["name"]
+                )
+            )
             await interaction.response.edit_message(
                 content=(
                     f"Main **{game_label(e['game_type'])}** gesetzt: **{e['name']}**.\n\n{PANEL_INTRO}"
                 ),
-                view=_menu_view(self.cog, self.guild, self.member),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
         ordered = sorted(subset, key=lambda e: e["name"].lower())[:25]
@@ -512,7 +597,7 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
         for e in ordered:
             value = f"{e['name']}|{e['game_type']}"
             opts.append(discord.SelectOption(label=e["name"][:100], value=value[:100]))
-        view = MainSearchDisambigView(self.cog, self.guild, self.member, opts)
+        view = MainSearchDisambigView(self.cog, self.guild, self.member, opts, actor=self.actor)
         await interaction.response.edit_message(
             content=f"Mehrere Treffer — bitte einen wählen:",
             view=view,
@@ -526,11 +611,14 @@ class MainSearchDisambigView(discord.ui.View):
         guild: discord.Guild,
         member: discord.Member,
         options: List[discord.SelectOption],
+        *,
+        actor: Optional[discord.Member] = None,
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
+        self.actor = actor if actor is not None else member
         s = discord.ui.Select(placeholder="Main wählen", min_values=1, max_values=1, options=options)
         s.callback = self._pick
         self.add_item(s)
@@ -539,13 +627,16 @@ class MainSearchDisambigView(discord.ui.View):
         self.add_item(b)
 
     async def _menu(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.member))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+        )
 
     async def _pick(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.member.id:
+        if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         raw = (interaction.data.get("values") or [""])[0]
@@ -555,9 +646,12 @@ class MainSearchDisambigView(discord.ui.View):
         name, game = raw.split("|", 1)
         await set_main_for_game(self.cog.config.member(self.member), game, name.strip())
         await self.cog.config.member(self.member).selected_game.set(game)
+        asyncio.create_task(
+            self.cog._schedule_rank_sync_after_main(self.guild, self.member, game, name.strip())
+        )
         await interaction.response.edit_message(
             content=f"Main **{game_label(game)}** gesetzt: **{name.strip()}**.\n\n{PANEL_INTRO}",
-            view=_menu_view(self.cog, self.guild, self.member),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
         )
 
 
@@ -650,7 +744,10 @@ class LinkedRemovePageView(discord.ui.View):
         if self.officer_mode:
             await interaction.response.edit_message(content="Abgebrochen.", view=None)
             return
-        await interaction.response.edit_message(content=PANEL_INTRO, view=_menu_view(self.cog, self.guild, self.actor))
+        await interaction.response.edit_message(
+            content=PANEL_INTRO,
+            view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor),
+        )
 
     async def _prev(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.actor.id:
@@ -715,7 +812,7 @@ class LinkedRemovePageView(discord.ui.View):
             self.actor,
             self.ordered,
             self.page,
-            officer_mode=True,
+            officer_mode=self.officer_mode,
             officer=self.officer,
             target=self.target,
             accumulated=self.accumulated,
@@ -736,7 +833,7 @@ class LinkedRemovePageView(discord.ui.View):
         if not linked2:
             await interaction.response.edit_message(
                 content="Ausgewählte Chars entfernt. Keine Chars mehr verknüpft.\n\n" + PANEL_INTRO,
-                view=_menu_view(self.cog, self.guild, self.actor),
+                view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor),
             )
             return
         ordered = sorted(linked2, key=lambda e: (e["game_type"], e["name"].lower()))
@@ -895,5 +992,156 @@ class OfficerUserPickView(discord.ui.View):
             lines.append(await self.cog._format_user_char_list_ephemeral(self.guild, m, header_user=True))
         msg = "\n\n".join(lines) if lines else "Keine gültigen Mitglieder."
         for chunk in [msg[i : i + 1900] for i in range(0, len(msg), 1900)] or ["—"]:
+            await interaction.followup.send(chunk, ephemeral=True)
+        self.stop()
+
+
+class SlashWowAdminListView(discord.ui.View):
+    """Zweite Stufe für /wow-admin list — Auswahl per Dropdown."""
+
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.officer = officer
+        sel = discord.ui.Select(
+            placeholder="Listen-Art",
+            options=[
+                discord.SelectOption(label="Alle mit verknüpften Chars", value="all_linked"),
+                discord.SelectOption(label="Bestimmte Mitglieder wählen …", value="pick_users"),
+            ],
+        )
+        sel.callback = self._on_select
+        self.add_item(sel)
+
+    async def _on_select(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.officer.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        v = (interaction.data.get("values") or [""])[0]
+        if v == "all_linked":
+            await interaction.response.defer(ephemeral=True)
+            text = await self.cog._officer_format_all_linked_chars(self.guild)
+            for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["Keine Einträge."]:
+                await interaction.followup.send(chunk, ephemeral=True)
+            self.stop()
+            return
+        await interaction.response.edit_message(
+            content="Wähle bis zu 25 Mitglieder:",
+            view=OfficerUserPickView(self.cog, self.guild, self.officer),
+        )
+
+
+class SlashWowAdminMemberPickView(discord.ui.View):
+    """Ein Mitglied wählen (Dropdown), dann Officer-Aktion ausführen."""
+
+    def __init__(
+        self,
+        cog: "WowGuildAutomation",
+        guild: discord.Guild,
+        officer: discord.Member,
+        *,
+        mode: str,
+    ) -> None:
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.officer = officer
+        self.mode = mode
+        self.user_select = discord.ui.UserSelect(
+            placeholder="Mitglied wählen",
+            min_values=1,
+            max_values=1,
+            custom_id="slash_wow_admin_member_one",
+        )
+        self.user_select.callback = self._on_user
+        self.add_item(self.user_select)
+
+    async def _on_user(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.officer.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        u = self.user_select.values[0]
+        member = self.guild.get_member(u.id)
+        if member is None:
+            await interaction.response.send_message("Mitglied ist nicht (mehr) auf dem Server.", ephemeral=True)
+            return
+        cog = self.cog
+        guild = self.guild
+        mode = self.mode
+        if mode == "remove_char_member":
+            linked = await get_linked_list(cog.config.member(member))
+            if not linked:
+                await interaction.response.send_message(
+                    f"{member.mention} hat keine verknüpften Chars.",
+                    ephemeral=True,
+                )
+                return
+            ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
+            await interaction.response.edit_message(
+                content=(
+                    "Markiere Charaktere im Dropdown (mehrere Seiten), dann **Grund eingeben …**."
+                ),
+                view=LinkedRemovePageView(
+                    cog,
+                    guild,
+                    interaction.user,
+                    ordered,
+                    0,
+                    officer_mode=True,
+                    officer=interaction.user,
+                    target=member,
+                    accumulated=set(),
+                ),
+            )
+            return
+        if mode == "add_char_member":
+            await interaction.response.edit_message(
+                content=f"**Ziel:** {member.mention} — welches Spiel?",
+                view=GamePickView(cog, guild, member, mode="add", actor=interaction.user),
+            )
+            return
+        if mode == "set_main_member":
+            await interaction.response.edit_message(
+                content=f"**Ziel:** {member.mention}\n\n{PANEL_INTRO}",
+                view=CharMainMenuView(cog, guild, member, actor=interaction.user),
+            )
+            return
+        if mode == "sync_specific_member":
+            await interaction.response.defer(ephemeral=True)
+            text = await cog._slash_admin_sync_report_for_member(guild, member)
+            await interaction.followup.send(text[:1900], ephemeral=True)
+            self.stop()
+            return
+        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+
+
+class SlashWowAdminSyncAllConfirmView(discord.ui.View):
+    """Bestätigung per Dropdown vor Bulk-Rang-Sync."""
+
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.guild = guild
+        self.officer = officer
+        sel = discord.ui.Select(
+            placeholder="Aktion bestätigen",
+            options=[
+                discord.SelectOption(
+                    label="Jetzt alle (mit Main) synchronisieren — kann dauern",
+                    value="confirm",
+                ),
+            ],
+        )
+        sel.callback = self._confirm
+        self.add_item(sel)
+
+    async def _confirm(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.officer.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        text = await self.cog._slash_admin_sync_all_members_report(self.guild)
+        for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
             await interaction.followup.send(chunk, ephemeral=True)
         self.stop()

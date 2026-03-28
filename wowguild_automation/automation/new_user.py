@@ -1,9 +1,11 @@
-from typing import Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 import discord
 from discord.ext import commands
 
+from ..character_helpers import merge_rank_sync_game_state
 from ..functions.automations import RankSyncService
+from ..officer_notifications import send_protected_rank_officer_notice
 
 TEXTS: Dict[str, Dict[str, str]] = {
     "de-DE": {
@@ -17,6 +19,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "mainchar_timeout": "Kein Mainchar erhalten, Onboarding beendet.",
         "verified": "Verifizierung erfolgreich. Mainchar `{main}` gefunden, Ingame-Rang `{rank}`.",
         "manual": "Automatische Verifizierung nicht moeglich. Das Team wurde fuer manuelle Pruefung benachrichtigt.",
+        "protected_rank": "Dein Char wurde gefunden. Der Ingame-Rang ist geschuetzt — ein Offizier teilt dir die passende Discord-Rolle mit.",
         "rules": "Wichtig: Bitte lies die Serverregeln und bestaetige sie mit dem vorgegebenen Emoji.",
         "rules_confirm": "Regeln bestaetigen",
     },
@@ -31,6 +34,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "mainchar_timeout": "No main character received, onboarding cancelled.",
         "verified": "Verification successful. Main character `{main}` found, ingame rank `{rank}`.",
         "manual": "Automatic verification failed. The team was notified for manual review.",
+        "protected_rank": "Your character was found. The in-game rank is protected — an officer will assign your Discord role.",
         "rules": "Important: Please read the server rules and confirm with the required emoji.",
         "rules_confirm": "Confirm rules",
     },
@@ -122,6 +126,8 @@ async def handle_new_member_onboarding(
     rank_sync: RankSyncService,
     manual_channel: Optional[discord.TextChannel],
     onboarding_channel: Optional[discord.TextChannel] = None,
+    *,
+    member_config: Optional[Any] = None,
 ) -> dict:
     destination: discord.abc.Messageable
     if onboarding_channel is not None:
@@ -268,7 +274,36 @@ async def handle_new_member_onboarding(
     main_char = modal_view.value.strip()
     selected_cfg = dict(guild_config)
     selected_cfg["wow"] = wow_profiles.get(selected_game, {})
-    rank = await rank_sync.sync_member_rank(member, selected_cfg, main_char)
+    rank_title, sync_reason, role_id = await rank_sync.sync_member_rank(
+        member,
+        selected_cfg,
+        main_char,
+        profile_key=selected_game,
+        locked=False,
+    )
+    rank = rank_title if sync_reason == "ok" else None
+    if sync_reason == "ok" and rank_title and member_config is not None:
+        await merge_rank_sync_game_state(
+            member_config,
+            selected_game,
+            last_title=str(rank_title),
+            last_role_id=int(role_id or 0),
+        )
+    elif sync_reason == "protected" and rank_title and member_config is not None:
+        await merge_rank_sync_game_state(
+            member_config,
+            selected_game,
+            last_title=str(rank_title),
+        )
+    if sync_reason == "protected" and rank_title:
+        await send_protected_rank_officer_notice(
+            member.guild,
+            guild_config,
+            member,
+            selected_game,
+            main_char,
+            rank_title,
+        )
     if rank:
         if member_role and member_role not in member.roles:
             await member.add_roles(member_role, reason="WoW onboarding: verified guild member")
@@ -277,6 +312,13 @@ async def handle_new_member_onboarding(
             await manual_channel.send(
                 f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
                 f"Spieltyp: {selected_game}. Automatisch verifiziert (Rang: {rank})."
+            )
+    elif sync_reason == "protected" and rank_title:
+        await destination.send(t["protected_rank"])
+        if manual_channel:
+            await manual_channel.send(
+                f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                f"Ingame-Rang `{rank_title}` ist geschützt; Offiziere wurden im Rang-Schutz-Kanal benachrichtigt."
             )
     else:
         template = guild_config.get("templates", {}).get(
