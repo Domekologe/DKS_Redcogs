@@ -61,6 +61,121 @@ async def get_linked_list(member_group: Config) -> List[Dict[str, str]]:
     return normalize_linked_characters(legacy)
 
 
+def mains_from_member_data(payload: Dict[str, Any]) -> Dict[str, Optional[Dict[str, str]]]:
+    """Build per-game main map from stored member payload (supports legacy main_character)."""
+    out: Dict[str, Optional[Dict[str, str]]] = {g: None for g in SUPPORTED_GAMES}
+    raw_m = payload.get("main_characters")
+    if isinstance(raw_m, dict):
+        for g in SUPPORTED_GAMES:
+            v = raw_m.get(g)
+            if isinstance(v, dict) and str(v.get("name", "")).strip():
+                out[g] = {"name": str(v["name"]).strip(), "game_type": g}
+        if any(v is not None for v in out.values()):
+            return out
+    leg = payload.get("main_character")
+    if isinstance(leg, dict) and str(leg.get("name", "")).strip():
+        gt = str(leg.get("game_type", GAME_RETAIL)).lower()
+        if gt not in SUPPORTED_GAMES:
+            gt = GAME_RETAIL
+        out[gt] = {"name": str(leg["name"]).strip(), "game_type": gt}
+    return out
+
+
+async def get_main_characters(member_group: Config) -> Dict[str, Optional[Dict[str, str]]]:
+    raw = await member_group.main_characters()
+    payload = {"main_characters": raw, "main_character": await member_group.main_character()}
+    return mains_from_member_data(payload)
+
+
+async def set_main_for_game(member_group: Config, game_type: str, name: str) -> None:
+    if game_type not in SUPPORTED_GAMES:
+        return
+    current: Dict[str, Any] = {g: None for g in SUPPORTED_GAMES}
+    raw = await member_group.main_characters()
+    if isinstance(raw, dict):
+        for g in SUPPORTED_GAMES:
+            v = raw.get(g)
+            if isinstance(v, dict) and str(v.get("name", "")).strip():
+                current[g] = {"name": str(v["name"]).strip(), "game_type": g}
+    leg = await member_group.main_character()
+    if isinstance(leg, dict) and str(leg.get("name", "")).strip():
+        lg = str(leg.get("game_type", GAME_RETAIL)).lower()
+        if lg not in SUPPORTED_GAMES:
+            lg = GAME_RETAIL
+        if current.get(lg) is None:
+            current[lg] = {"name": str(leg["name"]).strip(), "game_type": lg}
+    current[game_type] = {"name": name.strip(), "game_type": game_type}
+    await member_group.main_characters.set(current)
+    await member_group.main_character.clear()
+
+
+async def clear_main_for_game(member_group: Config, game_type: str) -> None:
+    raw = await member_group.main_characters()
+    if isinstance(raw, dict):
+        current = dict(raw)
+    else:
+        current = {}
+    for g in SUPPORTED_GAMES:
+        if g not in current:
+            current[g] = None
+    current[game_type] = None
+    await member_group.main_characters.set(current)
+    leg = await member_group.main_character()
+    if isinstance(leg, dict) and str(leg.get("game_type", "")).lower() == game_type:
+        await member_group.main_character.clear()
+
+
+async def clear_all_mains(member_group: Config) -> None:
+    await member_group.main_characters.clear()
+    await member_group.main_character.clear()
+
+
+def profile_key_to_link_game(profile_key: str) -> str:
+    """Map wow_profiles key from onboarding to linked_characters game_type (retail / mop_classic)."""
+    pk = (profile_key or "").strip().lower()
+    if pk == GAME_MOP:
+        return GAME_MOP
+    return GAME_RETAIL
+
+
+async def merge_onboarding_character_into_linked(
+    config: Config,
+    guild: discord.Guild,
+    member: discord.Member,
+    char_name: str,
+    wow_profile_key: str,
+) -> bool:
+    """
+    Persist onboarding main character into linked_characters without a roster API check
+    (needed for manual verification and parity with /wowchar panel).
+
+    Returns True if the member has this name+game linked after the call (added, or already present).
+    Returns False if another member already owns this char+game on the server.
+    """
+    name = (char_name or "").strip()
+    if not name:
+        return False
+    game_type = profile_key_to_link_game(wow_profile_key)
+    member_group = config.member(member)
+    linked = await get_linked_list(member_group)
+    key = char_tuple_key(name, game_type)
+    if any(char_tuple_key(e["name"], e["game_type"]) == key for e in linked):
+        return True
+    owner = await find_char_owner_guild_wide(config, guild, name, game_type, exclude_user_id=member.id)
+    if owner is not None:
+        return False
+    await set_linked_list(member_group, linked + [{"name": name, "game_type": game_type}])
+    return True
+
+
+async def ensure_main_for_game_if_empty(member_group: Config, game_type: str, char_name: str) -> None:
+    """Set main for this game only when none is stored yet."""
+    mains = await get_main_characters(member_group)
+    if mains.get(game_type) is not None:
+        return
+    await set_main_for_game(member_group, game_type, (char_name or "").strip())
+
+
 async def set_linked_list(member_group: Config, items: List[Dict[str, str]]) -> None:
     clean: List[Dict[str, str]] = []
     seen: Set[Tuple[str, str]] = set()
@@ -78,12 +193,15 @@ async def set_linked_list(member_group: Config, items: List[Dict[str, str]]) -> 
     await member_group.chars.set([f"{x['name']} ({x['game_type']})" for x in clean])
 
 
-def format_char_line(entry: Dict[str, str], main: Optional[Dict[str, str]] = None) -> str:
+def format_char_line(
+    entry: Dict[str, str],
+    mains: Optional[Dict[str, Optional[Dict[str, str]]]] = None,
+) -> str:
     tag = f"{entry['name']} ({game_label(entry['game_type'])})"
-    if main and main.get("name") and main.get("game_type"):
-        if (
-            main["name"].lower() == entry["name"].lower()
-            and main["game_type"].lower() == entry["game_type"].lower()
+    if mains:
+        m = mains.get(entry["game_type"])
+        if m and m.get("name") and char_tuple_key(m["name"], m["game_type"]) == char_tuple_key(
+            entry["name"], entry["game_type"]
         ):
             return f"**{tag}** (Main)"
     return tag

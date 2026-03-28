@@ -29,18 +29,25 @@ from .character_helpers import (
     GAME_MOP,
     GAME_RETAIL,
     char_tuple_key,
+    clear_main_for_game,
+    ensure_main_for_game_if_empty,
     find_char_owner_guild_wide,
     format_char_line,
     game_label,
     get_linked_list,
+    get_main_characters,
+    mains_from_member_data,
+    merge_onboarding_character_into_linked,
     normalize_linked_characters,
+    profile_key_to_link_game,
     set_linked_list,
     wow_profile_for_game,
 )
 from .character_ui import (
     CharMainMenuView,
+    LinkedRemovePageView,
     OfficerListMenuView,
-    OfficerRemoveCharView,
+    PANEL_INTRO,
     officer_can_manage_characters,
 )
 from .functions.automations import RankSyncService
@@ -96,12 +103,12 @@ class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
     wow_char_grp = app_commands.Group(
-        name="wow-char",
+        name="wowchar",
         description="WoW-Charaktere mit der Gilde verknüpfen (Retail / MoP Classic)",
     )
     wow_char_officer_grp = app_commands.Group(
-        name="wow-char-officer",
-        description="Officer tools: character lists and removals",
+        name="wowcharofficer",
+        description="Officer: Charakterlisten und Entfernen",
     )
 
     def __init__(self, bot: Red) -> None:
@@ -163,6 +170,7 @@ class WowGuildAutomation(commands.Cog):
             chars=[],
             linked_characters=[],
             main_character=None,
+            main_characters={"retail": None, "mop_classic": None},
             ready_times={},
             onboarding_language="de-DE",
             selected_game="retail",
@@ -322,12 +330,11 @@ class WowGuildAutomation(commands.Cog):
     ) -> str:
         _ = guild
         linked = await get_linked_list(self.config.member(member))
-        main = await self.config.member(member).main_character()
-        main_d = main if isinstance(main, dict) else None
+        mains = await get_main_characters(self.config.member(member))
         if not linked:
             head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
             return head + "Keine Chars verknüpft."
-        lines = [format_char_line(e, main_d) for e in linked]
+        lines = [format_char_line(e, mains) for e in linked]
         head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
         return head + "\n".join(lines)
 
@@ -346,20 +353,25 @@ class WowGuildAutomation(commands.Cog):
                 continue
             mem = guild.get_member(uid)
             label = mem.mention if mem else f"<@{uid}>"
-            main_d = payload.get("main_character")
-            main_d = main_d if isinstance(main_d, dict) else None
-            parts = [format_char_line(e, main_d) for e in linked]
+            mains = mains_from_member_data(payload)
+            parts = [format_char_line(e, mains) for e in linked]
             lines.append(f"{label}: {', '.join(parts)}")
         return "\n".join(lines) if lines else "Keine verknüpften Chars auf diesem Server."
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         linked = await get_linked_list(self.config.member(member))
-        main = await self.config.member(member).main_character()
+        mains_before = await get_main_characters(self.config.member(member))
+        main_str = ", ".join(
+            f"{game_label(g)}: {m['name']}"
+            for g, m in mains_before.items()
+            if m and str(m.get("name", "")).strip()
+        )
         had_chars = bool(linked)
         await self.config.member(member).linked_characters.clear()
         await self.config.member(member).chars.clear()
         await self.config.member(member).main_character.clear()
+        await self.config.member(member).main_characters.clear()
         await self.config.member(member).selected_game.clear()
         await self.config.member(member).registration.clear()
         if not had_chars:
@@ -384,7 +396,7 @@ class WowGuildAutomation(commands.Cog):
                     user=f"{member} ({member.id})",
                     username=str(member),
                     chars=chars_str,
-                    main=str(main) if main else "",
+                    main=main_str,
                 )
             )
         except discord.HTTPException:
@@ -460,6 +472,23 @@ class WowGuildAutomation(commands.Cog):
         await self.config.member(member).onboarding_language.set(chosen_lang)
         await self.config.member(member).selected_game.set(selected_game)
         await self.config.member(member).registration.set(registration)
+
+        char_from_onboarding = str(registration.get("char_name") or "").strip()
+        if registration.get("type") == "member" and char_from_onboarding:
+            link_game = profile_key_to_link_game(selected_game)
+            merged_ok = await merge_onboarding_character_into_linked(
+                self.config,
+                member.guild,
+                member,
+                char_from_onboarding,
+                selected_game,
+            )
+            if merged_ok:
+                await ensure_main_for_game_if_empty(
+                    self.config.member(member),
+                    link_game,
+                    char_from_onboarding,
+                )
 
         complete_role_id = guild_cfg.get("roles", {}).get("onboarding_complete_role_id", 0)
         if complete_role_id and rules_confirmed:
@@ -587,11 +616,28 @@ class WowGuildAutomation(commands.Cog):
         await self.wow_guildsettings(ctx, region, version, realm, guildname, language)
 
     @wow.command(name="chars")
+    @app_commands.describe(
+        action="Was tun?",
+        charname="Charaktername (nur bei Hinzufügen/Entfernen)",
+        spiel="Spielversion — bei Entfernen nötig, wenn der Name in Retail und MoP existiert",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Liste anzeigen", value="list"),
+            app_commands.Choice(name="Charakter hinzufügen", value="add"),
+            app_commands.Choice(name="Charakter entfernen", value="remove"),
+        ],
+        spiel=[
+            app_commands.Choice(name="Retail", value=GAME_RETAIL),
+            app_commands.Choice(name="MoP Classic", value=GAME_MOP),
+        ],
+    )
     async def wow_chars(
         self,
         ctx: commands.Context,
         action: str,
         charname: Optional[str] = None,
+        spiel: Optional[str] = None,
     ) -> None:
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             await ctx.send(await self._t(ctx, "server_only"))
@@ -599,44 +645,94 @@ class WowGuildAutomation(commands.Cog):
 
         member_conf = self.config.member(ctx.author)
         linked = await get_linked_list(member_conf)
-        main = await member_conf.main_character()
-        main_d = main if isinstance(main, dict) else None
+        mains = await get_main_characters(member_conf)
 
-        action = action.lower().strip()
+        action = (action or "").lower().strip()
         if action == "list":
             if not linked:
                 await self._send_private_ack(ctx, await self._t(ctx, "chars_none"))
                 return
-            msg = "\n".join(format_char_line(e, main_d) for e in linked)
+            msg = "\n".join(format_char_line(e, mains) for e in linked)
             await self._send_private_ack(ctx, msg)
-        elif action == "add" and charname:
+        elif action == "add":
+            if not charname or not str(charname).strip():
+                await self._send_private_ack(
+                    ctx, "Bitte einen Charakternamen angeben (Prefix: `wow chars add Meinchar retail`)."
+                )
+                return
+            game = (spiel or GAME_RETAIL).lower()
+            if game not in (GAME_RETAIL, GAME_MOP):
+                game = GAME_RETAIL
             msg, ok = await self._try_add_characters_for_member(
-                ctx.guild, ctx.author, GAME_RETAIL, [charname]
+                ctx.guild, ctx.author, game, [str(charname).strip()]
             )
             await self._send_private_ack(ctx, msg)
-        elif action == "remove" and charname:
-            target = charname.strip().lower()
-            new_list = [e for e in linked if e["name"].lower() != target]
-            if len(new_list) == len(linked):
+        elif action == "remove":
+            if not charname or not str(charname).strip():
+                await self._send_private_ack(
+                    ctx, "Bitte einen Charakternamen angeben (optional: Spielversion)."
+                )
+                return
+            raw_name = str(charname).strip()
+            matches = [e for e in linked if e["name"].lower() == raw_name.lower()]
+            if not matches:
                 await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
                 return
+            if len(matches) > 1 and not spiel:
+                await self._send_private_ack(
+                    ctx,
+                    "Dieser Name ist in **Retail** und **MoP** verknüpft — bitte `spiel` wählen (Slash) oder "
+                    f"`wow chars remove {raw_name} retail` / `mop_classic` nutzen.",
+                )
+                return
+            if spiel:
+                spiel_l = str(spiel).lower()
+                matches = [e for e in matches if e["game_type"].lower() == spiel_l]
+            if len(matches) != 1:
+                await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
+                return
+            victim = matches[0]
+            rkey = (victim["name"].lower(), victim["game_type"].lower())
+            new_list = [
+                e for e in linked if (e["name"].lower(), e["game_type"].lower()) != rkey
+            ]
             await set_linked_list(member_conf, new_list)
-            if main_d and main_d.get("name", "").lower() == target:
-                await member_conf.main_character.clear()
-            await self._send_private_ack(ctx, await self._t(ctx, "char_removed", char=charname))
+            cur = mains.get(victim["game_type"])
+            if cur and char_tuple_key(cur["name"], victim["game_type"]) == char_tuple_key(
+                victim["name"], victim["game_type"]
+            ):
+                await clear_main_for_game(member_conf, victim["game_type"])
+            await self._send_private_ack(ctx, await self._t(ctx, "char_removed", char=victim["name"]))
         else:
             await self._send_private_ack(ctx, await self._t(ctx, "chars_invalid"))
 
-    @commands.hybrid_command(name="wow-chars")
+    @commands.hybrid_command(name="wowchars")
     @commands.guild_only()
+    @app_commands.describe(
+        action="Was tun?",
+        charname="Charaktername (nur bei Hinzufügen/Entfernen)",
+        spiel="Bei Entfernen nötig, wenn der Name in Retail und MoP existiert",
+    )
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Liste anzeigen", value="list"),
+            app_commands.Choice(name="Charakter hinzufügen", value="add"),
+            app_commands.Choice(name="Charakter entfernen", value="remove"),
+        ],
+        spiel=[
+            app_commands.Choice(name="Retail", value=GAME_RETAIL),
+            app_commands.Choice(name="MoP Classic", value=GAME_MOP),
+        ],
+    )
     async def wow_chars_direct(
         self,
         ctx: commands.Context,
         action: str,
         charname: Optional[str] = None,
+        spiel: Optional[str] = None,
     ) -> None:
-        """Slash-style alias for character management."""
-        await self.wow_chars(ctx, action, charname)
+        """Zeigt, fügt hinzu oder entfernt verknüpfte Gildenchars (Slash: Auswahlmenüs)."""
+        await self.wow_chars(ctx, action, charname, spiel)
 
     @wow.command(name="syncrank")
     async def wow_syncrank(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
@@ -649,18 +745,42 @@ class WowGuildAutomation(commands.Cog):
         game: str
         if mainchar and mainchar.strip():
             mainchar = mainchar.strip()
-            game = await self.config.member(ctx.author).selected_game() or GAME_RETAIL
-        else:
-            main_d = await self.config.member(ctx.author).main_character()
-            if isinstance(main_d, dict) and main_d.get("name"):
-                mainchar = str(main_d["name"]).strip()
-                game = str(main_d.get("game_type", GAME_RETAIL)).lower()
-            else:
+            linked = await get_linked_list(self.config.member(ctx.author))
+            name_matches = [e for e in linked if e["name"].lower() == mainchar.lower()]
+            if not name_matches:
                 await self._send_private_ack(
                     ctx,
-                    "Kein Main gesetzt. Nutze `/wow-char panel` oder `wow syncrank <Charname>`.",
+                    f"`{mainchar}` ist bei dir nicht verknüpft — zuerst Char hinzufügen.",
                 )
                 return
+            if len(name_matches) == 1:
+                game = name_matches[0]["game_type"]
+            else:
+                game = await self.config.member(ctx.author).selected_game() or GAME_RETAIL
+                pick = [e for e in name_matches if e["game_type"] == game]
+                if len(pick) != 1:
+                    await self._send_private_ack(
+                        ctx,
+                        "Dieser Name existiert in **Retail** und **MoP** — bitte Main setzen oder "
+                        "`selected_game` durch einen der Chars setzen lassen (`/wowchar panel`).",
+                    )
+                    return
+                mainchar = pick[0]["name"]
+                game = pick[0]["game_type"]
+        else:
+            main_map = await get_main_characters(self.config.member(ctx.author))
+            active_key = str(cfg.get("active_profile_key", "retail")).lower()
+            main_entry = main_map.get(active_key)
+            if not main_entry or not main_entry.get("name"):
+                main_entry = main_map.get(GAME_RETAIL) or main_map.get(GAME_MOP)
+            if not main_entry or not main_entry.get("name"):
+                await self._send_private_ack(
+                    ctx,
+                    "Kein Main gesetzt. Nutze `/wowchar panel` oder `wow syncrank <Charname>`.",
+                )
+                return
+            mainchar = str(main_entry["name"]).strip()
+            game = str(main_entry.get("game_type", GAME_RETAIL)).lower()
         if game in wow_profiles:
             cfg = dict(cfg)
             cfg["wow"] = wow_profiles[game]
@@ -1029,12 +1149,12 @@ class WowGuildAutomation(commands.Cog):
             await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
             return
         await interaction.response.send_message(
-            "Verknüpfe nur Charaktere, die auf eurer **Gildenroster**-API stehen.",
+            PANEL_INTRO,
             ephemeral=True,
             view=CharMainMenuView(self, interaction.guild, interaction.user),
         )
 
-    @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
+    @wow_char_grp.command(name="meinechars", description="Deine verknüpften Chars (nur du siehst das)")
     @app_commands.guild_only()
     async def slash_wow_char_mine(self, interaction: discord.Interaction) -> None:
         if not isinstance(interaction.user, discord.Member):
@@ -1061,7 +1181,7 @@ class WowGuildAutomation(commands.Cog):
         )
 
     @wow_char_officer_grp.command(
-        name="meine-chars",
+        name="meinechars",
         description="Zeigt deine eigenen verknüpften Chars (zum Abgleich)",
     )
     @app_commands.guild_only()
@@ -1078,7 +1198,7 @@ class WowGuildAutomation(commands.Cog):
         await interaction.response.send_message(text, ephemeral=True)
 
     @wow_char_officer_grp.command(
-        name="char-entfernen",
+        name="charentfernen",
         description="Chars eines Mitglieds entfernen (User erhält DM mit Grund)",
     )
     @app_commands.guild_only()
@@ -1101,11 +1221,20 @@ class WowGuildAutomation(commands.Cog):
                 ephemeral=True,
             )
             return
+        ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
         await interaction.response.send_message(
-            "Wähle die Charaktere, dann öffnet sich die Begründung:",
+            "Markiere Charaktere im Dropdown (mehrere Seiten möglich), dann **Grund eingeben …**.",
             ephemeral=True,
-            view=OfficerRemoveCharView(
-                self, interaction.guild, interaction.user, mitglied, linked
+            view=LinkedRemovePageView(
+                self,
+                interaction.guild,
+                interaction.user,
+                ordered,
+                0,
+                officer_mode=True,
+                officer=interaction.user,
+                target=mitglied,
+                accumulated=set(),
             ),
         )
 
@@ -1966,7 +2095,7 @@ class WowGuildAutomation(commands.Cog):
 
       <div class="wow-card">
         <h3>Character linking messages</h3>
-        <p><small>Slash <code>/wow-char</code> / <code>/wow-char-officer</code> and interactive panel.</small></p>
+        <p><small>Slash <code>/wowchar</code> / <code>/wowcharofficer</code> und interaktives Panel.</small></p>
         <p><label>Duplicate / already linked (use &#123;detail&#125;)</label><br>{form.duplicate_character_message(rows=4)}</p>
         <p><label>Member left notice (&#123;user&#125;, &#123;username&#125;, &#123;chars&#125;)</label><br>{form.member_left_characters_notice(rows=3)}</p>
         <p><label>Officer removal DM (&#123;chars&#125;, &#123;reason&#125;, &#123;officer&#125;)</label><br>{form.admin_removed_char_dm(rows=3)}</p>
