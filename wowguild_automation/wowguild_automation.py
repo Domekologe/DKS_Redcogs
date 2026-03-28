@@ -889,7 +889,7 @@ class WowGuildAutomation(commands.Cog):
                     await self._send_private_ack(
                         ctx,
                         "Dieser Name existiert in **Retail** und **MoP** — bitte Main setzen oder "
-                        "`selected_game` durch einen der Chars setzen lassen (`/wow-char panel`).",
+                        "`selected_game` durch einen der Chars setzen lassen (`/wow-chars-panel`).",
                     )
                     return
                 mainchar = pick[0]["name"]
@@ -903,7 +903,7 @@ class WowGuildAutomation(commands.Cog):
             if not main_entry or not main_entry.get("name"):
                 await self._send_private_ack(
                     ctx,
-                    "Kein Main gesetzt. Nutze `/wow-char panel` oder `wow syncrank <Charname>`.",
+                    "Kein Main gesetzt. Nutze `/wow-chars-panel` oder `wow syncrank <Charname>`.",
                 )
                 return
             mainchar = str(main_entry["name"]).strip()
@@ -1372,17 +1372,31 @@ class WowGuildAutomation(commands.Cog):
         except Exception as e:
             await ctx.send(f"Dashboard status check failed: {e}")
 
-    @wow_char_grp.command(name="panel", description="Interaktives Menü: Chars hinzufügen, Main, Liste, entfernen")
-    @app_commands.guild_only()
-    async def slash_wow_char_panel(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+    @commands.hybrid_command(
+        name="wow-chars-panel",
+        description="Interaktives Menü: Chars verknüpfen, Main setzen, Liste, entfernen (ephemeral).",
+    )
+    @commands.guild_only()
+    async def wow_chars_panel_hybrid(self, ctx: commands.Context) -> None:
+        """Öffnet das Charakter-Panel (Slash empfohlen; Prefix versucht DM)."""
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            await ctx.send(await self._t(ctx, "server_only"))
             return
-        await interaction.response.send_message(
-            PANEL_INTRO,
-            ephemeral=True,
-            view=CharMainMenuView(self, interaction.guild, interaction.user),
-        )
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is not None:
+            await interaction.response.send_message(
+                PANEL_INTRO,
+                ephemeral=True,
+                view=CharMainMenuView(self, ctx.guild, ctx.author),
+            )
+            return
+        try:
+            dm = await ctx.author.create_dm()
+            await dm.send(PANEL_INTRO, view=CharMainMenuView(self, ctx.guild, ctx.author))
+        except discord.HTTPException:
+            await ctx.send(
+                "DM nicht möglich — nutze bitte **`/wow-chars-panel`** auf dem Server (ephemerales Menü)."
+            )
 
     @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
     @app_commands.guild_only()
@@ -2325,7 +2339,7 @@ class WowGuildAutomation(commands.Cog):
 
       <div class="wow-card">
         <h3>Character linking messages</h3>
-        <p><small>Slash <code>/wow-char</code> / <code>/wow-char-officer</code> und interaktives Panel.</small></p>
+        <p><small>Slash <code>/wow-chars-panel</code>, <code>/wow-char</code> / <code>/wow-char-officer</code>.</small></p>
         <p><label>Duplicate / already linked (use &#123;detail&#125;)</label><br>{form.duplicate_character_message(rows=4)}</p>
         <p><label>Member left notice (&#123;user&#125;, &#123;username&#125;, &#123;chars&#125;)</label><br>{form.member_left_characters_notice(rows=3)}</p>
         <p><label>Officer removal DM (&#123;chars&#125;, &#123;reason&#125;, &#123;officer&#125;)</label><br>{form.admin_removed_char_dm(rows=3)}</p>

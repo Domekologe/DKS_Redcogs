@@ -29,6 +29,18 @@ PANEL_INTRO = (
 )
 
 LINKED_PAGE_SIZE = 24
+# Discord: Nachrichten-Content max. 2000 Zeichen — sonst schlägt edit_message fehl („Interaktion fehlgeschlagen“).
+PANEL_MESSAGE_CONTENT_LIMIT = 2000
+
+
+def _truncate_for_message(body: str, footer: str, limit: int = PANEL_MESSAGE_CONTENT_LIMIT) -> str:
+    """body + footer ≤ limit (footer bleibt erhalten)."""
+    max_body = limit - len(footer)
+    if max_body < 80:
+        return (body[: max(40, limit - 40)] + "…")[:limit]
+    if len(body) <= max_body:
+        return body + footer
+    return body[: max_body - 25].rstrip() + "\n… *(Liste gekürzt — `/wow-chars list`)*" + footer
 
 
 def _menu_view(cog: "WowGuildAutomation", guild: discord.Guild, member: discord.Member) -> CharMainMenuView:
@@ -74,11 +86,30 @@ class CharMainMenuView(discord.ui.View):
         if interaction.user.id != self.member.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        text = await self.cog._format_user_char_list_ephemeral(self.guild, self.member, header_user=False)
-        await interaction.response.edit_message(
-            content=text,
-            view=_menu_view(self.cog, self.guild, self.member),
-        )
+        await interaction.response.defer(ephemeral=True)
+        try:
+            text = await self.cog._format_user_char_list_ephemeral(
+                self.guild, self.member, header_user=False
+            )
+        except Exception:
+            await interaction.edit_original_response(
+                content="Char-Liste konnte nicht geladen werden. Nutze `/wow-chars list`.",
+                view=_menu_view(self.cog, self.guild, self.member),
+            )
+            return
+        footer = "\n\n—\n" + PANEL_INTRO
+        full = _truncate_for_message(text, footer)
+        try:
+            await interaction.edit_original_response(
+                content=full,
+                view=_menu_view(self.cog, self.guild, self.member),
+            )
+        except discord.HTTPException:
+            try:
+                short = text[:1900] + ("…" if len(text) > 1900 else "")
+                await interaction.followup.send(short, ephemeral=True)
+            except discord.HTTPException:
+                pass
 
     @discord.ui.button(label="Chars entfernen", style=discord.ButtonStyle.danger, row=1)
     async def remove_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

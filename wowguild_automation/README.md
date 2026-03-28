@@ -40,6 +40,7 @@ Two styles are available:
   - `/wow-guildsettings`
   - `/wow-readytimes-manage`
   - `/wow-chars` mit Unterbefehlen `list`, `add`, `remove` bzw. Prefix `wow chars …`
+  - `/wow-chars-panel` — interaktives Menü (Buttons, ephemeral)
   - `/wow-syncrank`
   - `/wow-botsetup`
   - `/wow-onboarding-setup`
