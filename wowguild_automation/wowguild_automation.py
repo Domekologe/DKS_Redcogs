@@ -179,7 +179,8 @@ class WowGuildAutomation(commands.Cog):
             chars=[],
             linked_characters=[],
             main_character=None,
-            main_characters={"retail": None, "mop_classic": None},
+            # Nur echte Dict-Einträge persistieren — Red nested_update bricht bei None-Blättern ab.
+            main_characters={},
             ready_times={},
             onboarding_language="de-DE",
             selected_game="retail",

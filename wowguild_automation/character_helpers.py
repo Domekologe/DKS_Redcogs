@@ -81,8 +81,37 @@ def mains_from_member_data(payload: Dict[str, Any]) -> Dict[str, Optional[Dict[s
     return out
 
 
+async def _load_main_characters_raw(member_group: Config) -> Dict[str, Any]:
+    """Liest main_characters; repariert kaputte/None-Werte (Red nested_update + None-Defaults)."""
+    try:
+        raw = await member_group.main_characters()
+    except TypeError:
+        try:
+            await member_group.main_characters.set({})
+        except Exception:
+            pass
+        return {}
+    if raw is None or not isinstance(raw, dict):
+        try:
+            await member_group.main_characters.set({})
+        except Exception:
+            pass
+        return {}
+    return raw
+
+
+def _pack_mains_for_storage(mains: Dict[str, Optional[Dict[str, str]]]) -> Dict[str, Dict[str, str]]:
+    """Nur gesetzte Mains speichern — keine None-Einträge (vermeidet Red-Config-Fehler)."""
+    out: Dict[str, Dict[str, str]] = {}
+    for g in SUPPORTED_GAMES:
+        v = mains.get(g)
+        if isinstance(v, dict) and str(v.get("name", "")).strip():
+            out[g] = {"name": str(v["name"]).strip(), "game_type": g}
+    return out
+
+
 async def get_main_characters(member_group: Config) -> Dict[str, Optional[Dict[str, str]]]:
-    raw = await member_group.main_characters()
+    raw = await _load_main_characters_raw(member_group)
     payload = {"main_characters": raw, "main_character": await member_group.main_character()}
     return mains_from_member_data(payload)
 
@@ -90,36 +119,33 @@ async def get_main_characters(member_group: Config) -> Dict[str, Optional[Dict[s
 async def set_main_for_game(member_group: Config, game_type: str, name: str) -> None:
     if game_type not in SUPPORTED_GAMES:
         return
-    current: Dict[str, Any] = {g: None for g in SUPPORTED_GAMES}
-    raw = await member_group.main_characters()
-    if isinstance(raw, dict):
-        for g in SUPPORTED_GAMES:
-            v = raw.get(g)
-            if isinstance(v, dict) and str(v.get("name", "")).strip():
-                current[g] = {"name": str(v["name"]).strip(), "game_type": g}
+    merged: Dict[str, Optional[Dict[str, str]]] = {g: None for g in SUPPORTED_GAMES}
+    raw = await _load_main_characters_raw(member_group)
+    for g in SUPPORTED_GAMES:
+        v = raw.get(g)
+        if isinstance(v, dict) and str(v.get("name", "")).strip():
+            merged[g] = {"name": str(v["name"]).strip(), "game_type": g}
     leg = await member_group.main_character()
     if isinstance(leg, dict) and str(leg.get("name", "")).strip():
         lg = str(leg.get("game_type", GAME_RETAIL)).lower()
         if lg not in SUPPORTED_GAMES:
             lg = GAME_RETAIL
-        if current.get(lg) is None:
-            current[lg] = {"name": str(leg["name"]).strip(), "game_type": lg}
-    current[game_type] = {"name": name.strip(), "game_type": game_type}
-    await member_group.main_characters.set(current)
+        if merged.get(lg) is None:
+            merged[lg] = {"name": str(leg["name"]).strip(), "game_type": lg}
+    merged[game_type] = {"name": name.strip(), "game_type": game_type}
+    await member_group.main_characters.set(_pack_mains_for_storage(merged))
     await member_group.main_character.clear()
 
 
 async def clear_main_for_game(member_group: Config, game_type: str) -> None:
-    raw = await member_group.main_characters()
-    if isinstance(raw, dict):
-        current = dict(raw)
-    else:
-        current = {}
-    for g in SUPPORTED_GAMES:
-        if g not in current:
-            current[g] = None
-    current[game_type] = None
-    await member_group.main_characters.set(current)
+    raw = await _load_main_characters_raw(member_group)
+    new_store: Dict[str, Dict[str, str]] = {}
+    for g, v in raw.items():
+        if g == game_type:
+            continue
+        if g in SUPPORTED_GAMES and isinstance(v, dict) and str(v.get("name", "")).strip():
+            new_store[g] = {"name": str(v["name"]).strip(), "game_type": g}
+    await member_group.main_characters.set(new_store)
     leg = await member_group.main_character()
     if isinstance(leg, dict) and str(leg.get("game_type", "")).lower() == game_type:
         await member_group.main_character.clear()
