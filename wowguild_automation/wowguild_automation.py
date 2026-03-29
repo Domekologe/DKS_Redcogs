@@ -1,13 +1,13 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
-# Slash: Literal erzwingt Auswahllisten (Zuverlässiger als nur @app_commands.choices bei Hybrid-Subcommands).
-WowCharsAction = Literal["list", "add", "remove"]
-WowCharsSpiel = Literal["retail", "mop_classic"]
 import html
 import json
 import traceback
 import asyncio
+import time
 from datetime import datetime, timezone
+
+from discord.ext import tasks
 
 import discord
 from discord import app_commands
@@ -48,19 +48,33 @@ from .character_helpers import (
     normalize_linked_characters,
     profile_key_to_link_game,
     set_linked_list,
-    set_rank_sync_lock,
     wow_profile_for_game,
 )
 from .officer_notifications import send_protected_rank_officer_notice
 from .character_ui import (
+    ADMIN_PANEL_INTRO,
     CharMainMenuView,
     LinkedRemovePageView,
     OfficerListMenuView,
     PANEL_INTRO,
-    SlashWowAdminListView,
-    SlashWowAdminMemberPickView,
     SlashWowAdminSyncAllConfirmView,
+    WowAdminCharPanelView,
     officer_can_manage_characters,
+)
+from .readytimes_ui import (
+    format_member_ready_times_block,
+    member_marked_any_day,
+    send_member_readytimes_panel,
+)
+from .slash_modals import (
+    AdminPickOneMemberView,
+    BotSetupModal,
+    GuildSettingsModal,
+    MapRankModal,
+    MasterSetupModal,
+    OnboardingSetupModal,
+    SetRankTitleModal,
+    SyncIntervalModal,
 )
 from .functions.automations import RankSyncService
 from .functions.blizzard import BlizzardService
@@ -124,20 +138,6 @@ I18N = {
 class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
-    wow_char_grp = app_commands.Group(
-        name="wow-char",
-        description="WoW-Charaktere mit der Gilde verknüpfen (Retail / MoP Classic)",
-    )
-    wow_char_officer_grp = app_commands.Group(
-        name="wow-char-officer",
-        description="Officer: Charakterlisten und Entfernen",
-    )
-    # Top-level Slash: /wow-chars list|add|remove — keine generische „action“-Option
-    wow_chars_slash_grp = app_commands.Group(
-        name="wow-chars",
-        description="Gildenchars: Liste, hinzufügen oder entfernen (nur Gildenroster).",
-    )
-
     def __init__(self, bot: Red) -> None:
         self.bot = bot
         self.config = Config.get_conf(self, identifier=980231234, force_registration=True)
@@ -188,6 +188,8 @@ class WowGuildAutomation(commands.Cog):
                 "rank_protected_notify_channel_id": 0,
             },
             rules={"rule_channel_id": 0, "rule_emoji": "✅"},
+            rank_sync_interval_minutes=0,
+            rank_sync_last_run_epoch=0,
             templates={
                 "manual_verification": "Manuelle Verifizierung nötig! User {username} hat sich gemeldet als Char {charname} und möchte Gildenrechte erhalten. Bitte bestätigen sie dies manuell.",
                 "duplicate_character_message": "Dieser Charakter ist bereits verknüpft oder ungültig. Wende dich an einen Offizier. ({detail})",
@@ -240,8 +242,17 @@ class WowGuildAutomation(commands.Cog):
         dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
+        try:
+            if not self._rank_auto_sync_loop.is_running():
+                self._rank_auto_sync_loop.start()
+        except Exception:
+            pass
 
     async def cog_unload(self) -> None:
+        try:
+            self._rank_auto_sync_loop.cancel()
+        except Exception:
+            pass
         dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             try:
@@ -274,6 +285,23 @@ class WowGuildAutomation(commands.Cog):
 
     async def _t(self, ctx: commands.Context, key: str, **kwargs: str) -> str:
         lang = await self._lang(ctx)
+        template = I18N.get(lang, I18N["de-DE"]).get(key, key)
+        return template.format(**kwargs)
+
+    async def _guild_lang(self, guild: discord.Guild, member: Optional[discord.Member] = None) -> str:
+        if member is not None:
+            ml = await self.config.member(member).onboarding_language()
+            if ml in ("de-DE", "en-US"):
+                return ml
+        gl = await self.config.guild(guild).language()
+        if gl in ("de-DE", "en-US"):
+            return gl
+        return "de-DE"
+
+    async def _t_from_guild(
+        self, guild: discord.Guild, member: discord.Member, key: str, **kwargs: str
+    ) -> str:
+        lang = await self._guild_lang(guild, member)
         template = I18N.get(lang, I18N["de-DE"]).get(key, key)
         return template.format(**kwargs)
 
@@ -368,11 +396,14 @@ class WowGuildAutomation(commands.Cog):
         main_name: str,
     ):
         raw = await self.config.member(member).rank_sync_by_game()
-        locked = False
+        prev_rid = 0
         if isinstance(raw, dict):
             st = raw.get(profile_key)
             if isinstance(st, dict):
-                locked = bool(st.get("locked"))
+                try:
+                    prev_rid = int(st.get("last_role_id") or 0)
+                except (TypeError, ValueError):
+                    prev_rid = 0
         cfg = await self._guild_config(guild)
         profiles = cfg.get("wow_profiles") or {}
         if profile_key not in profiles:
@@ -384,7 +415,7 @@ class WowGuildAutomation(commands.Cog):
             selected_cfg,
             main_name.strip(),
             profile_key=profile_key,
-            locked=locked,
+            previous_bot_role_id=prev_rid,
         )
         if reason == "protected" and rank_title:
             await merge_rank_sync_game_state(
@@ -457,8 +488,6 @@ class WowGuildAutomation(commands.Cog):
                     last_role_id=int(role_id),
                 )
                 lines.append(f"• **{gl}:** `{rank_title}` synchronisiert.")
-            elif reason == "locked":
-                lines.append(f"• **{gl}:** eingefroren — keine Rollenänderung.")
             elif reason == "protected":
                 lines.append(f"• **{gl}:** geschützter Rang (Hinweis ggf. im Offizierskanal).")
             elif reason == "no_profile":
@@ -506,6 +535,130 @@ class WowGuildAutomation(commands.Cog):
         if len(blocks) > 15:
             out += f"\n\n… gekürzt: **{len(blocks) - 15}** weitere Mitglieder — erneut ausführen oder einzeln syncen."
         return out[:3900]
+
+    async def _background_rank_sync_guild_members(self, guild: discord.Guild) -> None:
+        data = await self.config.all_members(guild)
+        for uid_str, payload in data.items():
+            try:
+                uid = int(uid_str)
+            except (TypeError, ValueError):
+                continue
+            mem = guild.get_member(uid)
+            if mem is None:
+                continue
+            linked = normalize_linked_characters(
+                payload.get("linked_characters") or payload.get("chars")
+            )
+            if not linked:
+                continue
+            main_map = mains_from_member_data(payload)
+            has_main = any(
+                main_map.get(g) and str((main_map.get(g) or {}).get("name", "")).strip()
+                for g in (GAME_RETAIL, GAME_MOP)
+            )
+            if not has_main:
+                continue
+            report = await self._slash_admin_sync_report_for_member(guild, mem)
+            if "Kein Main für ein konfiguriertes Profil" in report:
+                continue
+
+    async def _maybe_auto_rank_sync_guild(self, guild: discord.Guild) -> None:
+        cfg = await self.config.guild(guild).all()
+        mins = int(cfg.get("rank_sync_interval_minutes") or 0)
+        if mins <= 0:
+            return
+        if not await self._guild_has_sync_rank(guild):
+            return
+        last = float(cfg.get("rank_sync_last_run_epoch") or 0)
+        now = time.time()
+        if last <= 0:
+            cfg2 = dict(cfg)
+            cfg2["rank_sync_last_run_epoch"] = now
+            await self.config.guild(guild).set(cfg2)
+            return
+        if (now - last) < mins * 60:
+            return
+        await self._background_rank_sync_guild_members(guild)
+        cfg3 = await self.config.guild(guild).all()
+        cfg3["rank_sync_last_run_epoch"] = time.time()
+        await self.config.guild(guild).set(cfg3)
+
+    @tasks.loop(minutes=1)
+    async def _rank_auto_sync_loop(self) -> None:
+        for guild in self.bot.guilds:
+            try:
+                await self._maybe_auto_rank_sync_guild(guild)
+            except Exception:
+                pass
+
+    @_rank_auto_sync_loop.before_loop
+    async def _rank_auto_sync_before_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _slash_format_rankmap_text(self, guild: discord.Guild) -> str:
+        cfg = await self._guild_config(guild)
+        pk = str(cfg.get("active_profile_key") or "retail")
+        titles = (cfg.get("rank_titles_by_profile") or {}).get(pk) or cfg.get("rank_titles") or {}
+        m = (cfg.get("rank_mapping_by_profile") or {}).get(pk) or cfg.get("rank_mapping") or {}
+        lines: List[str] = [
+            f"**Rang-Mapping** — aktives Profil `{pk}`",
+            "",
+            "**Indizes → Titel:**",
+        ]
+        any_title = False
+        for i in range(10):
+            t = titles.get(str(i))
+            if t:
+                any_title = True
+                lines.append(f"• [{i}] `{t}`")
+        if not any_title:
+            lines.append("_(keine Titel gesetzt)_")
+        lines.extend(["", "**Titel/Name → Rolle:**"])
+        if not m:
+            lines.append("_(keine Einträge)_")
+        else:
+            for name, rid in sorted(m.items(), key=lambda x: str(x[0]).lower()):
+                try:
+                    rid_i = int(rid)
+                except (TypeError, ValueError):
+                    continue
+                lines.append(f"• `{name}` → <@&{rid_i}>")
+        return "\n".join(lines)
+
+    async def _slash_format_onboardings_text(self, guild: discord.Guild) -> str:
+        data = await self.config.all_members(guild)
+        lines: List[str] = []
+        for uid_str, payload in data.items():
+            reg = payload.get("registration") or {}
+            if not reg:
+                continue
+            try:
+                uid = int(uid_str)
+            except (TypeError, ValueError):
+                continue
+            mem = guild.get_member(uid)
+            who = mem.display_name if mem else str(uid)
+            lines.append(f"• **{who}** (`{uid}`): `{reg}`")
+        return "\n".join(lines) if lines else "Keine Registrierungsdaten bei Mitgliedern."
+
+    async def _slash_format_admin_readytimes_text(self, guild: discord.Guild) -> str:
+        data = await self.config.all_members(guild)
+        blocks: List[str] = []
+        for uid_str, payload in data.items():
+            rt = payload.get("ready_times")
+            if not member_marked_any_day(rt):
+                continue
+            try:
+                uid = int(uid_str)
+            except (TypeError, ValueError):
+                continue
+            mem = guild.get_member(uid)
+            label = mem.mention if mem else f"<@{uid}>"
+            block = format_member_ready_times_block(rt)
+            blocks.append(f"{label}\n{block}")
+        if not blocks:
+            return "Niemand hat aktive Bereitschaftszeiten eingetragen."
+        return "\n\n".join(blocks)
 
     async def _format_user_char_list_ephemeral(
         self,
@@ -723,971 +876,8 @@ class WowGuildAutomation(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         await self._run_onboarding_flow(member, simulated=False)
 
-    @commands.hybrid_group(
-        name="wow",
-        description="WoW-Gilde: Onboarding, Charaktere, Ränge und Server-Einstellungen.",
-    )
-    @commands.guild_only()
-    async def wow(self, ctx: commands.Context) -> None:
-        """WoW guild automation commands."""
-        if ctx.invoked_subcommand is None:
-            await ctx.send(await self._t(ctx, "wow_help"))
 
-    @wow.command(
-        name="readytimes-manage",
-        description="Bereitschaftszeiten ansehen (Editor folgt).",
-    )
-    async def wow_readytimes_manage(self, ctx: commands.Context) -> None:
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-
-        member_conf = self.config.member(ctx.author)
-        current = await member_conf.ready_times()
-        if not current:
-            current = {
-                "monday": [],
-                "tuesday": [],
-                "wednesday": [],
-                "thursday": [],
-                "friday": [],
-                "saturday": [],
-                "sunday": [],
-            }
-            await member_conf.ready_times.set(current)
-        await ctx.send(await self._t(ctx, "readytimes_init"))
-
-    @commands.hybrid_command(
-        name="wow-readytimes-manage",
-        description="Bereitschaftszeiten ansehen (Editor folgt).",
-    )
-    @commands.guild_only()
-    async def wow_readytimes_manage_direct(self, ctx: commands.Context) -> None:
-        """Bereitschaftszeiten ansehen (Editor folgt)."""
-        await self.wow_readytimes_manage(ctx)
-
-    @wow.command(
-        name="guildsettings",
-        description="Gilden-API: Region, Spielversion, Realm und Gildenname setzen.",
-    )
-    @commands.guild_only()
-    @app_commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        region="Blizzard-Region, z. B. eu oder us",
-        version="Profil-Version, z. B. retail oder mop_classic",
-        realm="Realm-Slug, z. B. tarren-mill",
-        guildname="Gildenname (exakt wie in WoW)",
-        language="Bot-Sprache für diesen Server: de-DE oder en-US",
-    )
-    async def wow_guildsettings(
-        self,
-        ctx: commands.Context,
-        region: str,
-        version: str,
-        realm: str,
-        guildname: str,
-        language: str = "de-DE",
-    ) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-
-        cfg = await self._guild_config(ctx.guild)
-        cfg["language"] = language if language in ("de-DE", "en-US") else "de-DE"
-        version_key = version.lower().strip()
-        profile = {
-            "region": region.lower().strip(),
-            "version": version_key,
-            "realm": realm.strip(),
-            "guild_name": guildname.strip(),
-        }
-        cfg.setdefault("wow_profiles", {})
-        cfg["wow_profiles"][version_key] = profile
-        cfg["wow"] = profile
-        await self.config.guild(ctx.guild).set(cfg)
-        await ctx.send(
-            await self._t(
-                ctx,
-                "settings_saved",
-                region=region,
-                version=version,
-                realm=realm,
-                guild=guildname,
-            )
-        )
-
-    @commands.hybrid_command(
-        name="wow-guildsettings",
-        description="Gilden-API: Region, Spielversion, Realm und Gildenname setzen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        region="Blizzard-Region, z. B. eu oder us",
-        version="Profil-Version, z. B. retail oder mop_classic",
-        realm="Realm-Slug, z. B. tarren-mill",
-        guildname="Gildenname (exakt wie in WoW)",
-        language="Bot-Sprache für diesen Server: de-DE oder en-US",
-    )
-    async def wow_guildsettings_direct(
-        self,
-        ctx: commands.Context,
-        region: str,
-        version: str,
-        realm: str,
-        guildname: str,
-        language: str = "de-DE",
-    ) -> None:
-        """Gilden-API: Region, Spielversion, Realm und Gildenname setzen."""
-        await self.wow_guildsettings(ctx, region, version, realm, guildname, language)
-
-    async def _wow_chars_execute(
-        self,
-        guild: discord.Guild,
-        member: discord.Member,
-        action: str,
-        charname: Optional[str] = None,
-        spiel: Optional[str] = None,
-        *,
-        chars_none_msg: str,
-        chars_invalid_msg: str,
-    ) -> str:
-        """Gibt die Nutzer-Nachricht zurück (für Prefix und Slash)."""
-        member_conf = self.config.member(member)
-        linked = await get_linked_list(member_conf)
-        mains = await get_main_characters(member_conf)
-
-        action = (action or "").lower().strip()
-        if action == "list":
-            if not linked:
-                return chars_none_msg
-            return "\n".join(format_char_line(e, mains) for e in linked)
-        if action == "add":
-            if not charname or not str(charname).strip():
-                return "Bitte einen Charakternamen angeben (Prefix: `wow chars add Meinchar retail`)."
-            game = (spiel or GAME_RETAIL).lower()
-            if game not in (GAME_RETAIL, GAME_MOP):
-                game = GAME_RETAIL
-            msg, _ok = await self._try_add_characters_for_member(
-                guild, member, game, [str(charname).strip()]
-            )
-            return msg
-        if action == "remove":
-            if not charname or not str(charname).strip():
-                return "Bitte einen Charakternamen angeben (optional: Spielversion)."
-            raw_name = str(charname).strip()
-            matches = [e for e in linked if e["name"].lower() == raw_name.lower()]
-            if not matches:
-                return chars_invalid_msg
-            if len(matches) > 1 and not spiel:
-                return (
-                    "Dieser Name ist in **Retail** und **MoP** verknüpft — bitte `spiel` wählen (Slash) oder "
-                    f"`wow chars remove {raw_name} retail` / `mop_classic` nutzen."
-                )
-            if spiel:
-                spiel_l = str(spiel).lower()
-                matches = [e for e in matches if e["game_type"].lower() == spiel_l]
-            if len(matches) != 1:
-                return chars_invalid_msg
-            victim = matches[0]
-            rkey = (victim["name"].lower(), victim["game_type"].lower())
-            new_list = [
-                e for e in linked if (e["name"].lower(), e["game_type"].lower()) != rkey
-            ]
-            await set_linked_list(member_conf, new_list)
-            cur = mains.get(victim["game_type"])
-            if cur and char_tuple_key(cur["name"], victim["game_type"]) == char_tuple_key(
-                victim["name"], victim["game_type"]
-            ):
-                await clear_main_for_game(member_conf, victim["game_type"])
-            return await self._t_from_guild(guild, member, "char_removed", char=victim["name"])
-        return chars_invalid_msg
-
-    async def _t_from_guild(
-        self, guild: discord.Guild, member: discord.Member, key: str, **kwargs: Any
-    ) -> str:
-        """Resolve I18N wie _t, ohne Context."""
-        member_lang = await self.config.member(member).onboarding_language()
-        if member_lang in ("de-DE", "en-US"):
-            lang = member_lang
-        else:
-            guild_lang = await self.config.guild(guild).language()
-            lang = guild_lang if guild_lang in ("de-DE", "en-US") else "de-DE"
-        tpl = I18N.get(lang, I18N["de-DE"]).get(key, key)
-        try:
-            return tpl.format(**kwargs)
-        except Exception:
-            return tpl
-
-    @wow.command(
-        name="chars",
-        description="Gildenchars verknüpfen: Liste, hinzufügen oder entfernen (Roster).",
-    )
-    @commands.guild_only()
-    @app_commands.guild_only()
-    @app_commands.describe(
-        action="Liste anzeigen, Char hinzufügen oder Char entfernen",
-        charname="Name des Charakters (nur bei Hinzufügen/Entfernen)",
-        spiel="Retail oder MoP — bei Entfernen nötig, wenn Name in beiden Spielen existiert",
-    )
-    async def wow_chars(
-        self,
-        ctx: commands.Context,
-        action: WowCharsAction,
-        charname: Optional[str] = None,
-        spiel: Optional[WowCharsSpiel] = None,
-    ) -> None:
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-
-        text = await self._wow_chars_execute(
-            ctx.guild,
-            ctx.author,
-            action,
-            charname,
-            spiel,
-            chars_none_msg=await self._t(ctx, "chars_none"),
-            chars_invalid_msg=await self._t(ctx, "chars_invalid"),
-        )
-        await self._send_private_ack(ctx, text)
-
-    @wow_chars_slash_grp.command(name="list", description="Deine verknüpften Gildenchars anzeigen")
-    @app_commands.guild_only()
-    async def slash_wow_chars_list(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        text = await self._wow_chars_execute(
-            interaction.guild,
-            interaction.user,
-            "list",
-            None,
-            None,
-            chars_none_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_none"
-            ),
-            chars_invalid_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_invalid"
-            ),
-        )
-        await interaction.response.send_message(text, ephemeral=True)
-
-    @wow_chars_slash_grp.command(
-        name="add",
-        description="Einen Char vom Gildenroster mit deinem Account verknüpfen",
-    )
-    @app_commands.guild_only()
-    @app_commands.describe(
-        charname="Charaktername (wie im Gildenroster)",
-        spiel="Retail oder MoP Classic (optional, Standard: Retail)",
-    )
-    async def slash_wow_chars_add(
-        self,
-        interaction: discord.Interaction,
-        charname: str,
-        spiel: Optional[WowCharsSpiel] = None,
-    ) -> None:
-        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        text = await self._wow_chars_execute(
-            interaction.guild,
-            interaction.user,
-            "add",
-            charname,
-            spiel,
-            chars_none_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_none"
-            ),
-            chars_invalid_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_invalid"
-            ),
-        )
-        await interaction.response.send_message(text, ephemeral=True)
-
-    @wow_chars_slash_grp.command(
-        name="remove",
-        description="Einen verknüpften Char von deinem Account entfernen",
-    )
-    @app_commands.guild_only()
-    @app_commands.describe(
-        charname="Charaktername",
-        spiel="Bei gleichem Namen in Retail und MoP: Version angeben",
-    )
-    async def slash_wow_chars_remove(
-        self,
-        interaction: discord.Interaction,
-        charname: str,
-        spiel: Optional[WowCharsSpiel] = None,
-    ) -> None:
-        if not isinstance(interaction.user, discord.Member) or not interaction.guild:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        text = await self._wow_chars_execute(
-            interaction.guild,
-            interaction.user,
-            "remove",
-            charname,
-            spiel,
-            chars_none_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_none"
-            ),
-            chars_invalid_msg=await self._t_from_guild(
-                interaction.guild, interaction.user, "chars_invalid"
-            ),
-        )
-        await interaction.response.send_message(text, ephemeral=True)
-
-    @wow.command(
-        name="syncrank",
-        description="WoW-Gildenrang mit der passenden Discord-Rolle abgleichen.",
-    )
-    @commands.guild_only()
-    @app_commands.guild_only()
-    @app_commands.describe(
-        mainchar="Optional: Charaktername; leer = alle Mains (pro konfiguriertem Profil)",
-    )
-    async def wow_syncrank(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-
-        if not await self._guild_has_sync_rank(ctx.guild):
-            await self._send_private_ack(
-                ctx,
-                "Rang-Sync ist auf diesem Server deaktiviert (`features.sync_rank`).",
-            )
-            return
-
-        cfg = await self._guild_config(ctx.guild)
-        wow_profiles = cfg.get("wow_profiles") or {}
-        member_conf = self.config.member(ctx.author)
-
-        async def _run_one(game: str, char_name: str):
-            rank_title, reason, role_id = await self._sync_rank_for_main(
-                ctx.author, ctx.guild, game, char_name
-            )
-            gl = game_label(game)
-            if reason == "ok" and rank_title and role_id:
-                await merge_rank_sync_game_state(
-                    member_conf,
-                    game,
-                    last_title=str(rank_title),
-                    last_role_id=int(role_id),
-                )
-                return f"• **{gl}:** `{rank_title}` synchronisiert.", rank_title
-            if reason == "locked":
-                return f"• **{gl}:** eingefroren — keine Rollenänderung.", None
-            if reason == "protected":
-                return (
-                    f"• **{gl}:** Rang `{rank_title}` ist geschützt — kein Auto-Sync; Offiziere wurden benachrichtigt.",
-                    None,
-                )
-            if reason == "no_profile":
-                return f"• **{gl}:** kein Profil konfiguriert.", None
-            if reason in ("not_found", "no_role"):
-                return f"• **{gl}:** Char nicht im Roster oder kein Rollen-Mapping.", None
-            if reason == "no_perms":
-                return f"• **{gl}:** Bot darf Rollen nicht setzen.", None
-            if reason == "http":
-                return f"• **{gl}:** Discord-API-Fehler.", None
-            return f"• **{gl}:** fehlgeschlagen ({reason}).", None
-
-        if mainchar and mainchar.strip():
-            mainchar = mainchar.strip()
-            linked = await get_linked_list(member_conf)
-            name_matches = [e for e in linked if e["name"].lower() == mainchar.lower()]
-            if not name_matches:
-                await self._send_private_ack(
-                    ctx,
-                    f"`{mainchar}` ist bei dir nicht verknüpft — zuerst Char hinzufügen.",
-                )
-                return
-            if len(name_matches) == 1:
-                game = name_matches[0]["game_type"]
-                mainchar = name_matches[0]["name"]
-            else:
-                game = await member_conf.selected_game() or GAME_RETAIL
-                pick = [e for e in name_matches if e["game_type"] == game]
-                if len(pick) != 1:
-                    await self._send_private_ack(
-                        ctx,
-                        "Dieser Name existiert in **Retail** und **MoP** — bitte Main setzen oder "
-                        "Spiel im Panel wählen (`/wow-chars-panel`).",
-                    )
-                    return
-                mainchar = pick[0]["name"]
-                game = pick[0]["game_type"]
-            line, synced_rank = await _run_one(game, mainchar)
-            if synced_rank:
-                await self._send_private_ack(
-                    ctx,
-                    await self._t(ctx, "rank_synced", rank=synced_rank),
-                )
-            else:
-                await self._send_private_ack(ctx, line)
-            return
-
-        main_map = await get_main_characters(member_conf)
-        jobs: List[tuple[str, str]] = []
-        for g in (GAME_RETAIL, GAME_MOP):
-            if g not in wow_profiles:
-                continue
-            m = main_map.get(g)
-            if m and str(m.get("name", "")).strip():
-                jobs.append((g, str(m["name"]).strip()))
-        if not jobs:
-            await self._send_private_ack(
-                ctx,
-                "Kein Main für ein konfiguriertes Profil gesetzt. Nutze `/wow-chars-panel` "
-                "oder `wow syncrank <Charname>`.",
-            )
-            return
-        out_lines: List[str] = []
-        for g, n in jobs:
-            line, _ = await _run_one(g, n)
-            out_lines.append(line)
-        await self._send_private_ack(
-            ctx,
-            await self._t(ctx, "rank_synced_multi", lines="\n".join(out_lines)),
-        )
-
-    @commands.hybrid_command(
-        name="wow-syncrank",
-        description="WoW-Gildenrang mit der passenden Discord-Rolle abgleichen.",
-    )
-    @commands.guild_only()
-    @app_commands.describe(
-        mainchar="Optional: Charaktername; leer = alle Mains (pro konfiguriertem Profil)",
-    )
-    async def wow_syncrank_direct(self, ctx: commands.Context, mainchar: Optional[str] = None) -> None:
-        """WoW-Gildenrang mit der passenden Discord-Rolle abgleichen."""
-        await self.wow_syncrank(ctx, mainchar)
-
-    @wow.command(
-        name="rank-freeze",
-        description="Rang-Sync für ein Spiel anhalten — manuelle Discord-Rolle wird nicht überschrieben.",
-    )
-    @commands.guild_only()
-    @app_commands.guild_only()
-    @app_commands.describe(spiel="Retail oder MoP Classic")
-    async def wow_rank_freeze(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        await set_rank_sync_lock(self.config.member(ctx.author), spiel, True)
-        await self._send_private_ack(
-            ctx,
-            await self._t(ctx, "rank_freeze_ok", game=game_label(spiel)),
-        )
-
-    @commands.hybrid_command(
-        name="wow-rank-freeze",
-        description="Rang-Sync für ein Spiel anhalten (manuelle Rolle bleibt).",
-    )
-    @commands.guild_only()
-    @app_commands.describe(spiel="Retail oder MoP Classic")
-    async def wow_rank_freeze_direct(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
-        await self.wow_rank_freeze(ctx, spiel)
-
-    @wow.command(
-        name="rank-unfreeze",
-        description="Rang-Sync für ein Spiel wieder aktivieren.",
-    )
-    @commands.guild_only()
-    @app_commands.guild_only()
-    @app_commands.describe(spiel="Retail oder MoP Classic")
-    async def wow_rank_unfreeze(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        await set_rank_sync_lock(self.config.member(ctx.author), spiel, False)
-        await self._send_private_ack(
-            ctx,
-            await self._t(ctx, "rank_unfreeze_ok", game=game_label(spiel)),
-        )
-
-    @commands.hybrid_command(
-        name="wow-rank-unfreeze",
-        description="Rang-Sync für ein Spiel wieder aktivieren.",
-    )
-    @commands.guild_only()
-    @app_commands.describe(spiel="Retail oder MoP Classic")
-    async def wow_rank_unfreeze_direct(self, ctx: commands.Context, spiel: WowCharsSpiel) -> None:
-        await self.wow_rank_unfreeze(ctx, spiel)
-
-    @wow.command(
-        name="setrankmap",
-        description="Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        rank_name="Rangbezeichnung wie im Mapping (z. B. aus wow listrankmap)",
-        role="Discord-Rolle für diesen Rang",
-    )
-    async def wow_setrankmap(self, ctx: commands.Context, rank_name: str, role: discord.Role) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        cfg = await self._guild_config(ctx.guild)
-        rank_mapping = cfg.get("rank_mapping", {})
-        rank_mapping[rank_name.strip()] = role.id
-        cfg["rank_mapping"] = rank_mapping
-        await self.config.guild(ctx.guild).set(cfg)
-        await ctx.send(f"Mapping gesetzt: `{rank_name}` -> {role.mention}")
-
-    @commands.hybrid_command(
-        name="wow-setrankmap",
-        description="Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        rank_name="Rangbezeichnung wie im Mapping (z. B. aus wow listrankmap)",
-        role="Discord-Rolle für diesen Rang",
-    )
-    async def wow_setrankmap_direct(
-        self, ctx: commands.Context, rank_name: str, role: discord.Role
-    ) -> None:
-        """Einen WoW-Gildenrang (Titel) einer Discord-Rolle zuordnen."""
-        await self.wow_setrankmap(ctx, rank_name, role)
-
-    @wow.command(
-        name="setranktitle",
-        description="Anzeigetitel für einen Gildenrang-Index (0–9) setzen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        rank_index="Gildenrang-Index von 0 bis 9",
-        title="Freier Titeltext für diesen Index",
-    )
-    async def wow_setranktitle(self, ctx: commands.Context, rank_index: int, title: str) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        cfg = await self._guild_config(ctx.guild)
-        rank_titles = cfg.get("rank_titles", {})
-        rank_titles[str(rank_index)] = title.strip()
-        cfg["rank_titles"] = rank_titles
-        await self.config.guild(ctx.guild).set(cfg)
-        await ctx.send(f"Rangtitel gesetzt: Index `{rank_index}` -> `{title}`")
-
-    @commands.hybrid_command(
-        name="wow-setranktitle",
-        description="Anzeigetitel für einen Gildenrang-Index (0–9) setzen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(
-        rank_index="Gildenrang-Index von 0 bis 9",
-        title="Freier Titeltext für diesen Index",
-    )
-    async def wow_setranktitle_direct(
-        self, ctx: commands.Context, rank_index: int, title: str
-    ) -> None:
-        """Anzeigetitel für einen Gildenrang-Index (0–9) setzen."""
-        await self.wow_setranktitle(ctx, rank_index, title)
-
-    @wow.command(
-        name="listrankmap",
-        description="Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_listrankmap(self, ctx: commands.Context) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        cfg = await self._guild_config(ctx.guild)
-        active = cfg.get("active_profile_key", "retail")
-        rank_titles_by_profile = cfg.get("rank_titles_by_profile", {})
-        rank_mapping_by_profile = cfg.get("rank_mapping_by_profile", {})
-        rank_titles = rank_titles_by_profile.get(active, cfg.get("rank_titles", {}))
-        rank_mapping = rank_mapping_by_profile.get(active, cfg.get("rank_mapping", {}))
-        lines = [f"Active profile: `{active}`", "Rank Titles:"]
-        if rank_titles:
-            for idx, title in sorted(rank_titles.items(), key=lambda kv: int(kv[0])):
-                lines.append(f"- `{idx}` -> `{title}`")
-        else:
-            lines.append("- none")
-        lines.append("\nRank Mapping:")
-        if rank_mapping:
-            for rank_name, role_id in rank_mapping.items():
-                role = ctx.guild.get_role(int(role_id))
-                role_label = role.mention if role else f"`{role_id}`"
-                lines.append(f"- `{rank_name}` -> {role_label}")
-        else:
-            lines.append("- none")
-        await ctx.send("\n".join(lines))
-
-    @commands.hybrid_command(
-        name="wow-listrankmap",
-        description="Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_listrankmap_direct(self, ctx: commands.Context) -> None:
-        """Aktives WoW-Profil: Rangtitel und Discord-Rollen-Mapping anzeigen."""
-        await self.wow_listrankmap(ctx)
-
-    @wow.command(
-        name="botsetup",
-        description="Blizzard API: Client-ID und Secret (nur Bot-Besitzer).",
-    )
-    @commands.is_owner()
-    @app_commands.describe(
-        client_id="Blizzard Developer Portal Client-ID",
-        client_secret="Blizzard Developer Portal Client Secret",
-    )
-    async def wow_botsetup(
-        self,
-        ctx: commands.Context,
-        client_id: str,
-        client_secret: str,
-    ) -> None:
-        data = await self.config.bot_setup()
-        owners = set(data.get("owner_ids", []))
-        owners.add(ctx.author.id)
-        data["owner_ids"] = list(owners)
-        data["client_id"] = client_id
-        data["client_secret"] = client_secret
-        await self.config.bot_setup.set(data)
-        self.blizzard.client_id = client_id
-        self.blizzard.client_secret = client_secret
-        await ctx.send(await self._t(ctx, "botsetup_saved"))
-
-    @wow.command(
-        name="mastersetup",
-        description="Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer).",
-    )
-    @commands.is_owner()
-    @app_commands.describe(
-        default_language="Standard de-DE oder en-US für neue Servereinträge",
-        default_region="Standard-API-Region, z. B. eu",
-        default_version="Standard-Spielversion, z. B. retail",
-        dashboard_enabled="Web-Dashboard für WoW-Cog aktivieren",
-    )
-    async def wow_mastersetup(
-        self,
-        ctx: commands.Context,
-        default_language: str = "de-DE",
-        default_region: str = "eu",
-        default_version: str = "retail",
-        dashboard_enabled: bool = True,
-    ) -> None:
-        data = await self.config.bot_setup()
-        if default_language not in ("de-DE", "en-US"):
-            default_language = "de-DE"
-        data["default_language"] = default_language
-        data["default_region"] = default_region.lower().strip()
-        data["default_version"] = default_version.lower().strip()
-        data["dashboard_enabled"] = bool(dashboard_enabled)
-        await self.config.bot_setup.set(data)
-        await ctx.send(await self._t(ctx, "master_saved"))
-
-    @commands.hybrid_command(
-        name="wow-botsetup",
-        description="Blizzard API: Client-ID und Secret (nur Bot-Besitzer).",
-    )
-    @commands.is_owner()
-    @app_commands.describe(
-        client_id="Blizzard Developer Portal Client-ID",
-        client_secret="Blizzard Developer Portal Client Secret",
-    )
-    async def wow_botsetup_direct(
-        self,
-        ctx: commands.Context,
-        client_id: str,
-        client_secret: str,
-    ) -> None:
-        """Blizzard API: Client-ID und Secret (nur Bot-Besitzer)."""
-        await self.wow_botsetup(ctx, client_id, client_secret)
-
-    @commands.hybrid_command(
-        name="wow-mastersetup",
-        description="Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer).",
-    )
-    @commands.is_owner()
-    @app_commands.describe(
-        default_language="Standard de-DE oder en-US für neue Servereinträge",
-        default_region="Standard-API-Region, z. B. eu",
-        default_version="Standard-Spielversion, z. B. retail",
-        dashboard_enabled="Web-Dashboard für WoW-Cog aktivieren",
-    )
-    async def wow_mastersetup_direct(
-        self,
-        ctx: commands.Context,
-        default_language: str = "de-DE",
-        default_region: str = "eu",
-        default_version: str = "retail",
-        dashboard_enabled: bool = True,
-    ) -> None:
-        """Globale Defaults: Sprache, Region, Version, Dashboard (nur Bot-Besitzer)."""
-        await self.wow_mastersetup(
-            ctx,
-            default_language=default_language,
-            default_region=default_region,
-            default_version=default_version,
-            dashboard_enabled=dashboard_enabled,
-        )
-
-    @wow.command(
-        name="onboarding-setup",
-        description="Onboarding-Kanal und Rollen per Chat-Wizard einrichten.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_onboarding_setup(self, ctx: commands.Context) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-
-        await ctx.send(await self._t(ctx, "onboarding_setup_intro"))
-        await ctx.send(await self._t(ctx, "onboarding_setup_mode"))
-        mode = await self._wait_text(ctx)
-        if not mode:
-            await ctx.send(await self._t(ctx, "onboarding_setup_cancelled"))
-            return
-
-        mode = mode.lower().strip()
-        cfg = await self._guild_config(ctx.guild)
-        roles = cfg.get("roles", {})
-        channels = cfg.get("channels", {})
-
-        new_role: Optional[discord.Role] = None
-        complete_role: Optional[discord.Role] = None
-        onboarding_channel: Optional[discord.TextChannel] = None
-
-        if mode == "create":
-            new_role = discord.utils.get(ctx.guild.roles, name="onboarding-new")
-            if not new_role:
-                new_role = await ctx.guild.create_role(
-                    name="onboarding-new", reason="WoW onboarding setup"
-                )
-            complete_role = discord.utils.get(ctx.guild.roles, name="onboarding-complete")
-            if not complete_role:
-                complete_role = await ctx.guild.create_role(
-                    name="onboarding-complete", reason="WoW onboarding setup"
-                )
-            onboarding_channel = discord.utils.get(
-                ctx.guild.text_channels, name="onboarding-private"
-            )
-            if not onboarding_channel:
-                onboarding_channel = await ctx.guild.create_text_channel(
-                    name="onboarding-private", reason="WoW onboarding setup"
-                )
-        elif mode == "existing":
-            await ctx.send(await self._t(ctx, "prompt_new_role"))
-            new_role_raw = await self._wait_text(ctx)
-            await ctx.send(await self._t(ctx, "prompt_complete_role"))
-            complete_role_raw = await self._wait_text(ctx)
-            await ctx.send(await self._t(ctx, "prompt_channel"))
-            channel_raw = await self._wait_text(ctx)
-            if not new_role_raw or not complete_role_raw or not channel_raw:
-                await ctx.send(await self._t(ctx, "onboarding_setup_cancelled"))
-                return
-
-            if new_role_raw.lower() != "skip":
-                try:
-                    new_role = ctx.guild.get_role(int(new_role_raw))
-                except ValueError:
-                    new_role = None
-            if complete_role_raw.lower() != "skip":
-                try:
-                    complete_role = ctx.guild.get_role(int(complete_role_raw))
-                except ValueError:
-                    complete_role = None
-            if channel_raw.lower() != "skip":
-                try:
-                    channel_obj = ctx.guild.get_channel(int(channel_raw))
-                    if isinstance(channel_obj, discord.TextChannel):
-                        onboarding_channel = channel_obj
-                except ValueError:
-                    onboarding_channel = None
-        else:
-            await ctx.send(await self._t(ctx, "onboarding_setup_cancelled"))
-            return
-
-        roles["onboarding_new_role_id"] = new_role.id if new_role else 0
-        roles["onboarding_complete_role_id"] = complete_role.id if complete_role else 0
-        channels["onboarding_channel_id"] = onboarding_channel.id if onboarding_channel else 0
-        cfg["roles"] = roles
-        cfg["channels"] = channels
-        await self.config.guild(ctx.guild).set(cfg)
-        await self._apply_onboarding_channel_permissions(ctx.guild)
-
-        await ctx.send(
-            await self._t(
-                ctx,
-                "onboarding_setup_done",
-                channel=onboarding_channel.mention if onboarding_channel else "none",
-                new_role=new_role.mention if new_role else "none",
-                complete_role=complete_role.mention if complete_role else "none",
-            )
-        )
-
-    @commands.hybrid_command(
-        name="wow-onboarding-setup",
-        description="Onboarding-Kanal und Rollen per Chat-Wizard einrichten.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_onboarding_setup_direct(self, ctx: commands.Context) -> None:
-        """Onboarding-Kanal und Rollen per Chat-Wizard einrichten."""
-        await self.wow_onboarding_setup(ctx)
-
-    @wow.command(
-        name="simulate-join",
-        description="Onboarding-Flow für ein Mitglied testen (ohne echten Join).",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(member="Mitglied, für das die Simulation läuft")
-    async def wow_simulate_join(self, ctx: commands.Context, member: discord.Member) -> None:
-        await self._send_private_ack(ctx, f"Simuliere Join-Onboarding fuer {member.mention}...")
-        await self._run_onboarding_flow(member, simulated=True)
-        await self._send_private_ack(ctx, "Simulation abgeschlossen.")
-
-    @commands.hybrid_command(
-        name="wow-simulate-join",
-        description="Onboarding-Flow für ein Mitglied testen (ohne echten Join).",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(member="Mitglied, für das die Simulation läuft")
-    async def wow_simulate_join_direct(self, ctx: commands.Context, member: discord.Member) -> None:
-        """Onboarding-Flow für ein Mitglied testen (ohne echten Join)."""
-        await self.wow_simulate_join(ctx, member)
-
-    @wow.command(
-        name="registrations",
-        description="Alle gespeicherten Onboarding-Registrierungen dieses Servers listen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_registrations(self, ctx: commands.Context) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        all_members = await self.config.all_members(ctx.guild)
-        lines = []
-        for member_id, payload in all_members.items():
-            reg = payload.get("registration", {})
-            if not reg:
-                continue
-            user = ctx.guild.get_member(int(member_id))
-            user_label = user.mention if user else f"<@{member_id}>"
-            reg_at = reg.get("registered_at", "-")
-            game = payload.get("selected_game", "retail")
-            reg_type = reg.get("type", "unknown")
-            char_name = reg.get("char_name", "")
-            details = f"{user_label} - {reg_at} - {game} - {reg_type}"
-            if reg_type == "member" and char_name:
-                details += f" ({char_name})"
-            lines.append(details)
-        if not lines:
-            await ctx.send("Keine Registrierungen vorhanden.")
-            return
-        message = "Registrierungen:\n" + "\n".join(f"- {line}" for line in lines[:100])
-        await ctx.send(message)
-
-    @commands.hybrid_command(
-        name="wow-registrations",
-        description="Alle gespeicherten Onboarding-Registrierungen dieses Servers listen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    async def wow_registrations_direct(self, ctx: commands.Context) -> None:
-        """Alle gespeicherten Onboarding-Registrierungen dieses Servers listen."""
-        await self.wow_registrations(ctx)
-
-    @wow.command(
-        name="delregistration",
-        description="Onboarding-Registrierung und Spielwahl eines Mitglieds löschen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(member="Mitglied, dessen Registrierung gelöscht wird")
-    async def wow_delregistration(self, ctx: commands.Context, member: discord.Member) -> None:
-        if not ctx.guild:
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        await self.config.member(member).registration.clear()
-        await self.config.member(member).selected_game.clear()
-        await ctx.send(f"Registrierung von {member.mention} wurde entfernt.")
-
-    @commands.hybrid_command(
-        name="wow-delregistration",
-        description="Onboarding-Registrierung und Spielwahl eines Mitglieds löschen.",
-    )
-    @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
-    @app_commands.describe(member="Mitglied, dessen Registrierung gelöscht wird")
-    async def wow_delregistration_direct(self, ctx: commands.Context, member: discord.Member) -> None:
-        """Onboarding-Registrierung und Spielwahl eines Mitglieds löschen."""
-        await self.wow_delregistration(ctx, member)
-
-    @wow.command(
-        name="dashboard-status",
-        description="Prüfen, ob Dashboard-Cog und WoW-Webseiten erreichbar sind (Bot-Besitzer).",
-    )
-    @commands.is_owner()
-    async def wow_dashboard_status(self, ctx: commands.Context) -> None:
-        dashboard_cog = self._get_dashboard_cog()
-        if dashboard_cog is None:
-            await ctx.send("Dashboard cog is not loaded.")
-            return
-        try:
-            third_parties = dashboard_cog.rpc.third_parties_handler.third_parties  # type: ignore[attr-defined]
-            names = sorted(third_parties.keys())
-            disabled = await dashboard_cog.config.webserver.disabled_third_parties()  # type: ignore[attr-defined]
-            wow_pages = []
-            if "WowGuildAutomation" in third_parties:
-                wow_pages = [
-                    f"{page} (hidden={meta[1].get('hidden')})"
-                    for page, meta in third_parties["WowGuildAutomation"].items()
-                ]
-            await ctx.send(
-                "Dashboard loaded: yes"
-                f" | attached: {self._dashboard_attached}"
-                f" | third parties: {', '.join(names) if names else 'none'}"
-                f" | disabled: {', '.join(disabled) if disabled else 'none'}"
-                f" | wow pages: {', '.join(wow_pages) if wow_pages else 'none'}"
-            )
-        except Exception as e:
-            await ctx.send(f"Dashboard status check failed: {e}")
-
-    @commands.hybrid_command(
-        name="wow-chars-panel",
-        description="Interaktives Menü: Chars verknüpfen, Main setzen, Liste, entfernen (ephemeral).",
-    )
-    @commands.guild_only()
-    async def wow_chars_panel_hybrid(self, ctx: commands.Context) -> None:
-        """Öffnet das Charakter-Panel (Slash empfohlen; Prefix versucht DM)."""
-        if not ctx.guild or not isinstance(ctx.author, discord.Member):
-            await ctx.send(await self._t(ctx, "server_only"))
-            return
-        interaction = getattr(ctx, "interaction", None)
-        if interaction is not None:
-            await interaction.response.send_message(
-                PANEL_INTRO,
-                ephemeral=True,
-                view=CharMainMenuView(self, ctx.guild, ctx.author),
-            )
-            return
-        try:
-            dm = await ctx.author.create_dm()
-            await dm.send(PANEL_INTRO, view=CharMainMenuView(self, ctx.guild, ctx.author))
-        except discord.HTTPException:
-            await ctx.send(
-                "DM nicht möglich — nutze bitte **`/wow-chars-panel`** auf dem Server (ephemerales Menü)."
-            )
-
-    @app_commands.command(name="wow-user", description="WoW: Panel, deine Char-Liste und Rang-Sync.")
+    @app_commands.command(name="wow-user", description="WoW: Panel, Chars, Rang-Sync, Bereitschaftszeiten.")
     @app_commands.guild_only()
     @app_commands.describe(action="Aktion")
     @app_commands.choices(
@@ -1695,6 +885,7 @@ class WowGuildAutomation(commands.Cog):
             app_commands.Choice(name="Panel (interaktives Menü)", value="panel"),
             app_commands.Choice(name="Meine Chars (Liste)", value="list_my"),
             app_commands.Choice(name="Rang-Sync (meine Mains)", value="sync_my_profile"),
+            app_commands.Choice(name="Bereitschaftszeiten (nur du)", value="readytimes"),
         ]
     )
     async def slash_wow_user(self, interaction: discord.Interaction, action: str) -> None:
@@ -1725,23 +916,32 @@ class WowGuildAutomation(commands.Cog):
             report = await self._slash_admin_sync_report_for_member(interaction.guild, interaction.user)
             await interaction.followup.send(report[:1900], ephemeral=True)
             return
+        if action == "readytimes":
+            await send_member_readytimes_panel(self, interaction, interaction.user)
+            return
         await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
 
     @app_commands.command(
         name="wow-admin",
-        description="Officer: Charaktere listen, verwalten und Rang-Sync (Manage Server).",
+        description="Officer: Char-Panel, Rang-Sync, Gildeninfos, Onboarding-Daten (Manage Server).",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(action="Aktion — bei Bedarf folgt eine zweite Auswahl (Dropdown).")
+    @app_commands.describe(action="Aktion")
     @app_commands.choices(
         action=[
-            app_commands.Choice(name="Übersicht (alle / Mitglieder wählen)", value="list"),
-            app_commands.Choice(name="Char von Mitglied entfernen", value="remove_char_member"),
-            app_commands.Choice(name="Char für Mitglied hinzufügen (Roster)", value="add_char_member"),
-            app_commands.Choice(name="Main für Mitglied setzen (Panel)", value="set_main_member"),
-            app_commands.Choice(name="Rang-Sync für ein Mitglied", value="sync_specific_member"),
-            app_commands.Choice(name="Rang-Sync für alle (mit Main)", value="sync_all_members"),
+            app_commands.Choice(
+                name="Panel (Mitglied wählen + Buttons)",
+                value="panel",
+            ),
+            app_commands.Choice(name="Rang-Sync: ein Mitglied", value="sync_specific_member"),
+            app_commands.Choice(name="Rang-Sync: alle mit Main", value="sync_all_members"),
+            app_commands.Choice(name="Onboarding simulieren (Join)", value="simulate_join"),
+            app_commands.Choice(name="Gildenprofil (Modal)", value="guildsettings"),
+            app_commands.Choice(name="Registrierung löschen (User wählen)", value="remove_registration"),
+            app_commands.Choice(name="Registrierungen listen", value="list_onboardings"),
+            app_commands.Choice(name="Rang-Mapping listen", value="list_rankmap"),
+            app_commands.Choice(name="Bereitschaftszeiten (Übersicht)", value="readytimes"),
         ]
     )
     async def slash_wow_admin(self, interaction: discord.Interaction, action: str) -> None:
@@ -1754,47 +954,19 @@ class WowGuildAutomation(commands.Cog):
                 ephemeral=True,
             )
             return
-        if action == "list":
+        guild = interaction.guild
+        if action == "panel":
             await interaction.response.send_message(
-                "Listen-Art wählen:",
+                ADMIN_PANEL_INTRO,
                 ephemeral=True,
-                view=SlashWowAdminListView(self, interaction.guild, interaction.user),
-            )
-            return
-        if action == "remove_char_member":
-            await interaction.response.send_message(
-                "Welches Mitglied? (Dropdown)",
-                ephemeral=True,
-                view=SlashWowAdminMemberPickView(
-                    self, interaction.guild, interaction.user, mode="remove_char_member"
-                ),
-            )
-            return
-        if action == "add_char_member":
-            await interaction.response.send_message(
-                "Für welches Mitglied soll ein Char aus dem Roster verknüpft werden?",
-                ephemeral=True,
-                view=SlashWowAdminMemberPickView(
-                    self, interaction.guild, interaction.user, mode="add_char_member"
-                ),
-            )
-            return
-        if action == "set_main_member":
-            await interaction.response.send_message(
-                "Für welches Mitglied soll der Main gesetzt werden?",
-                ephemeral=True,
-                view=SlashWowAdminMemberPickView(
-                    self, interaction.guild, interaction.user, mode="set_main_member"
-                ),
+                view=WowAdminCharPanelView(self, guild, interaction.user),
             )
             return
         if action == "sync_specific_member":
             await interaction.response.send_message(
                 "Welches Mitglied synchronisieren?",
                 ephemeral=True,
-                view=SlashWowAdminMemberPickView(
-                    self, interaction.guild, interaction.user, mode="sync_specific_member"
-                ),
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="sync_rank_member"),
             )
             return
         if action == "sync_all_members":
@@ -1802,94 +974,97 @@ class WowGuildAutomation(commands.Cog):
                 "Alle Mitglieder mit verknüpften Chars **und** gesetztem Main werden nacheinander synchronisiert "
                 "(kann bei großen Gilden lange dauern). Bitte bestätigen:",
                 ephemeral=True,
-                view=SlashWowAdminSyncAllConfirmView(self, interaction.guild, interaction.user),
+                view=SlashWowAdminSyncAllConfirmView(self, guild, interaction.user),
             )
+            return
+        if action == "simulate_join":
+            await interaction.response.send_message(
+                "Welches Mitglied? Der Bot führt das Onboarding **simuliert** aus.",
+                ephemeral=True,
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="simulate_join"),
+            )
+            return
+        if action == "guildsettings":
+            await interaction.response.send_modal(GuildSettingsModal(self, guild))
+            return
+        if action == "remove_registration":
+            await interaction.response.send_message(
+                "Welche Registrierung soll gelöscht werden?",
+                ephemeral=True,
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="remove_registration"),
+            )
+            return
+        if action == "list_onboardings":
+            await interaction.response.defer(ephemeral=True)
+            text = await self._slash_format_onboardings_text(guild)
+            for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
+                await interaction.followup.send(chunk, ephemeral=True)
+            return
+        if action == "list_rankmap":
+            await interaction.response.defer(ephemeral=True)
+            text = await self._slash_format_rankmap_text(guild)
+            for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
+                await interaction.followup.send(chunk, ephemeral=True)
+            return
+        if action == "readytimes":
+            await interaction.response.defer(ephemeral=True)
+            text = await self._slash_format_admin_readytimes_text(guild)
+            for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
+                await interaction.followup.send(chunk, ephemeral=True)
             return
         await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
 
-    @wow_char_grp.command(name="meine-chars", description="Deine verknüpften Chars (nur du siehst das)")
-    @app_commands.guild_only()
-    async def slash_wow_char_mine(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        text = await self._format_user_char_list_ephemeral(
-            interaction.guild, interaction.user, header_user=False
-        )
-        await interaction.response.send_message(text, ephemeral=True)
-
-    @wow_char_officer_grp.command(name="liste", description="Übersicht: alle oder ausgewählte Mitglieder")
-    @app_commands.guild_only()
-    async def slash_wow_char_officer_list(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        if not officer_can_manage_characters(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung (Manage Server).", ephemeral=True)
-            return
-        await interaction.response.send_message(
-            "Wähle eine Option:",
-            ephemeral=True,
-            view=OfficerListMenuView(self, interaction.guild, interaction.user),
-        )
-
-    @wow_char_officer_grp.command(
-        name="meine-chars",
-        description="Zeigt deine eigenen verknüpften Chars (zum Abgleich)",
+    @app_commands.command(
+        name="wow-masteradmin",
+        description="Erweitert: Onboarding-IDs, Blizzard-API, Rang-Titel/Mapping, Auto-Sync-Intervall.",
     )
     @app_commands.guild_only()
-    async def slash_wow_char_officer_self(self, interaction: discord.Interaction) -> None:
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
-            return
-        if not officer_can_manage_characters(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        text = await self._format_user_char_list_ephemeral(
-            interaction.guild, interaction.user, header_user=True
-        )
-        await interaction.response.send_message(text, ephemeral=True)
-
-    @wow_char_officer_grp.command(
-        name="char-entfernen",
-        description="Chars eines Mitglieds entfernen (User erhält DM mit Grund)",
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.describe(action="Aktion")
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Onboarding Kanal & Rollen (Modal)", value="onboarding_setup"),
+            app_commands.Choice(name="Blizzard API (nur Bot-Besitzer)", value="botsetup"),
+            app_commands.Choice(name="Rangtitel setzen (Index 0–9)", value="setranktitle"),
+            app_commands.Choice(name="Rang → Rolle mappen (Modal)", value="maprank"),
+            app_commands.Choice(name="Globale Bot-Defaults (nur Bot-Besitzer)", value="mastersetup_bot"),
+            app_commands.Choice(name="Auto Rang-Sync Intervall (Minuten)", value="syncsetup"),
+        ]
     )
-    @app_commands.guild_only()
-    @app_commands.describe(mitglied="Discord-Mitglied")
-    async def slash_wow_char_officer_remove(
-        self,
-        interaction: discord.Interaction,
-        mitglied: discord.Member,
-    ) -> None:
-        if not isinstance(interaction.user, discord.Member):
+    async def slash_wow_masteradmin(self, interaction: discord.Interaction, action: str) -> None:
+        if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
             await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
             return
-        if not officer_can_manage_characters(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("Fehlende Berechtigung **Server verwalten**.", ephemeral=True)
             return
-        linked = await get_linked_list(self.config.member(mitglied))
-        if not linked:
-            await interaction.response.send_message(
-                f"{mitglied.mention} hat keine verknüpften Chars.",
-                ephemeral=True,
-            )
+        guild = interaction.guild
+        if action in ("botsetup", "mastersetup_bot"):
+            if interaction.user.id not in self.bot.owner_ids:
+                await interaction.response.send_message(
+                    "Nur der **Bot-Besitzer** kann das.",
+                    ephemeral=True,
+                )
+                return
+        if action == "onboarding_setup":
+            await interaction.response.send_modal(OnboardingSetupModal(self, guild))
             return
-        ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
-        await interaction.response.send_message(
-            "Markiere Charaktere im Dropdown (mehrere Seiten möglich), dann **Grund eingeben …**.",
-            ephemeral=True,
-            view=LinkedRemovePageView(
-                self,
-                interaction.guild,
-                interaction.user,
-                ordered,
-                0,
-                officer_mode=True,
-                officer=interaction.user,
-                target=mitglied,
-                accumulated=set(),
-            ),
-        )
+        if action == "botsetup":
+            await interaction.response.send_modal(BotSetupModal(self))
+            return
+        if action == "setranktitle":
+            await interaction.response.send_modal(SetRankTitleModal(self, guild))
+            return
+        if action == "maprank":
+            await interaction.response.send_modal(MapRankModal(self, guild))
+            return
+        if action == "mastersetup_bot":
+            await interaction.response.send_modal(MasterSetupModal(self))
+            return
+        if action == "syncsetup":
+            await interaction.response.send_modal(SyncIntervalModal(self, guild))
+            return
+        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
 
     @_dashboard_page(name=None, description="WoW Guild Automation Dashboard")
     async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
@@ -2812,7 +1987,7 @@ class WowGuildAutomation(commands.Cog):
 
       <div class="wow-card">
         <h3>Character linking messages</h3>
-        <p><small>Slash <code>/wow-chars-panel</code>, <code>/wow-char</code> / <code>/wow-char-officer</code>.</small></p>
+        <p><small>Slash: <code>/wow-user</code> (Panel), <code>/wow-admin</code> (Officer), <code>/wow-masteradmin</code>.</small></p>
         <p><label>Duplicate / already linked (use &#123;detail&#125;)</label><br>{form.duplicate_character_message(rows=4)}</p>
         <p><label>Member left notice (&#123;user&#125;, &#123;username&#125;, &#123;chars&#125;)</label><br>{form.member_left_characters_notice(rows=3)}</p>
         <p><label>Officer removal DM (&#123;chars&#125;, &#123;reason&#125;, &#123;officer&#125;)</label><br>{form.admin_removed_char_dm(rows=3)}</p>

@@ -279,7 +279,7 @@ async def handle_new_member_onboarding(
         selected_cfg,
         main_char,
         profile_key=selected_game,
-        locked=False,
+        previous_bot_role_id=0,
     )
     rank = rank_title if sync_reason == "ok" else None
     if sync_reason == "ok" and rank_title and member_config is not None:

@@ -124,14 +124,12 @@ class RankSyncService:
         member: discord.Member,
         plan: RankSyncPlan,
         *,
-        locked: bool,
+        previous_bot_role_id: int = 0,
     ) -> Tuple[bool, str]:
         """
-        Wendet den Plan an. Wenn locked: keine Rollenänderung.
-        Returns (applied_successfully, reason) reason in {ok, locked, not_found, no_role, no_perms}
+        Wendet den Plan an. Es wird nur die zuletzt vom Bot gesetzte Rang-Rolle entfernt
+        (previous_bot_role_id), nicht andere gemappte Rollen — manuelle Zuweisungen bleiben.
         """
-        if locked:
-            return False, "locked"
         if not plan.rank_title:
             return False, "not_found"
         if not plan.target_role_id:
@@ -142,16 +140,17 @@ class RankSyncService:
             return False, "no_role"
 
         to_remove: List[discord.Role] = []
-        mapped_ids = set(plan.mapped_role_ids)
-        for r in member.roles:
-            if r.id in mapped_ids and r.id != plan.target_role_id:
-                to_remove.append(r)
+        prev = int(previous_bot_role_id or 0)
+        if prev and prev != int(plan.target_role_id):
+            r_prev = member.guild.get_role(prev)
+            if r_prev is not None and r_prev in member.roles:
+                to_remove.append(r_prev)
 
         try:
             if to_remove:
                 await member.remove_roles(
                     *to_remove,
-                    reason="WoW-Rang-Sync: alte Gildenrang-Rolle(n) ersetzen",
+                    reason="WoW-Rang-Sync: vorherige Bot-Rang-Rolle ersetzen",
                 )
             if target not in member.roles:
                 await member.add_roles(
@@ -172,18 +171,20 @@ class RankSyncService:
         main_char: str,
         *,
         profile_key: str,
-        locked: bool,
+        previous_bot_role_id: int = 0,
     ) -> Tuple[Optional[str], str, int]:
         """
         Plan + Apply in einem Schritt.
         Returns (rank_title_or_none, reason, applied_role_id bei Erfolg sonst 0).
         """
         plan = await self.plan_sync(guild_config, main_char, profile_key)
-        if locked:
-            return plan.rank_title, "locked", 0
         if plan.protected_skip:
             return plan.rank_title, "protected", 0
-        ok, reason = await self.apply_plan(member, plan, locked=False)
+        ok, reason = await self.apply_plan(
+            member,
+            plan,
+            previous_bot_role_id=previous_bot_role_id,
+        )
         if not ok:
             return plan.rank_title, reason, 0
         return plan.rank_title, "ok", int(plan.target_role_id)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Tuple
 
 import discord
 
@@ -29,6 +29,12 @@ PANEL_INTRO = (
     "Alles läuft in **dieser einen** Nachricht (ephemeral)."
 )
 
+ADMIN_PANEL_INTRO = (
+    "**Officer-Panel**\n"
+    "Wähle ein **Mitglied** (Dropdown), um dessen Chars zu verwalten, oder nutze die Listen-Buttons.\n\n"
+    "Nach Auswahl: gleiche Aktionen wie der User — inkl. Rang-Sync für genau dieses Mitglied."
+)
+
 LINKED_PAGE_SIZE = 24
 # Discord: Nachrichten-Content max. 2000 Zeichen — sonst schlägt edit_message fehl („Interaktion fehlgeschlagen“).
 PANEL_MESSAGE_CONTENT_LIMIT = 2000
@@ -41,7 +47,7 @@ def _truncate_for_message(body: str, footer: str, limit: int = PANEL_MESSAGE_CON
         return (body[: max(40, limit - 40)] + "…")[:limit]
     if len(body) <= max_body:
         return body + footer
-    return body[: max_body - 25].rstrip() + "\n… *(Liste gekürzt — `/wow-chars list`)*" + footer
+    return body[: max_body - 25].rstrip() + "\n… *(Liste gekürzt — `/wow-user` → list-my)*" + footer
 
 
 def _menu_view(
@@ -68,6 +74,7 @@ class CharMainMenuView(discord.ui.View):
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        attach_officer_extras_if_needed(self)
 
     @discord.ui.button(label="Chars hinzufügen", style=discord.ButtonStyle.primary, row=0)
     async def add_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -108,7 +115,7 @@ class CharMainMenuView(discord.ui.View):
             )
         except Exception:
             await interaction.edit_original_response(
-                content="Char-Liste konnte nicht geladen werden. Nutze `/wow-chars list`.",
+                content="Char-Liste konnte nicht geladen werden. Nutze `/wow-user` → list-my.",
                 view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
             )
             return
@@ -952,11 +959,21 @@ class OfficerListMenuView(discord.ui.View):
 
 
 class OfficerUserPickView(discord.ui.View):
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+    def __init__(
+        self,
+        cog: "WowGuildAutomation",
+        guild: discord.Guild,
+        officer: discord.Member,
+        *,
+        back_view_factory: Optional[Callable[[], discord.ui.View]] = None,
+        back_content: Optional[str] = None,
+    ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.officer = officer
+        self._back_view_factory = back_view_factory
+        self._back_content = back_content
         self.user_select = discord.ui.UserSelect(
             placeholder="Mitglieder (mehrfach)",
             min_values=1,
@@ -972,6 +989,12 @@ class OfficerUserPickView(discord.ui.View):
     async def _back(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.officer.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        if self._back_view_factory is not None:
+            await interaction.response.edit_message(
+                content=self._back_content or ADMIN_PANEL_INTRO,
+                view=self._back_view_factory(),
+            )
             return
         await interaction.response.edit_message(
             content="Wähle eine Option:",
@@ -996,124 +1019,66 @@ class OfficerUserPickView(discord.ui.View):
         self.stop()
 
 
-class SlashWowAdminListView(discord.ui.View):
-    """Zweite Stufe für /wow-admin list — Auswahl per Dropdown."""
+class WowAdminCharPanelView(discord.ui.View):
+    """Ein Panel: Mitglied wählen + Listen — ersetzt mehrere /wow-admin-Unteraktionen."""
 
     def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.officer = officer
-        sel = discord.ui.Select(
-            placeholder="Listen-Art",
-            options=[
-                discord.SelectOption(label="Alle mit verknüpften Chars", value="all_linked"),
-                discord.SelectOption(label="Bestimmte Mitglieder wählen …", value="pick_users"),
-            ],
-        )
-        sel.callback = self._on_select
-        self.add_item(sel)
 
-    async def _on_select(self, interaction: discord.Interaction) -> None:
+    @discord.ui.select(
+        cls=discord.ui.UserSelect,
+        placeholder="Mitglied zum Bearbeiten wählen",
+        row=0,
+        min_values=1,
+        max_values=1,
+    )
+    async def pick_member(self, interaction: discord.Interaction, select: discord.ui.UserSelect) -> None:
         if interaction.user.id != self.officer.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        v = (interaction.data.get("values") or [""])[0]
-        if v == "all_linked":
-            await interaction.response.defer(ephemeral=True)
-            text = await self.cog._officer_format_all_linked_chars(self.guild)
-            for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["Keine Einträge."]:
-                await interaction.followup.send(chunk, ephemeral=True)
-            self.stop()
-            return
-        await interaction.response.edit_message(
-            content="Wähle bis zu 25 Mitglieder:",
-            view=OfficerUserPickView(self.cog, self.guild, self.officer),
-        )
-
-
-class SlashWowAdminMemberPickView(discord.ui.View):
-    """Ein Mitglied wählen (Dropdown), dann Officer-Aktion ausführen."""
-
-    def __init__(
-        self,
-        cog: "WowGuildAutomation",
-        guild: discord.Guild,
-        officer: discord.Member,
-        *,
-        mode: str,
-    ) -> None:
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.guild = guild
-        self.officer = officer
-        self.mode = mode
-        self.user_select = discord.ui.UserSelect(
-            placeholder="Mitglied wählen",
-            min_values=1,
-            max_values=1,
-            custom_id="slash_wow_admin_member_one",
-        )
-        self.user_select.callback = self._on_user
-        self.add_item(self.user_select)
-
-    async def _on_user(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.officer.id:
-            await interaction.response.send_message("Nur für dich.", ephemeral=True)
-            return
-        u = self.user_select.values[0]
+        u = select.values[0]
         member = self.guild.get_member(u.id)
         if member is None:
             await interaction.response.send_message("Mitglied ist nicht (mehr) auf dem Server.", ephemeral=True)
             return
-        cog = self.cog
-        guild = self.guild
-        mode = self.mode
-        if mode == "remove_char_member":
-            linked = await get_linked_list(cog.config.member(member))
-            if not linked:
-                await interaction.response.send_message(
-                    f"{member.mention} hat keine verknüpften Chars.",
-                    ephemeral=True,
-                )
-                return
-            ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
-            await interaction.response.edit_message(
-                content=(
-                    "Markiere Charaktere im Dropdown (mehrere Seiten), dann **Grund eingeben …**."
-                ),
-                view=LinkedRemovePageView(
-                    cog,
-                    guild,
-                    interaction.user,
-                    ordered,
-                    0,
-                    officer_mode=True,
-                    officer=interaction.user,
-                    target=member,
-                    accumulated=set(),
-                ),
-            )
+        header = f"**Bearbeitest:** {member.mention} (`{member.display_name}`)\n\n{PANEL_INTRO}"
+        await interaction.response.edit_message(
+            content=header,
+            view=CharMainMenuView(self.cog, self.guild, member, actor=self.officer),
+        )
+
+    @discord.ui.button(label="Alle mit verknüpften Chars", style=discord.ButtonStyle.primary, row=1)
+    async def all_linked(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.user.id != self.officer.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        if mode == "add_char_member":
-            await interaction.response.edit_message(
-                content=f"**Ziel:** {member.mention} — welches Spiel?",
-                view=GamePickView(cog, guild, member, mode="add", actor=interaction.user),
-            )
+        await interaction.response.defer(ephemeral=True)
+        text = await self.cog._officer_format_all_linked_chars(self.guild)
+        for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["Keine Einträge."]:
+            await interaction.followup.send(chunk, ephemeral=True)
+
+    @discord.ui.button(label="Bestimmte Mitglieder listen", style=discord.ButtonStyle.secondary, row=1)
+    async def pick_list(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.user.id != self.officer.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        if mode == "set_main_member":
-            await interaction.response.edit_message(
-                content=f"**Ziel:** {member.mention}\n\n{PANEL_INTRO}",
-                view=CharMainMenuView(cog, guild, member, actor=interaction.user),
-            )
-            return
-        if mode == "sync_specific_member":
-            await interaction.response.defer(ephemeral=True)
-            text = await cog._slash_admin_sync_report_for_member(guild, member)
-            await interaction.followup.send(text[:1900], ephemeral=True)
-            self.stop()
-            return
-        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+
+        def _back() -> discord.ui.View:
+            return WowAdminCharPanelView(self.cog, self.guild, self.officer)
+
+        await interaction.response.edit_message(
+            content="Wähle bis zu 25 Mitglieder:",
+            view=OfficerUserPickView(
+                self.cog,
+                self.guild,
+                self.officer,
+                back_view_factory=_back,
+                back_content=ADMIN_PANEL_INTRO,
+            ),
+        )
 
 
 class SlashWowAdminSyncAllConfirmView(discord.ui.View):
@@ -1145,3 +1110,36 @@ class SlashWowAdminSyncAllConfirmView(discord.ui.View):
         for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
             await interaction.followup.send(chunk, ephemeral=True)
         self.stop()
+
+
+def attach_officer_extras_if_needed(view: CharMainMenuView) -> None:
+    """Zusatz-Buttons, wenn ein Offizier ein anderes Mitglied bearbeitet."""
+    if view.actor.id == view.member.id:
+        return
+
+    sync_b = discord.ui.Button(label="Rang-Sync", style=discord.ButtonStyle.success, row=2)
+
+    async def _sync_cb(interaction: discord.Interaction) -> None:
+        if interaction.user.id != view.actor.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        text = await view.cog._slash_admin_sync_report_for_member(view.guild, view.member)
+        await interaction.followup.send(text[:1900], ephemeral=True)
+
+    sync_b.callback = _sync_cb
+    view.add_item(sync_b)
+
+    switch_b = discord.ui.Button(label="Anderes Mitglied", style=discord.ButtonStyle.secondary, row=2)
+
+    async def _switch_cb(interaction: discord.Interaction) -> None:
+        if interaction.user.id != view.actor.id:
+            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content=ADMIN_PANEL_INTRO,
+            view=WowAdminCharPanelView(view.cog, view.guild, view.actor),
+        )
+
+    switch_b.callback = _switch_cb
+    view.add_item(switch_b)
