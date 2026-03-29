@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import discord
 
@@ -332,3 +332,96 @@ class AdminPickOneMemberView(discord.ui.View):
             self.stop()
             return
         await interaction.response.send_message("Unbekannt.", ephemeral=True)
+
+
+class RankLockAddModal(discord.ui.Modal, title="Rank-Lock: Rang sperren"):
+    line = discord.ui.TextInput(
+        label="Rangname oder Index (0–9), wie in der WebUI",
+        placeholder="z.B. Kriegsfürst oder 3",
+        max_length=64,
+        required=True,
+    )
+
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
+        super().__init__()
+        self.cog = cog
+        self.guild = guild
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+        new_l = str(self.line.value).strip()
+        if not new_l:
+            await interaction.response.send_message("Leer.", ephemeral=True)
+            return
+        cfg = await self.cog._guild_config(self.guild)
+        pk = str(cfg.get("active_profile_key") or "retail")
+        lr = dict(cfg.get("locked_rank_titles_by_profile") or {})
+        cur = lr.get(pk)
+        lines: List[str]
+        if cur is None:
+            lines = []
+        elif isinstance(cur, str):
+            lines = [cur]
+        elif isinstance(cur, (list, tuple)):
+            lines = [str(x).strip() for x in cur if str(x).strip()]
+        else:
+            lines = []
+        low = {x.lower() for x in lines}
+        if new_l.lower() not in low:
+            lines.append(new_l)
+        lr[pk] = lines
+        cfg["locked_rank_titles_by_profile"] = lr
+        await self.cog.config.guild(self.guild).set(cfg)
+        await interaction.response.send_message(
+            f"Rank-Lock für **{new_l}** gespeichert (aktives Profil `{pk}`).",
+            ephemeral=True,
+        )
+
+
+class RankLockRemoveModal(discord.ui.Modal, title="Rank-Lock: Eintrag entfernen"):
+    line = discord.ui.TextInput(
+        label="Exakt oder Teil des Eintrags (Groß/Klein egal)",
+        placeholder="z.B. Kriegsfürst",
+        max_length=64,
+        required=True,
+    )
+
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
+        super().__init__()
+        self.cog = cog
+        self.guild = guild
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+        needle = str(self.line.value).strip().lower()
+        if not needle:
+            await interaction.response.send_message("Leer.", ephemeral=True)
+            return
+        cfg = await self.cog._guild_config(self.guild)
+        pk = str(cfg.get("active_profile_key") or "retail")
+        lr = dict(cfg.get("locked_rank_titles_by_profile") or {})
+        cur = lr.get(pk)
+        if isinstance(cur, str):
+            lines = [cur] if cur.strip() else []
+        elif isinstance(cur, (list, tuple)):
+            lines = [str(x).strip() for x in cur if str(x).strip()]
+        else:
+            lines = []
+        before = len(lines)
+        lines = [x for x in lines if needle not in x.lower()]
+        removed = before - len(lines)
+        if removed == 0:
+            await interaction.response.send_message(
+                f"Kein Treffer in der Rank-Lock-Liste für Profil `{pk}`.",
+                ephemeral=True,
+            )
+            return
+        lr[pk] = lines
+        cfg["locked_rank_titles_by_profile"] = lr
+        await self.cog.config.guild(self.guild).set(cfg)
+        await interaction.response.send_message(
+            f"**{removed}** Eintrag/Einträge aus Rank-Lock entfernt (`{pk}`).",
+            ephemeral=True,
+        )

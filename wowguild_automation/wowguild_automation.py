@@ -34,7 +34,7 @@ from .character_helpers import (
     GAME_RETAIL,
     char_tuple_key,
     clear_main_for_game,
-    ensure_main_for_game_if_empty,
+    set_main_for_game,
     find_char_owner_guild_wide,
     format_char_line,
     format_mains_summary,
@@ -50,7 +50,7 @@ from .character_helpers import (
     set_linked_list,
     wow_profile_for_game,
 )
-from .officer_notifications import send_protected_rank_officer_notice
+from .officer_notifications import send_rank_lock_officer_notice, send_protected_rank_officer_notice
 from .character_ui import (
     ADMIN_PANEL_INTRO,
     CharMainMenuView,
@@ -73,6 +73,8 @@ from .slash_modals import (
     MapRankModal,
     MasterSetupModal,
     OnboardingSetupModal,
+    RankLockAddModal,
+    RankLockRemoveModal,
     SetRankTitleModal,
     SyncIntervalModal,
 )
@@ -138,6 +140,9 @@ I18N = {
 class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
+    # Mindestabstand zwischen Offiziers-Hinweisen bei gesperrtem Ingame-Rang (Auto-Sync).
+    RANK_LOCK_NOTICE_COOLDOWN_SEC = 6 * 3600
+
     def __init__(self, bot: Red) -> None:
         self.bot = bot
         self.config = Config.get_conf(self, identifier=980231234, force_registration=True)
@@ -180,12 +185,14 @@ class WowGuildAutomation(commands.Cog):
             rank_mapping_by_profile={},
             rank_titles_by_profile={},
             protected_rank_titles_by_profile={},
+            locked_rank_titles_by_profile={},
             channels={
                 "onboarding_channel_id": 0,
                 "manual_review_channel_id": 0,
                 "raid_guest_channel_id": 0,
                 "officer_character_notify_channel_id": 0,
                 "rank_protected_notify_channel_id": 0,
+                "rank_lock_notify_channel_id": 0,
             },
             rules={"rule_channel_id": 0, "rule_emoji": "✅"},
             rank_sync_interval_minutes=0,
@@ -198,6 +205,10 @@ class WowGuildAutomation(commands.Cog):
                 "protected_rank_sync_notice": (
                     "{member} — **{game}**, Main `{char}`: Ingame-Rang **{rank}** ist geschützt; "
                     "kein automatischer Discord-Rang-Sync."
+                ),
+                "rank_lock_officer_notice": (
+                    "{member} — **{game}**, Main `{char}`: Ingame-Rang **{rank}** steht auf der **Rank-Lock**-Liste; "
+                    "Bot setzt keine Discord-Rangrolle.{detail}"
                 ),
             },
         )
@@ -395,7 +406,14 @@ class WowGuildAutomation(commands.Cog):
         profile_key: str,
         main_name: str,
     ):
-        raw = await self.config.member(member).rank_sync_by_game()
+        cfg = await self._guild_config(guild)
+        profiles = cfg.get("wow_profiles") or {}
+        if profile_key not in profiles:
+            return None, "no_profile", 0
+        selected_cfg = dict(cfg)
+        selected_cfg["wow"] = profiles.get(profile_key, {})
+        conf = self.config.member(member)
+        raw = await conf.rank_sync_by_game()
         prev_rid = 0
         if isinstance(raw, dict):
             st = raw.get(profile_key)
@@ -404,12 +422,6 @@ class WowGuildAutomation(commands.Cog):
                     prev_rid = int(st.get("last_role_id") or 0)
                 except (TypeError, ValueError):
                     prev_rid = 0
-        cfg = await self._guild_config(guild)
-        profiles = cfg.get("wow_profiles") or {}
-        if profile_key not in profiles:
-            return None, "no_profile", 0
-        selected_cfg = dict(cfg)
-        selected_cfg["wow"] = profiles.get(profile_key, {})
         rank_title, reason, role_id = await self.rank_sync.sync_member_rank(
             member,
             selected_cfg,
@@ -417,9 +429,33 @@ class WowGuildAutomation(commands.Cog):
             profile_key=profile_key,
             previous_bot_role_id=prev_rid,
         )
-        if reason == "protected" and rank_title:
+        if reason == "rank_locked" and rank_title:
             await merge_rank_sync_game_state(
-                self.config.member(member),
+                conf,
+                profile_key,
+                last_title=str(rank_title),
+            )
+            raw_rs = await conf.rank_sync_by_game()
+            st = (raw_rs.get(profile_key) or {}) if isinstance(raw_rs, dict) else {}
+            last_n = float(st.get("rank_lock_notice_ts") or st.get("manual_lock_notice_ts") or 0)
+            now = time.time()
+            if (now - last_n) >= self.RANK_LOCK_NOTICE_COOLDOWN_SEC:
+                await send_rank_lock_officer_notice(
+                    guild,
+                    cfg,
+                    member,
+                    profile_key,
+                    main_name.strip(),
+                    rank_title,
+                )
+                await merge_rank_sync_game_state(
+                    conf,
+                    profile_key,
+                    rank_lock_notice_ts=now,
+                )
+        elif reason == "protected" and rank_title:
+            await merge_rank_sync_game_state(
+                conf,
                 profile_key,
                 last_title=str(rank_title),
             )
@@ -490,6 +526,10 @@ class WowGuildAutomation(commands.Cog):
                 lines.append(f"• **{gl}:** `{rank_title}` synchronisiert.")
             elif reason == "protected":
                 lines.append(f"• **{gl}:** geschützter Rang (Hinweis ggf. im Offizierskanal).")
+            elif reason == "rank_locked":
+                lines.append(
+                    f"• **{gl}:** **Rank-Lock** (dieser Ingame-Rang) — keine Discord-Rolle vom Bot."
+                )
             elif reason == "no_profile":
                 lines.append(f"• **{gl}:** kein Profil konfiguriert.")
             elif reason in ("not_found", "no_role"):
@@ -833,7 +873,7 @@ class WowGuildAutomation(commands.Cog):
                 selected_game,
             )
             if merged_ok:
-                await ensure_main_for_game_if_empty(
+                await set_main_for_game(
                     self.config.member(member),
                     link_game,
                     char_from_onboarding,
@@ -867,7 +907,8 @@ class WowGuildAutomation(commands.Cog):
         try:
             dm = await member.create_dm()
             await dm.send(
-                "Erinnerung: Bitte bestaetige noch die Serverregeln, damit dein Onboarding abgeschlossen wird."
+                "Erinnerung: Bitte bestätige noch die Serverregeln — im Regel-Kanal mit dem konfigurierten Emoji "
+                "(z. B. ✅) auf die **bestehende** Regelnachricht, damit dein Onboarding abgeschlossen wird."
             )
         except Exception:
             pass
@@ -1016,7 +1057,7 @@ class WowGuildAutomation(commands.Cog):
 
     @app_commands.command(
         name="wow-masteradmin",
-        description="Erweitert: Onboarding-IDs, Blizzard-API, Rang-Titel/Mapping, Auto-Sync-Intervall.",
+        description="Erweitert: Onboarding, Blizzard-API, Rang-Mapping, Auto-Sync, Rank-Lock pro Mitglied.",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -1029,6 +1070,8 @@ class WowGuildAutomation(commands.Cog):
             app_commands.Choice(name="Rang → Rolle mappen (Modal)", value="maprank"),
             app_commands.Choice(name="Globale Bot-Defaults (nur Bot-Besitzer)", value="mastersetup_bot"),
             app_commands.Choice(name="Auto Rang-Sync Intervall (Minuten)", value="syncsetup"),
+            app_commands.Choice(name="Rank-Lock: Ingame-Rang sperren (Modal)", value="rank_lock"),
+            app_commands.Choice(name="Rank-Lock: Eintrag entfernen (Modal)", value="rank_unlock"),
         ]
     )
     async def slash_wow_masteradmin(self, interaction: discord.Interaction, action: str) -> None:
@@ -1063,6 +1106,12 @@ class WowGuildAutomation(commands.Cog):
             return
         if action == "syncsetup":
             await interaction.response.send_modal(SyncIntervalModal(self, guild))
+            return
+        if action == "rank_lock":
+            await interaction.response.send_modal(RankLockAddModal(self, guild))
+            return
+        if action == "rank_unlock":
+            await interaction.response.send_modal(RankLockRemoveModal(self, guild))
             return
         await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
 
@@ -1368,15 +1417,24 @@ class WowGuildAutomation(commands.Cog):
                         "DM text after officer removed chars (vars: {chars}, {reason}, {officer})"
                     )
                     rank_protected_notify_channel_id = wtforms.SelectField(
-                        "Channel: protected-rank notices (no auto Discord role)"
+                        "Channel: Hinweise bei Protected-Rängen (kein Auto-Discord-Rang)"
                     )
                     protected_rank_lines = wtforms.TextAreaField(
-                        "Protected WoW ranks for active profile (one per line: rank title or 0–9)"
+                        "Protected: Ingame-Ränge (eine Zeile: Titel, API-Name oder Index 0–9)"
+                    )
+                    locked_rank_lines = wtforms.TextAreaField(
+                        "Rank-Lock: Ingame-Ränge ohne Bot-Discord-Rolle (eine Zeile wie bei Protected)"
                     )
                     protected_rank_sync_notice = wtforms.TextAreaField(
-                        "Template: protected rank notice ({member},{user},{username},{user_id},{game},{char},{rank},{profile})"
+                        "Vorlage Offiziers-Hinweis Protected ({member}, …)"
                     )
-                    save_protected_ranks = wtforms.SubmitField("Save Protected Ranks + Notice")
+                    rank_lock_notify_channel_id = wtforms.SelectField(
+                        "Kanal Rank-Lock-Hinweise (0 = gleicher Kanal wie Protected)"
+                    )
+                    rank_lock_officer_notice = wtforms.TextAreaField(
+                        "Vorlage Offiziers-Hinweis Rank-Lock (gleiche Platzhalter wie Protected)"
+                    )
+                    save_protected_ranks = wtforms.SubmitField("Protected- & Rank-Lock-Listen speichern")
                     submit = wtforms.SubmitField("Save Guild Settings")
 
                 form = GuildForm()
@@ -1435,6 +1493,7 @@ class WowGuildAutomation(commands.Cog):
                 form.remove_registration_user_id.choices = reg_choices
                 form.officer_character_notify_channel_id.choices = channel_choices
                 form.rank_protected_notify_channel_id.choices = channel_choices
+                form.rank_lock_notify_channel_id.choices = channel_choices
                 tmpl = cfg.get("templates", {})
                 if method.upper() == "GET":
                     form.language.data = cfg.get("language", "de-DE")
@@ -1500,7 +1559,17 @@ class WowGuildAutomation(commands.Cog):
                     form.protected_rank_lines.data = (
                         "\n".join(str(x) for x in pr_lines) if isinstance(pr_lines, (list, tuple)) else ""
                     )
+                    lk_lines = (cfg.get("locked_rank_titles_by_profile") or {}).get(active_key, [])
+                    if isinstance(lk_lines, str):
+                        lk_lines = [lk_lines]
+                    form.locked_rank_lines.data = (
+                        "\n".join(str(x) for x in lk_lines) if isinstance(lk_lines, (list, tuple)) else ""
+                    )
                     form.protected_rank_sync_notice.data = tmpl.get("protected_rank_sync_notice", "")
+                    form.rank_lock_notify_channel_id.data = str(
+                        channels.get("rank_lock_notify_channel_id", 0)
+                    )
+                    form.rank_lock_officer_notice.data = tmpl.get("rank_lock_officer_notice", "")
 
                 if form.load_profile.data:
                     selected_key = str(form.profile_key.data or "").strip().lower()
@@ -1599,20 +1668,30 @@ class WowGuildAutomation(commands.Cog):
                     pr = cfg.setdefault("protected_rank_titles_by_profile", {})
                     pr[profile_key_for_prot] = cleaned
                     cfg["protected_rank_titles_by_profile"] = pr
+                    lock_lines = str(form.locked_rank_lines.data or "").splitlines()
+                    cleaned_lock = [ln.strip() for ln in lock_lines if ln.strip()]
+                    lr = cfg.setdefault("locked_rank_titles_by_profile", {})
+                    lr[profile_key_for_prot] = cleaned_lock
+                    cfg["locked_rank_titles_by_profile"] = lr
                     ch = dict(cfg.get("channels") or {})
                     ch["rank_protected_notify_channel_id"] = int(
                         form.rank_protected_notify_channel_id.data or 0
                     )
+                    ch["rank_lock_notify_channel_id"] = int(form.rank_lock_notify_channel_id.data or 0)
                     cfg["channels"] = ch
-                    cfg.setdefault("templates", {})["protected_rank_sync_notice"] = str(
+                    tmerge = cfg.setdefault("templates", {})
+                    tmerge["protected_rank_sync_notice"] = str(
                         form.protected_rank_sync_notice.data or ""
+                    ).strip()
+                    tmerge["rank_lock_officer_notice"] = str(
+                        form.rank_lock_officer_notice.data or ""
                     ).strip()
                     await self.config.guild(guild).set(cfg)
                     return {
                         "status": 0,
                         "notifications": [
                             {
-                                "message": f"Protected ranks saved for profile `{profile_key_for_prot}`.",
+                                "message": f"Protected ranks + rank-lock notices saved for profile `{profile_key_for_prot}`.",
                                 "category": "success",
                             }
                         ],
@@ -1706,6 +1785,9 @@ class WowGuildAutomation(commands.Cog):
                             "rank_protected_notify_channel_id": int(
                                 form.rank_protected_notify_channel_id.data or 0
                             ),
+                            "rank_lock_notify_channel_id": int(
+                                form.rank_lock_notify_channel_id.data or 0
+                            ),
                         }
                     )
                     cfg["channels"] = ch_merge
@@ -1726,11 +1808,19 @@ class WowGuildAutomation(commands.Cog):
                     cfg["templates"]["protected_rank_sync_notice"] = str(
                         form.protected_rank_sync_notice.data or ""
                     ).strip()
+                    cfg["templates"]["rank_lock_officer_notice"] = str(
+                        form.rank_lock_officer_notice.data or ""
+                    ).strip()
                     lines_prot = str(form.protected_rank_lines.data or "").splitlines()
                     cleaned_prot = [ln.strip() for ln in lines_prot if ln.strip()]
                     pr_save = cfg.setdefault("protected_rank_titles_by_profile", {})
                     pr_save[profile_key] = cleaned_prot
                     cfg["protected_rank_titles_by_profile"] = pr_save
+                    lock_lines_main = str(form.locked_rank_lines.data or "").splitlines()
+                    cleaned_lock_main = [ln.strip() for ln in lock_lines_main if ln.strip()]
+                    lr_main = cfg.setdefault("locked_rank_titles_by_profile", {})
+                    lr_main[profile_key] = cleaned_lock_main
+                    cfg["locked_rank_titles_by_profile"] = lr_main
                     notifications = []
                     category = None
                     try:
@@ -1964,8 +2054,9 @@ class WowGuildAutomation(commands.Cog):
         <p><label>Onboarding Text DE</label><br>{form.welcome_text_de()}</p>
         <p><label>Onboarding Text EN</label><br>{form.welcome_text_en()}</p>
         <h3>Rules</h3>
+        <p><small>Onboarding endet mit einem Hinweis in Thread/DM: Nutzer gehen in diesen Kanal und reagieren mit dem Emoji auf die <b>bereits vorhandene</b> Regelnachricht. Der Bot postet <b>nichts</b> im Regel-Kanal.</small></p>
         <p><label>Rules Channel</label><br>{form.rule_channel_id()}</p>
-        <p><label>Rules Confirmation Emoji</label><br>{form.rule_emoji()}</p>
+        <p><label>Rules Confirmation Emoji</label><br>{form.rule_emoji()}<br><small>z. B. <b>✅</b> — muss mit der Reaktion auf dem bestehenden Regel-Post übereinstimmen</small></p>
       </div>
 
       <div class="wow-card">
@@ -1982,7 +2073,8 @@ class WowGuildAutomation(commands.Cog):
         <p><label>Manual Review Channel</label><br>{form.manual_review_channel_id()}<br><label>{form.create_manual_review_channel()} Auto-create</label></p>
         <p><label>Raid Guest Channel</label><br>{form.raid_guest_channel_id()}<br><label>{form.create_raid_guest_channel()} Auto-create</label></p>
         <p><label>Officer notify channel</label><br>{form.officer_character_notify_channel_id()}<br><small>Leave / member quit: notice if linked WoW chars existed</small></p>
-        <p><label>Protected-rank notify channel</label><br>{form.rank_protected_notify_channel_id()}<br><small>When a member’s ingame rank is protected, no auto role — post here</small></p>
+        <p><label>Protected-rank notify channel</label><br>{form.rank_protected_notify_channel_id()}<br><small>Hier erscheint der <b>Protected</b>-Hinweis, wenn jemand einen geschützten Ingame-Rang hat (kein automatischer Discord-Rang).</small></p>
+        <p><label>Rank-lock notify channel</label><br>{form.rank_lock_notify_channel_id()}<br><small>Hier erscheint der <b>Rank-Lock</b>-Hinweis (eigenes Template). <b>0</b> = gleicher Kanal wie Protected.</small></p>
       </div>
 
       <div class="wow-card">
@@ -2021,10 +2113,16 @@ class WowGuildAutomation(commands.Cog):
       </div>
 
       <div class="wow-card">
-        <h3>Protected WoW ranks (active profile)</h3>
-        <p><small>Members with these ingame ranks (match rank title, API name, or guild rank index <b>0–9</b>) do <b>not</b> get automatic Discord rank roles. One entry per line. Load profile first if you edit another version.</small></p>
-        <p><label>Protected rank list</label><br>{form.protected_rank_lines(rows=8)}</p>
-        <p><label>Officer notice template</label><br>{form.protected_rank_sync_notice(rows=3)}</p>
+        <h3>Protected &amp; Rank-Lock (aktives Profil)</h3>
+        <p><small><b>Technisch gleich:</b> Steht der Ingame-Rang auf einer der beiden Listen, setzt der Bot <b>keine</b> automatische Discord-Rangrolle (laut Rank-Mapping). Unterschied ist nur <b>Organisation</b>: eigener Offiziers-Kanal und eigenes Hinweis-Template — damit ihr z. B. „normale“ geschützte Ränge und bewusst gesperrte Ränge (Rank-Lock) getrennt behandeln könnt.</small></p>
+        <p><small><b>Protected</b> — für Ränge, die ihr grundsätzlich nicht per Bot syncen wollt (z. B. sensible Offiziersstufen, manuelle Discord-Vergabe). Hinweis geht an den <b>Protected-rank notify</b>-Kanal, Text aus der Vorlage „Protected“.</small></p>
+        <p><small><b>Rank-Lock</b> — für konkrete Ingame-Ränge, die der Bot nie zuweisen soll (z. B. „Kriegsfürst“). Liste ist pro Mitglied nicht nötig: Es zählt nur der WoW-Rang. Hinweis an <b>Rank-lock notify</b>-Kanal (oder 0 = wie Protected), Text aus der Vorlage „Rank-Lock“.</small></p>
+        <p><small><b>Matching:</b> Pro Zeile Rangtitel, API-interner Name oder Index <b>0–9</b> (wie in der Rang-Mapping-Tabelle). Ein Eintrag pro Zeile. Vor dem Bearbeiten immer das richtige Profil laden.</small></p>
+        <p><label>Liste Protected-Ränge</label><br>{form.protected_rank_lines(rows=8)}</p>
+        <p><label>Liste Rank-Lock-Ränge</label><br>{form.locked_rank_lines(rows=8)}</p>
+        <p><label>Vorlage Offiziers-Hinweis (Protected)</label><br>{form.protected_rank_sync_notice(rows=3)}</p>
+        <p><label>Vorlage Offiziers-Hinweis (Rank-Lock)</label><br>{form.rank_lock_officer_notice(rows=3)}</p>
+        <p><small>Platzhalter: &#123;member&#125;, &#123;user&#125;, &#123;username&#125;, &#123;user_id&#125;, &#123;game&#125;, &#123;char&#125;, &#123;rank&#125;, &#123;profile&#125;, &#123;detail&#125;</small></p>
         <p>{form.save_protected_ranks()}</p>
       </div>
     </div>

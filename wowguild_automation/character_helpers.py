@@ -21,6 +21,41 @@ def char_tuple_key(name: str, game_type: str) -> Tuple[str, str]:
     return (name.strip().lower(), (game_type or GAME_RETAIL).lower())
 
 
+def normalize_stored_main_characters(raw: Any) -> Dict[str, Dict[str, str]]:
+    """
+    Liefert main_characters mit kanonischen Keys (retail / mop_classic).
+    Ignoriert unbekannte Keys; akzeptiert String-Werte als Name.
+    """
+    out: Dict[str, Dict[str, str]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, v in raw.items():
+        ks = str(key).strip().lower().replace(" ", "_").replace("-", "_")
+        g: Optional[str] = None
+        if ks == GAME_RETAIL or ks in ("r", "wow_retail"):
+            g = GAME_RETAIL
+        elif ks in (GAME_MOP, "mop", "mopclassic", "classic_mop", "wow_mop"):
+            g = GAME_MOP
+        elif ks in SUPPORTED_GAMES:
+            g = ks
+        if g is None:
+            continue
+        if isinstance(v, str):
+            name = v.strip()
+            if name:
+                out[g] = {"name": name, "game_type": g}
+            continue
+        if isinstance(v, dict):
+            name = str(v.get("name", "")).strip()
+            if not name:
+                continue
+            gt = str(v.get("game_type", g)).lower()
+            if gt not in SUPPORTED_GAMES:
+                gt = g
+            out[g] = {"name": name, "game_type": gt}
+    return out
+
+
 def normalize_linked_characters(raw: Any) -> List[Dict[str, str]]:
     """Migrate legacy list[str] to [{name, game_type}]."""
     if not raw:
@@ -65,9 +100,10 @@ def mains_from_member_data(payload: Dict[str, Any]) -> Dict[str, Optional[Dict[s
     """Build per-game main map from stored member payload (supports legacy main_character)."""
     out: Dict[str, Optional[Dict[str, str]]] = {g: None for g in SUPPORTED_GAMES}
     raw_m = payload.get("main_characters")
-    if isinstance(raw_m, dict):
+    norm_m = normalize_stored_main_characters(raw_m)
+    if norm_m:
         for g in SUPPORTED_GAMES:
-            v = raw_m.get(g)
+            v = norm_m.get(g)
             if isinstance(v, dict) and str(v.get("name", "")).strip():
                 out[g] = {"name": str(v["name"]).strip(), "game_type": g}
         if any(v is not None for v in out.values()):
@@ -82,22 +118,14 @@ def mains_from_member_data(payload: Dict[str, Any]) -> Dict[str, Optional[Dict[s
 
 
 async def _load_main_characters_raw(member_group: Config) -> Dict[str, Any]:
-    """Liest main_characters; repariert kaputte/None-Werte (Red nested_update + None-Defaults)."""
+    """Liest main_characters — ohne Daten zu löschen (kein automatisches clear bei Typfehlern)."""
     try:
         raw = await member_group.main_characters()
     except TypeError:
-        try:
-            await member_group.main_characters.set({})
-        except Exception:
-            pass
         return {}
     if raw is None or not isinstance(raw, dict):
-        try:
-            await member_group.main_characters.set({})
-        except Exception:
-            pass
         return {}
-    return raw
+    return normalize_stored_main_characters(raw)
 
 
 def _pack_mains_for_storage(mains: Dict[str, Optional[Dict[str, str]]]) -> Dict[str, Dict[str, str]]:
@@ -113,7 +141,16 @@ def _pack_mains_for_storage(mains: Dict[str, Optional[Dict[str, str]]]) -> Dict[
 async def get_main_characters(member_group: Config) -> Dict[str, Optional[Dict[str, str]]]:
     raw = await _load_main_characters_raw(member_group)
     payload = {"main_characters": raw, "main_character": await member_group.main_character()}
-    return mains_from_member_data(payload)
+    out = mains_from_member_data(payload)
+    reg = await member_group.registration()
+    if isinstance(reg, dict) and reg.get("type") == "member":
+        cn = str(reg.get("char_name") or "").strip()
+        if cn:
+            sg = str(await member_group.selected_game() or GAME_RETAIL)
+            lg = profile_key_to_link_game(sg)
+            if out.get(lg) is None:
+                out[lg] = {"name": cn, "game_type": lg}
+    return out
 
 
 async def set_main_for_game(member_group: Config, game_type: str, name: str) -> None:
@@ -277,6 +314,7 @@ async def merge_rank_sync_game_state(
     *,
     last_title: Optional[str] = None,
     last_role_id: Optional[int] = None,
+    rank_lock_notice_ts: Optional[float] = None,
 ) -> None:
     """Aktualisiert rank_sync_by_game[game] ohne None-Blätter zu zerstören."""
     if game not in SUPPORTED_GAMES:
@@ -292,6 +330,8 @@ async def merge_rank_sync_game_state(
         cur["last_title"] = str(last_title)
     if last_role_id is not None:
         cur["last_role_id"] = int(last_role_id)
+    if rank_lock_notice_ts is not None:
+        cur["rank_lock_notice_ts"] = float(rank_lock_notice_ts)
     raw[game] = cur
     await member_group.rank_sync_by_game.set(raw)
 

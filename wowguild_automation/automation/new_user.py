@@ -1,11 +1,16 @@
+import asyncio
 from typing import Any, Dict, List, Optional
 
 import discord
 from discord.ext import commands
 
-from ..character_helpers import merge_rank_sync_game_state
+from ..character_helpers import (
+    game_label,
+    merge_rank_sync_game_state,
+    profile_key_to_link_game,
+)
 from ..functions.automations import RankSyncService
-from ..officer_notifications import send_protected_rank_officer_notice
+from ..officer_notifications import send_rank_lock_officer_notice, send_protected_rank_officer_notice
 
 TEXTS: Dict[str, Dict[str, str]] = {
     "de-DE": {
@@ -13,30 +18,50 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "lang_timeout": "Onboarding abgebrochen (Zeit abgelaufen).",
         "role_prompt": "Bist du Gast oder neues Gildenmitglied?",
         "guest_done": "Du wurdest als Gast markiert.",
-        "rules_channel_hint": "Bitte gehe jetzt zu {rules_channel} und bestaetige die Regeln mit {emoji}.",
+        "rules_channel_hint": (
+            "**Damit ist das Onboarding hier beendet.** Bitte gehe jetzt zu {rules_channel} und bestätige die Regeln mit {emoji} "
+            "auf der **bereits vorhandenen** Regelnachricht (den bestehenden Post mit dem Hinweis zum Abhaken). "
+            "Der Bot schreibt **nichts** in den Regel-Kanal — du reagierst nur auf die Nachricht, die schon da ist."
+        ),
         "mainchar_prompt": "Bitte gib deinen Mainchar ein (Button -> Popup).",
         "game_prompt": "Fuer welches WoW-Spiel meldest du dich an?",
         "mainchar_timeout": "Kein Mainchar erhalten, Onboarding beendet.",
         "verified": "Verifizierung erfolgreich. Mainchar `{main}` gefunden, Ingame-Rang `{rank}`.",
         "manual": "Automatische Verifizierung nicht moeglich. Das Team wurde fuer manuelle Pruefung benachrichtigt.",
         "protected_rank": "Dein Char wurde gefunden. Der Ingame-Rang ist geschuetzt — ein Offizier teilt dir die passende Discord-Rolle mit.",
+        "rank_locked_onboarding": (
+            "Dein Ingame-Rang steht auf der **Rank-Lock**-Liste: Der Bot weist dafür keine Discord-Rolle zu. "
+            "Bitte einen Offizier ansprechen."
+        ),
         "rules": "Wichtig: Bitte lies die Serverregeln und bestaetige sie mit dem vorgegebenen Emoji.",
         "rules_confirm": "Regeln bestaetigen",
+        "rules_timeout": "Zeit abgelaufen — Regeln nicht bestätigt. Bitte einen Admin kontaktieren oder erneut joinen.",
+        "rules_fallback": "Kein Regel-Kanal konfiguriert — bitte hier bestätigen:",
     },
     "en-US": {
         "lang_prompt": "Welcome! Please choose your language.",
         "lang_timeout": "Onboarding cancelled (timeout).",
         "role_prompt": "Are you a guest or a new guild member?",
         "guest_done": "You are marked as a guest.",
-        "rules_channel_hint": "Please go to {rules_channel} and confirm the rules with {emoji}.",
+        "rules_channel_hint": (
+            "**This finishes onboarding here.** Please go to {rules_channel} now and confirm the rules with {emoji} "
+            "on the **existing** rules post (the one that already asks for the checkmark). "
+            "The bot **does not post** in the rules channel — you only react on the message that is already there."
+        ),
         "mainchar_prompt": "Please enter your main character (button -> popup).",
         "game_prompt": "Which WoW game are you signing up for?",
         "mainchar_timeout": "No main character received, onboarding cancelled.",
         "verified": "Verification successful. Main character `{main}` found, ingame rank `{rank}`.",
         "manual": "Automatic verification failed. The team was notified for manual review.",
         "protected_rank": "Your character was found. The in-game rank is protected — an officer will assign your Discord role.",
+        "rank_locked_onboarding": (
+            "Your in-game rank is on the **rank-lock** list: the bot will not assign a Discord role for it. "
+            "Please contact an officer."
+        ),
         "rules": "Important: Please read the server rules and confirm with the required emoji.",
         "rules_confirm": "Confirm rules",
+        "rules_timeout": "Timed out — rules not confirmed. Contact an admin or rejoin.",
+        "rules_fallback": "No rules channel configured — confirm here:",
     },
 }
 
@@ -195,35 +220,31 @@ async def handle_new_member_onboarding(
     member_role = member.guild.get_role(roles.get("member_role_id", 0))
     rules_cfg = guild_config.get("rules", {})
     rule_channel = member.guild.get_channel(rules_cfg.get("rule_channel_id", 0))
-    rule_emoji = str(rules_cfg.get("rule_emoji", "✅"))
+    rule_emoji = str(rules_cfg.get("rule_emoji", "✅") or "✅").strip() or "✅"
 
     async def confirm_rules() -> bool:
-        await destination.send(t["rules"])
-        if rule_channel is not None:
+        if rule_channel is not None and isinstance(rule_channel, discord.TextChannel):
             await destination.send(
                 t["rules_channel_hint"].format(rules_channel=rule_channel.mention, emoji=rule_emoji)
             )
-            try:
-                rules_msg = await rule_channel.send(
-                    f"{member.mention} - bitte bestaetige die Regeln mit {rule_emoji}."
+
+            def reaction_check(payload: discord.RawReactionActionEvent) -> bool:
+                return (
+                    payload.guild_id == member.guild.id
+                    and payload.channel_id == rule_channel.id
+                    and payload.user_id == member.id
+                    and str(payload.emoji) == rule_emoji
                 )
-                await rules_msg.add_reaction(rule_emoji)
 
-                def reaction_check(payload: discord.RawReactionActionEvent) -> bool:
-                    return (
-                        payload.guild_id == member.guild.id
-                        and payload.channel_id == rule_channel.id
-                        and payload.message_id == rules_msg.id
-                        and payload.user_id == member.id
-                        and str(payload.emoji) == rule_emoji
-                    )
-
-                await bot.wait_for("raw_reaction_add", check=reaction_check, timeout=300)
+            try:
+                await bot.wait_for("raw_reaction_add", check=reaction_check, timeout=600)
                 return True
+            except asyncio.TimeoutError:
+                return False
             except Exception:
-                pass
+                return False
         confirm_view = RulesConfirmView(member.id, f"{t['rules_confirm']} {rule_emoji}")
-        await destination.send("Click to finish onboarding:", view=confirm_view)
+        await destination.send(t.get("rules_fallback", "Confirm:"), view=confirm_view)
         return (not await confirm_view.wait()) and confirm_view.value == "confirmed"
 
     if role_view.value == "guest":
@@ -249,7 +270,16 @@ async def handle_new_member_onboarding(
         wow_profiles = {wow_single.get("version", "retail"): wow_single}
     game_keys = list(wow_profiles.keys())
     selected_game = game_keys[0] if game_keys else "retail"
-    game_view = ChoiceView(member.id, [(k, k) for k in game_keys], timeout=180)
+    game_labels: List[tuple[str, str]] = []
+    for k in game_keys:
+        gtype = profile_key_to_link_game(k)
+        game_labels.append((f"{game_label(gtype)} ({k})", k))
+    if not game_labels:
+        game_labels = [(game_label(profile_key_to_link_game(selected_game)), selected_game)]
+    elif len(game_labels) == 1:
+        k0 = game_labels[0][1]
+        game_labels = [(game_label(profile_key_to_link_game(k0)), k0)]
+    game_view = ChoiceView(member.id, game_labels, timeout=180)
     await destination.send(t["game_prompt"], view=game_view)
     _ = await game_view.wait()
     if game_view.value:
@@ -295,8 +325,23 @@ async def handle_new_member_onboarding(
             selected_game,
             last_title=str(rank_title),
         )
+    elif sync_reason == "rank_locked" and rank_title and member_config is not None:
+        await merge_rank_sync_game_state(
+            member_config,
+            selected_game,
+            last_title=str(rank_title),
+        )
     if sync_reason == "protected" and rank_title:
         await send_protected_rank_officer_notice(
+            member.guild,
+            guild_config,
+            member,
+            selected_game,
+            main_char,
+            rank_title,
+        )
+    if sync_reason == "rank_locked" and rank_title:
+        await send_rank_lock_officer_notice(
             member.guild,
             guild_config,
             member,
@@ -312,6 +357,13 @@ async def handle_new_member_onboarding(
             await manual_channel.send(
                 f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
                 f"Spieltyp: {selected_game}. Automatisch verifiziert (Rang: {rank})."
+            )
+    elif sync_reason == "rank_locked":
+        await destination.send(t["rank_locked_onboarding"])
+        if manual_channel:
+            await manual_channel.send(
+                f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                f"Ingame-Rang `{rank_title}` rank-locked (kein Bot-Rang)."
             )
     elif sync_reason == "protected" and rank_title:
         await destination.send(t["protected_rank"])
@@ -334,6 +386,20 @@ async def handle_new_member_onboarding(
         await destination.send(t["manual"])
 
     rules_confirmed = await confirm_rules()
+    if not rules_confirmed:
+        await destination.send(t["rules_timeout"])
+        return {
+            "language": lang,
+            "selected_game": selected_game,
+            "registration": {
+                "type": "member",
+                "char_name": main_char,
+                "verified": bool(rank),
+                "requires_manual_verification": not bool(rank),
+                "rules_confirmed": False,
+            },
+        }
+
     return {
         "language": lang,
         "selected_game": selected_game,

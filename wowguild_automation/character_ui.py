@@ -455,13 +455,15 @@ class LinkedMainPageView(discord.ui.View):
         self.game_type = game_type
         self.ordered = ordered
         self.page = max(0, page)
+        self._main_pick_map: Dict[str, Tuple[str, str]] = {}
         start = self.page * LINKED_PAGE_SIZE
         chunk = ordered[start : start + LINKED_PAGE_SIZE]
         opts: List[discord.SelectOption] = []
-        for e in chunk[:25]:
+        for i, e in enumerate(chunk[:25]):
+            tok = f"m{self.page}_{i}"
+            self._main_pick_map[tok] = (e["name"], e["game_type"])
             label = f"{e['name']}"[:100]
-            value = f"{e['name']}|{e['game_type']}"
-            opts.append(discord.SelectOption(label=label, value=value[:100]))
+            opts.append(discord.SelectOption(label=label, value=tok))
         if opts:
             s = discord.ui.Select(placeholder="Main-Char wählen", min_values=1, max_values=1, options=opts)
             s.callback = self._pick
@@ -527,11 +529,12 @@ class LinkedMainPageView(discord.ui.View):
         if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        raw = (interaction.data.get("values") or [""])[0]
-        if "|" not in raw:
+        tok = (interaction.data.get("values") or [""])[0]
+        pair = self._main_pick_map.get(tok)
+        if not pair:
             await interaction.response.send_message("Ungültig.", ephemeral=True)
             return
-        name, game = raw.split("|", 1)
+        name, game = pair[0], pair[1]
         if game not in SUPPORTED_GAMES:
             game = GAME_RETAIL
         await set_main_for_game(self.cog.config.member(self.member), game, name.strip())
@@ -600,11 +603,7 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
             )
             return
         ordered = sorted(subset, key=lambda e: e["name"].lower())[:25]
-        opts: List[discord.SelectOption] = []
-        for e in ordered:
-            value = f"{e['name']}|{e['game_type']}"
-            opts.append(discord.SelectOption(label=e["name"][:100], value=value[:100]))
-        view = MainSearchDisambigView(self.cog, self.guild, self.member, opts, actor=self.actor)
+        view = MainSearchDisambigView(self.cog, self.guild, self.member, ordered, actor=self.actor)
         await interaction.response.edit_message(
             content=f"Mehrere Treffer — bitte einen wählen:",
             view=view,
@@ -617,7 +616,7 @@ class MainSearchDisambigView(discord.ui.View):
         cog: "WowGuildAutomation",
         guild: discord.Guild,
         member: discord.Member,
-        options: List[discord.SelectOption],
+        entries: List[Dict[str, str]],
         *,
         actor: Optional[discord.Member] = None,
     ) -> None:
@@ -626,7 +625,13 @@ class MainSearchDisambigView(discord.ui.View):
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
-        s = discord.ui.Select(placeholder="Main wählen", min_values=1, max_values=1, options=options)
+        self._pick_map: Dict[str, Tuple[str, str]] = {}
+        opts: List[discord.SelectOption] = []
+        for i, e in enumerate(entries[:25]):
+            tok = f"d{i}"
+            self._pick_map[tok] = (e["name"], e["game_type"])
+            opts.append(discord.SelectOption(label=e["name"][:100], value=tok))
+        s = discord.ui.Select(placeholder="Main wählen", min_values=1, max_values=1, options=opts)
         s.callback = self._pick
         self.add_item(s)
         b = discord.ui.Button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
@@ -646,11 +651,14 @@ class MainSearchDisambigView(discord.ui.View):
         if interaction.user.id != self.actor.id:
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
-        raw = (interaction.data.get("values") or [""])[0]
-        if "|" not in raw:
+        tok = (interaction.data.get("values") or [""])[0]
+        pair = self._pick_map.get(tok)
+        if not pair:
             await interaction.response.send_message("Ungültig.", ephemeral=True)
             return
-        name, game = raw.split("|", 1)
+        name, game = pair[0], pair[1]
+        if game not in SUPPORTED_GAMES:
+            game = GAME_RETAIL
         await set_main_for_game(self.cog.config.member(self.member), game, name.strip())
         await self.cog.config.member(self.member).selected_game.set(game)
         asyncio.create_task(
@@ -688,13 +696,15 @@ class LinkedRemovePageView(discord.ui.View):
         self.officer = officer
         self.target = target
         self.accumulated: Set[Tuple[str, str]] = accumulated or set()
+        self._remove_token_map: Dict[str, Tuple[str, str]] = {}
         start = self.page * LINKED_PAGE_SIZE
         chunk = ordered[start : start + LINKED_PAGE_SIZE]
         opts: List[discord.SelectOption] = []
-        for e in chunk[:25]:
+        for i, e in enumerate(chunk[:25]):
+            tok = f"rm{self.page}_{i}"
+            self._remove_token_map[tok] = (e["name"], e["game_type"])
             label = f"{e['name']} ({game_label(e['game_type'])})"[:100]
-            value = f"{e['name']}|{e['game_type']}"
-            opts.append(discord.SelectOption(label=label, value=value[:100]))
+            opts.append(discord.SelectOption(label=label, value=tok))
         if opts:
             s = discord.ui.Select(
                 placeholder="Zur Entfernen-Markierung wählen",
@@ -795,11 +805,10 @@ class LinkedRemovePageView(discord.ui.View):
             await interaction.response.send_message("Nur für dich.", ephemeral=True)
             return
         vals = interaction.data.get("values") or []
-        for v in vals:
-            if "|" not in v:
-                continue
-            n, g = v.split("|", 1)
-            self.accumulated.add((n.strip(), g.strip()))
+        for tok in vals:
+            pair = self._remove_token_map.get(tok)
+            if pair:
+                self.accumulated.add((pair[0].strip(), pair[1].strip()))
         nv = self._rebuild_view()
         await interaction.response.edit_message(content=nv._caption(), view=nv)
 

@@ -1,11 +1,45 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import FrozenSet, List, Optional, Set, Tuple
+from typing import Any, FrozenSet, List, Optional, Set, Tuple
 
 import discord
 
 from .blizzard import BlizzardService
+
+
+def _normalize_rank_entry_list(entries_raw: Any) -> Set[str]:
+    if not entries_raw:
+        return set()
+    if isinstance(entries_raw, str):
+        entries_raw = [entries_raw]
+    if not isinstance(entries_raw, (list, tuple, set)):
+        return set()
+    return {str(e).strip().lower() for e in entries_raw if str(e).strip()}
+
+
+def _rank_matches_normalized_entries(
+    normalized: Set[str],
+    rank_title: Optional[str],
+    rank_index: int,
+    api_rank_name: str,
+) -> bool:
+    if not normalized:
+        return False
+    candidates: List[str] = []
+    if rank_title:
+        rt = str(rank_title).strip().lower()
+        candidates.append(rt)
+        if rt.startswith("rank "):
+            candidates.append(rt.replace("rank ", "", 1).strip())
+    if api_rank_name:
+        an = str(api_rank_name).strip().lower()
+        candidates.append(an)
+        if an.startswith("rank "):
+            candidates.append(an.replace("rank ", "", 1).strip())
+    candidates.append(str(int(rank_index)))
+    candidates.append(f"rank {int(rank_index)}")
+    return any(c and c in normalized for c in candidates)
 
 
 @dataclass(frozen=True)
@@ -15,7 +49,10 @@ class RankSyncPlan:
     rank_title: Optional[str]
     target_role_id: int
     mapped_role_ids: FrozenSet[int]
+    # True: keine Discord-Rolle (Rank-Lock-Liste, Protected-Liste oder kein Mapping).
     protected_skip: bool = False
+    # "rank_locked" | "protected" wenn protected_skip und bewusst übersprungen.
+    skip_reason: Optional[str] = None
 
 
 class RankSyncService:
@@ -33,6 +70,19 @@ class RankSyncService:
                 continue
         return out
 
+    def is_rank_rank_locked(
+        self,
+        guild_config: dict,
+        profile_key: str,
+        rank_title: Optional[str],
+        rank_index: int,
+        api_rank_name: str,
+    ) -> bool:
+        """Gilden-„Rank-Lock“-Liste: Bot weist für diese Ingame-Ränge keine Discord-Rolle zu."""
+        raw = guild_config.get("locked_rank_titles_by_profile") or {}
+        norm = _normalize_rank_entry_list(raw.get(profile_key))
+        return _rank_matches_normalized_entries(norm, rank_title, rank_index, api_rank_name)
+
     def is_rank_protected(
         self,
         guild_config: dict,
@@ -42,30 +92,8 @@ class RankSyncService:
         api_rank_name: str,
     ) -> bool:
         raw = guild_config.get("protected_rank_titles_by_profile") or {}
-        entries = raw.get(profile_key)
-        if not entries:
-            return False
-        if isinstance(entries, str):
-            entries = [entries]
-        if not isinstance(entries, (list, tuple, set)):
-            return False
-        normalized = {str(e).strip().lower() for e in entries if str(e).strip()}
-        if not normalized:
-            return False
-        candidates: List[str] = []
-        if rank_title:
-            rt = str(rank_title).strip().lower()
-            candidates.append(rt)
-            if rt.startswith("rank "):
-                candidates.append(rt.replace("rank ", "", 1).strip())
-        if api_rank_name:
-            an = str(api_rank_name).strip().lower()
-            candidates.append(an)
-            if an.startswith("rank "):
-                candidates.append(an.replace("rank ", "", 1).strip())
-        candidates.append(str(int(rank_index)))
-        candidates.append(f"rank {int(rank_index)}")
-        return any(c and c in normalized for c in candidates)
+        norm = _normalize_rank_entry_list(raw.get(profile_key))
+        return _rank_matches_normalized_entries(norm, rank_title, rank_index, api_rank_name)
 
     async def plan_sync(
         self,
@@ -91,19 +119,37 @@ class RankSyncService:
         rank_titles_by_profile = guild_config.get("rank_titles_by_profile", {})
         rank_titles = rank_titles_by_profile.get(profile_key) or guild_config.get("rank_titles", {})
         rank_title = rank_titles.get(str(result.rank_index), result.rank_name)
+        ri = int(result.rank_index)
+        api_rn = str(result.rank_name or "")
 
-        if self.is_rank_protected(
+        if self.is_rank_rank_locked(
             guild_config,
             profile_key,
             rank_title,
-            int(result.rank_index),
-            str(result.rank_name or ""),
+            ri,
+            api_rn,
         ):
             return RankSyncPlan(
                 rank_title=rank_title,
                 target_role_id=0,
                 mapped_role_ids=frozenset(mapped),
                 protected_skip=True,
+                skip_reason="rank_locked",
+            )
+
+        if self.is_rank_protected(
+            guild_config,
+            profile_key,
+            rank_title,
+            ri,
+            api_rn,
+        ):
+            return RankSyncPlan(
+                rank_title=rank_title,
+                target_role_id=0,
+                mapped_role_ids=frozenset(mapped),
+                protected_skip=True,
+                skip_reason="protected",
             )
 
         rank_mapping_by_profile = guild_config.get("rank_mapping_by_profile", {})
@@ -179,7 +225,7 @@ class RankSyncService:
         """
         plan = await self.plan_sync(guild_config, main_char, profile_key)
         if plan.protected_skip:
-            return plan.rank_title, "protected", 0
+            return plan.rank_title, (plan.skip_reason or "protected"), 0
         ok, reason = await self.apply_plan(
             member,
             plan,
