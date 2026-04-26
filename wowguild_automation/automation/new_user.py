@@ -144,6 +144,107 @@ class RulesConfirmView(ChoiceView):
         super().__init__(user_id=user_id, options=[(label, "confirmed")], timeout=timeout)
 
 
+class ManualVerificationDecisionView(discord.ui.View):
+    def __init__(
+        self,
+        member: discord.Member,
+        member_role: Optional[discord.Role],
+        *,
+        char_name: str,
+        selected_game: str,
+        timeout: int = 172800,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.member = member
+        self.member_role = member_role
+        self.char_name = char_name
+        self.selected_game = selected_game
+        self.resolved = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        actor = interaction.user
+        if not isinstance(actor, discord.Member):
+            await interaction.response.send_message("Nur auf dem Server verfuegbar.", ephemeral=True)
+            return False
+        if actor.guild_permissions.manage_guild or actor.guild_permissions.administrator:
+            return True
+        await interaction.response.send_message(
+            "Keine Berechtigung. Du brauchst 'Server verwalten' oder Administrator.",
+            ephemeral=True,
+        )
+        return False
+
+    async def _mark_resolved(self, interaction: discord.Interaction, note: str) -> None:
+        self.resolved = True
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        try:
+            msg = interaction.message
+            if msg:
+                await msg.edit(content=f"{msg.content}\n{note}", view=self)
+        except Exception:
+            pass
+        self.stop()
+
+    @discord.ui.button(label="Bestaetigen", style=discord.ButtonStyle.success, emoji="✅")
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        _ = button
+        if self.resolved:
+            await interaction.response.send_message("Bereits bearbeitet.", ephemeral=True)
+            return
+        if self.member_role is None:
+            await interaction.response.send_message(
+                "Keine Member-Rolle konfiguriert oder Rolle nicht gefunden.",
+                ephemeral=True,
+            )
+            return
+        if self.member_role in self.member.roles:
+            await interaction.response.send_message(
+                f"{self.member.mention} hat die Member-Rolle bereits.",
+                ephemeral=True,
+            )
+            await self._mark_resolved(
+                interaction,
+                f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle war bereits vorhanden).",
+            )
+            return
+        try:
+            await self.member.add_roles(
+                self.member_role,
+                reason=f"WoW manual verification approved by {interaction.user} ({self.selected_game}/{self.char_name})",
+            )
+        except Exception as exc:
+            await interaction.response.send_message(
+                f"Rolle konnte nicht gesetzt werden: {exc}",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"Manuell bestaetigt: {self.member.mention} hat jetzt {self.member_role.mention}.",
+            ephemeral=True,
+        )
+        await self._mark_resolved(
+            interaction,
+            f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle {self.member_role.mention} gesetzt).",
+        )
+
+    @discord.ui.button(label="Ablehnen", style=discord.ButtonStyle.danger, emoji="❌")
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        _ = button
+        if self.resolved:
+            await interaction.response.send_message("Bereits bearbeitet.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Manuelle Verifizierung fuer {self.member.mention} wurde abgelehnt.",
+            ephemeral=True,
+        )
+        await self._mark_resolved(
+            interaction,
+            f"\n❌ Manuelle Verifizierung abgelehnt von {interaction.user.mention}.",
+        )
+
+
 async def handle_new_member_onboarding(
     bot: commands.Bot,
     member: discord.Member,
@@ -382,6 +483,18 @@ async def handle_new_member_onboarding(
             await manual_channel.send(
                 f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
                 f"Spieltyp: {selected_game}. Char nicht gefunden - manuelle Verifizierung noetig."
+            )
+            await manual_channel.send(
+                (
+                    f"Bitte Entscheidung treffen fuer {member.mention} "
+                    f"(Char: `{main_char}`, Spieltyp: `{selected_game}`)."
+                ),
+                view=ManualVerificationDecisionView(
+                    member=member,
+                    member_role=member_role,
+                    char_name=main_char,
+                    selected_game=selected_game,
+                ),
             )
         await destination.send(t["manual"])
 
