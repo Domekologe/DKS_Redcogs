@@ -463,6 +463,7 @@ class ChannelJoinNotification(commands.Cog):
                     for k, v in notifications.items()
                     if isinstance(v, dict)
                 }
+                config_json_html = html.escape(json.dumps(config_obj))
 
                 source = f"""
 <style>
@@ -695,9 +696,17 @@ input:focus, select:focus, textarea:focus {{
     {table_html}
   </div>
 </div>
+<script id="cjn-config" type="application/json">{config_json_html}</script>
 <script>
 (() => {{
-  const cfg = {json.dumps(config_obj)};
+  const cfgNode = document.getElementById("cjn-config");
+  if (!cfgNode) return;
+  let cfg = {{}};
+  try {{
+    cfg = JSON.parse(cfgNode.textContent || "{{}}");
+  }} catch (_e) {{
+    cfg = {{}};
+  }}
   const channelSelect =
     document.querySelector("select[name='cjn-channel_id']") ||
     document.querySelector("select[name$='channel_id']:not([name$='remove_channel_id'])");
