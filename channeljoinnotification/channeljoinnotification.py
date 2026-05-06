@@ -439,12 +439,11 @@ class ChannelJoinNotification(commands.Cog):
                     enabled = bool(entry.get("enabled", False))
                     text = str(entry.get("text", "") or "")
                     preview = text.strip() or "(empty)"
-                    preview = preview[:140] + ("…" if len(preview) > 140 else "")
                     rows.append(
                         f"<tr>"
                         f"<td><span class='tag'>{html.escape(name)}</span><div class='muted'>{cid}</div></td>"
                         f"<td>{'🟢 ON' if enabled else '⚫ OFF'}</td>"
-                        f"<td><code class='code'>{html.escape(preview)}</code></td>"
+                        f"<td><textarea class='preview-box' readonly>{html.escape(preview)}</textarea></td>"
                         f"</tr>"
                     )
                 table_html = (
@@ -601,10 +600,13 @@ input:focus, select:focus, textarea:focus {{
 }}
 .tbl th {{
   text-align:left;
-  color: rgba(230,237,247,.85);
+  color: rgba(245, 250, 255, .98);
   font-size: 12px;
   letter-spacing: .02em;
   background: rgba(0,0,0,.22);
+}}
+.tbl td {{
+  color: rgba(238, 244, 255, .95);
 }}
 .code {{
   background: rgba(0,0,0,.25);
@@ -612,6 +614,25 @@ input:focus, select:focus, textarea:focus {{
   border-radius: 8px;
   border: 1px solid rgba(255,255,255,.10);
   display:inline-block;
+}}
+.preview-box {{
+  width: 100%;
+  min-height: 72px;
+  max-height: 160px;
+  resize: vertical;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: rgba(245, 250, 255, .98);
+  background: rgba(5, 9, 18, .76);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.4;
+}}
+.preview-box:focus {{
+  outline: none;
+  border-color: rgba(34,211,238,.45);
+  box-shadow: 0 0 0 2px rgba(34,211,238,.12);
 }}
 .notice {{
   margin-bottom: 12px;
