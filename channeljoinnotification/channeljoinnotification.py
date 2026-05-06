@@ -355,6 +355,8 @@ class ChannelJoinNotification(commands.Cog):
             notifications = cfg.get("notifications", {})
             if not isinstance(notifications, dict):
                 notifications = {}
+            page_notice = ""
+            page_notice_kind = "success"
 
             voice_choices = [("0", "-- Channel wählen --")]
             for ch in sorted(list(guild.voice_channels) + list(guild.stage_channels), key=lambda c: c.position):
@@ -391,35 +393,42 @@ class ChannelJoinNotification(commands.Cog):
                     form.channel_id.data = "0"
                     form.enabled.data = True
 
-                if form.validate_on_submit():
-                    if form.remove.data:
-                        rid = str(form.remove_channel_id.data or "0")
+                if method.upper() == "POST":
+                    posted = dict((data or {}).get("form", {})) if isinstance(data, dict) else {}
+                    remove_clicked = bool(form.remove.data) or ("cjn-remove" in posted) or ("remove" in posted)
+                    save_clicked = bool(form.save.data) or ("cjn-save" in posted) or ("save" in posted)
+
+                    if remove_clicked:
+                        rid = str(
+                            posted.get("cjn-remove_channel_id")
+                            or posted.get("remove_channel_id")
+                            or form.remove_channel_id.data
+                            or "0"
+                        )
                         if rid != "0" and rid in notifications:
                             notifications.pop(rid, None)
                             await self.config.guild(guild).notifications.set(notifications)
-                        return {
-                            "status": 0,
-                            "notifications": [{"message": "Entry removed.", "category": "success"}],
-                            "redirect_url": kwargs.get("request_url"),
-                        }
-
-                    cid = str(form.channel_id.data or "0")
-                    if cid == "0":
-                        return {
-                            "status": 0,
-                            "notifications": [{"message": "Bitte einen Channel auswählen.", "category": "warning"}],
-                            "redirect_url": kwargs.get("request_url"),
-                        }
-                    notifications[cid] = {
-                        "enabled": bool(form.enabled.data),
-                        "text": str(form.text.data or "").strip(),
-                    }
-                    await self.config.guild(guild).notifications.set(notifications)
-                    return {
-                        "status": 0,
-                        "notifications": [{"message": "Saved.", "category": "success"}],
-                        "redirect_url": kwargs.get("request_url"),
-                    }
+                            page_notice = "Eintrag entfernt."
+                            page_notice_kind = "success"
+                        else:
+                            page_notice = "Kein gültiger Eintrag zum Entfernen ausgewählt."
+                            page_notice_kind = "warning"
+                    elif save_clicked or form.validate_on_submit():
+                        cid = str(posted.get("cjn-channel_id") or posted.get("channel_id") or form.channel_id.data or "0")
+                        enabled_raw = posted.get("cjn-enabled", posted.get("enabled", form.enabled.data))
+                        enabled = str(enabled_raw).lower() in ("true", "1", "on", "yes") or enabled_raw is True
+                        text = str(posted.get("cjn-text") or posted.get("text") or form.text.data or "").strip()
+                        if cid == "0":
+                            page_notice = "Bitte einen Channel auswählen."
+                            page_notice_kind = "warning"
+                        else:
+                            notifications[cid] = {
+                                "enabled": bool(enabled),
+                                "text": text,
+                            }
+                            await self.config.guild(guild).notifications.set(notifications)
+                            page_notice = "Eintrag gespeichert."
+                            page_notice_kind = "success"
 
                 rows = []
                 for cid, entry in sorted(
@@ -441,6 +450,23 @@ class ChannelJoinNotification(commands.Cog):
                 table_html = (
                     "<table class='tbl'><thead><tr><th>Channel</th><th>Status</th><th>Text Preview</th></tr></thead>"
                     f"<tbody>{''.join(rows) if rows else '<tr><td colspan=3 class=muted>Keine Einträge</td></tr>'}</tbody></table>"
+                )
+                notice_html = (
+                    f"<div class='notice {'ok' if page_notice_kind == 'success' else 'warn'}'>{html.escape(page_notice)}</div>"
+                    if page_notice
+                    else ""
+                )
+                config_js = html.escape(
+                    json.dumps(
+                        {
+                            str(k): {
+                                "enabled": bool(v.get("enabled", False)),
+                                "text": str(v.get("text", "") or ""),
+                            }
+                            for k, v in notifications.items()
+                            if isinstance(v, dict)
+                        }
+                    )
                 )
 
                 source = f"""
@@ -514,6 +540,27 @@ input, select, textarea {{
   transition: .18s ease;
 }}
 textarea {{ min-height: 110px; resize: vertical; }}
+.toggle {{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0,0,0,.26);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+}}
+.toggle input[type="checkbox"] {{
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #22d3ee;
+}}
+.toggle .tlabel {{
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(230,237,247,.95);
+  margin: 0;
+}}
 input:focus, select:focus, textarea:focus {{
   border-color: rgba(34,211,238,.55);
   box-shadow: 0 0 0 3px rgba(34,211,238,.14);
@@ -566,6 +613,21 @@ input:focus, select:focus, textarea:focus {{
   border: 1px solid rgba(255,255,255,.10);
   display:inline-block;
 }}
+.notice {{
+  margin-bottom: 12px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: 1px solid rgba(255,255,255,.14);
+}}
+.notice.ok {{
+  background: rgba(16, 185, 129, .12);
+  border-color: rgba(16, 185, 129, .4);
+}}
+.notice.warn {{
+  background: rgba(245, 158, 11, .12);
+  border-color: rgba(245, 158, 11, .4);
+}}
 @media (max-width: 980px) {{
   .grid {{ grid-template-columns: 1fr; }}
 }}
@@ -581,12 +643,16 @@ input:focus, select:focus, textarea:focus {{
     </div>
     <div class="muted">Server: <b>{html.escape(guild.name)}</b></div>
   </div>
+  {notice_html}
   <div class="grid">
     <div class="card">
       <form method="post">
         {form.hidden_tag()}
         <div class="row"><label>Channel</label><br>{form.channel_id()}</div>
-        <div class="row"><label>{form.enabled()} Enabled</label><div class="muted">Wenn aus: keine DM beim Join.</div></div>
+        <div class="row">
+          <div class="toggle"><span>{form.enabled()}</span><span class="tlabel">Enabled</span></div>
+          <div class="muted" style="margin-top: 6px;">Wenn aus: keine DM beim Join.</div>
+        </div>
         <div class="row"><label>DM Text</label><br>{form.text()}</div>
         <div class="btnrow">
           {form.save()}
@@ -612,6 +678,28 @@ input:focus, select:focus, textarea:focus {{
     {table_html}
   </div>
 </div>
+<script>
+(() => {{
+  const cfg = JSON.parse("{config_js}");
+  const channelSelect = document.querySelector("select[name$='channel_id']:not([name$='remove_channel_id'])");
+  const enabledInput = document.querySelector("input[name$='enabled']");
+  const textInput = document.querySelector("textarea[name$='text']");
+  if (!channelSelect || !enabledInput || !textInput) return;
+  const apply = () => {{
+    const cid = String(channelSelect.value || "0");
+    const entry = cfg[cid];
+    if (!entry) {{
+      enabledInput.checked = true;
+      textInput.value = "Hi <Username>! Willkommen in <Channelname>.";
+      return;
+    }}
+    enabledInput.checked = !!entry.enabled;
+    textInput.value = String(entry.text || "");
+  }};
+  channelSelect.addEventListener("change", apply);
+  apply();
+}})();
+</script>
 """
                 return {"status": 0, "web_content": {"source": source, "standalone": True}}
 
