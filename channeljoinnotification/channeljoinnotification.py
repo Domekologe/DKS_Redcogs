@@ -395,8 +395,8 @@ class ChannelJoinNotification(commands.Cog):
 
                 if method.upper() == "POST":
                     posted = dict((data or {}).get("form", {})) if isinstance(data, dict) else {}
-                    remove_clicked = bool(form.remove.data) or ("cjn-remove" in posted) or ("remove" in posted)
-                    save_clicked = bool(form.save.data) or ("cjn-save" in posted) or ("save" in posted)
+                    remove_clicked = ("cjn-remove" in posted) or ("remove" in posted)
+                    save_clicked = ("cjn-save" in posted) or ("save" in posted)
 
                     if remove_clicked:
                         rid = str(
@@ -413,7 +413,7 @@ class ChannelJoinNotification(commands.Cog):
                         else:
                             page_notice = "Kein gültiger Eintrag zum Entfernen ausgewählt."
                             page_notice_kind = "warning"
-                    elif save_clicked or form.validate_on_submit():
+                    elif save_clicked:
                         cid = str(posted.get("cjn-channel_id") or posted.get("channel_id") or form.channel_id.data or "0")
                         enabled_raw = posted.get("cjn-enabled", posted.get("enabled", form.enabled.data))
                         enabled = str(enabled_raw).lower() in ("true", "1", "on", "yes") or enabled_raw is True
@@ -463,7 +463,8 @@ class ChannelJoinNotification(commands.Cog):
                     for k, v in notifications.items()
                     if isinstance(v, dict)
                 }
-                config_json_html = html.escape(json.dumps(config_obj))
+                # Keep valid JSON for client-side parsing; only neutralize closing script tag.
+                config_json_html = json.dumps(config_obj).replace("</", "<\\/")
 
                 source = f"""
 <style>
