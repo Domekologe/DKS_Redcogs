@@ -455,18 +455,14 @@ class ChannelJoinNotification(commands.Cog):
                     if page_notice
                     else ""
                 )
-                config_js = html.escape(
-                    json.dumps(
-                        {
-                            str(k): {
-                                "enabled": bool(v.get("enabled", False)),
-                                "text": str(v.get("text", "") or ""),
-                            }
-                            for k, v in notifications.items()
-                            if isinstance(v, dict)
-                        }
-                    )
-                )
+                config_obj = {
+                    str(k): {
+                        "enabled": bool(v.get("enabled", False)),
+                        "text": str(v.get("text", "") or ""),
+                    }
+                    for k, v in notifications.items()
+                    if isinstance(v, dict)
+                }
 
                 source = f"""
 <style>
@@ -701,8 +697,10 @@ input:focus, select:focus, textarea:focus {{
 </div>
 <script>
 (() => {{
-  const cfg = JSON.parse("{config_js}");
-  const channelSelect = document.querySelector("select[name$='channel_id']:not([name$='remove_channel_id'])");
+  const cfg = {json.dumps(config_obj)};
+  const channelSelect =
+    document.querySelector("select[name='cjn-channel_id']") ||
+    document.querySelector("select[name$='channel_id']:not([name$='remove_channel_id'])");
   const enabledInput = document.querySelector("input[name$='enabled']");
   const textInput = document.querySelector("textarea[name$='text']");
   if (!channelSelect || !enabledInput || !textInput) return;
