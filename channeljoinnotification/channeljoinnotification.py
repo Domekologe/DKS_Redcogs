@@ -259,7 +259,7 @@ class ChannelJoinNotification(commands.Cog):
     # Dashboard attach helpers (AAA3A dashboard)
     # --------------------
     def _get_dashboard_cog(self) -> Optional[commands.Cog]:
-        return self.bot.get_cog("Dashboard")  # AAA3A Dashboard cog name
+        return self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
 
     def _attach_to_dashboard(self, dashboard_cog: commands.Cog) -> bool:
         try:
@@ -286,11 +286,13 @@ class ChannelJoinNotification(commands.Cog):
                 pass
         self._dashboard_attached = False
 
+    @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
         if self._dashboard_attached:
             return
         self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
 
+    @commands.Cog.listener()
     async def on_dashboard_cog_remove(self, dashboard_cog: commands.Cog) -> None:
         _ = dashboard_cog
         self._dashboard_attached = False
@@ -298,6 +300,24 @@ class ChannelJoinNotification(commands.Cog):
     # --------------------
     # Dashboard pages
     # --------------------
+    @_dashboard_page(name=None, description="Channel Join Notification Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>Channel Join Notification</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use the page <b>channeljoinnotification</b> for guild-specific settings.</p>
+</div>
+"""
+        return {
+            "status": 0,
+            "web_content": {
+                "source": source,
+                "standalone": True,
+            },
+        }
+
     @_dashboard_page(
         name="channeljoinnotification",
         description="Configure join DM notifications for this server.",
