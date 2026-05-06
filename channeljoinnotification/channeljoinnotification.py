@@ -44,7 +44,7 @@ def _render_template(text: str, *, member: discord.Member, channel: discord.abc.
 
 
 def _is_voiceish(channel: discord.abc.GuildChannel) -> bool:
-    return isinstance(channel, (discord.VoiceChannel, discord.StageChannel))
+    return isinstance(channel, discord.VoiceChannel)
 
 
 class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text"):
@@ -77,7 +77,7 @@ class JoinNotificationSetupView(discord.ui.View):
 
         self.channel_select = discord.ui.ChannelSelect(
             placeholder="Channel auswählen…",
-            channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice],
+            channel_types=[discord.ChannelType.voice],
             min_values=1,
             max_values=1,
         )
@@ -122,7 +122,7 @@ class JoinNotificationSetupView(discord.ui.View):
         if channel is None or self.channel_id is None:
             return (
                 "**Join Notification Setup**\n"
-                "Wähle zuerst einen Voice-/Stage-Channel.\n\n"
+                "Wähle zuerst einen Voice-Channel.\n\n"
                 "Platzhalter im Text:\n"
                 "- `<Username>`\n"
                 "- `<Channelname>`"
@@ -150,8 +150,8 @@ class JoinNotificationSetupView(discord.ui.View):
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
         channel = self.channel_select.values[0] if self.channel_select.values else None
-        if channel is None or not _is_voiceish(channel):
-            await interaction.response.send_message("Bitte einen Voice-/Stage-Channel auswählen.", ephemeral=True)
+        if channel is None:
+            await interaction.response.send_message("Bitte einen Channel auswählen.", ephemeral=True)
             return
         self.channel_id = channel.id
         await self._ensure_step2()
@@ -162,7 +162,7 @@ class JoinNotificationSetupView(discord.ui.View):
             await interaction.response.send_message("Bitte zuerst einen Channel auswählen.", ephemeral=True)
             return
         channel = self.guild.get_channel(self.channel_id)
-        if channel is None or not _is_voiceish(channel):
+        if channel is None:
             await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
             return
         _, existing_text = await self._load_channel_state(self.channel_id)
@@ -187,7 +187,7 @@ class JoinNotificationSetupView(discord.ui.View):
             await interaction.response.send_message("Bitte zuerst einen Channel auswählen.", ephemeral=True)
             return
         channel = self.guild.get_channel(self.channel_id)
-        if channel is None or not _is_voiceish(channel):
+        if channel is None:
             await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
             return
         await self._set_channel_state(self.channel_id, enabled=False)
@@ -359,8 +359,8 @@ class ChannelJoinNotification(commands.Cog):
             page_notice_kind = "success"
 
             voice_choices = [("0", "-- Channel wählen --")]
-            for ch in sorted(list(guild.voice_channels) + list(guild.stage_channels), key=lambda c: c.position):
-                voice_choices.append((str(ch.id), f"{ch.name} ({ch.id})"))
+            for ch in sorted(guild.voice_channels, key=lambda c: (c.position, c.name.lower())):
+                voice_choices.append((str(ch.id), f"{ch.name} (voice) ({ch.id})"))
 
             existing_choices = [("0", "-- none --")]
             for cid in sorted(notifications.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
@@ -376,7 +376,7 @@ class ChannelJoinNotification(commands.Cog):
                     def __init__(_self) -> None:
                         super().__init__(prefix="cjn_")
 
-                    channel_id = wtforms.SelectField("Voice/Stage Channel", choices=voice_choices)
+                    channel_id = wtforms.SelectField("Voice Channel", choices=voice_choices)
                     enabled = wtforms.BooleanField("Enabled")
                     text = wtforms.TextAreaField(
                         "DM Text (placeholders: <Username>, <Channelname>)",
@@ -395,8 +395,8 @@ class ChannelJoinNotification(commands.Cog):
 
                 if method.upper() == "POST":
                     posted = dict((data or {}).get("form", {})) if isinstance(data, dict) else {}
-                    remove_clicked = ("cjn-remove" in posted) or ("remove" in posted)
-                    save_clicked = ("cjn-save" in posted) or ("save" in posted)
+                    remove_clicked = bool(form.remove.data) or ("cjn-remove" in posted) or ("remove" in posted)
+                    save_clicked = bool(form.save.data) or ("cjn-save" in posted) or ("save" in posted)
 
                     if remove_clicked:
                         rid = str(
@@ -656,7 +656,7 @@ input:focus, select:focus, textarea:focus {{
     <div>
       <div class="title">Channel Join Notification</div>
       <div class="subtitle">
-        Wenn ein User einen konfigurierten <b>Voice/Stage</b>-Channel joint, sendet der Bot eine DM.
+        Bei Join in einen konfigurierten <b>Voice-Channel</b> sendet der Bot eine DM.
         <br>Platzhalter: <code class="code">&lt;Username&gt;</code>, <code class="code">&lt;Channelname&gt;</code>
       </div>
     </div>
