@@ -649,6 +649,27 @@ class AdminUtils(commands.Cog):
         await ctx.interaction.followup.send(msg, ephemeral=True)
 
 
+    async def _copy_role_channel_overwrites(
+        self,
+        guild: discord.Guild,
+        source_role: discord.Role,
+        dest_role: discord.Role,
+    ) -> tuple[int, List[str], bool]:
+        copied = 0
+        failed: List[str] = []
+        had_overwrites = False
+        for channel in guild.channels:
+            overwrite = channel.overwrites.get(source_role)
+            if overwrite is None:
+                continue
+            had_overwrites = True
+            try:
+                await channel.set_permissions(dest_role, overwrite=overwrite)
+                copied += 1
+            except (discord.Forbidden, discord.HTTPException):
+                failed.append(channel.mention)
+        return copied, failed, had_overwrites
+
     # ---- COPY CHANNEL ROLE PERMISSIONS ----
     @app_commands.command(
         name="copy-channelrole",
@@ -698,7 +719,7 @@ class AdminUtils(commands.Cog):
     # ---- COPY GUILD ROLE ----
     @app_commands.command(
         name="copy-role",
-        description="Erstelle eine neue Rolle mit allen Rechten einer bestehenden Rolle."
+        description="Erstelle eine neue Rolle mit allen Server- und Channel-Rechten einer bestehenden Rolle."
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
     @has_perms(manage_roles=True)
@@ -759,10 +780,36 @@ class AdminUtils(commands.Cog):
                 ephemeral=True
             )
 
-        await interaction.followup.send(
-            f"✅ Rolle {new_role.mention} wurde mit den Rechten von {source_role.mention} erstellt.",
-            ephemeral=True
+        copied_channels, failed_channels, had_channel_overwrites = (
+            await self._copy_role_channel_overwrites(guild, source_role, new_role)
         )
+
+        position_ok = True
+        if new_role.position != source_role.position:
+            try:
+                await new_role.edit(
+                    position=source_role.position,
+                    reason=f"copy-role position from {source_role.name} by {interaction.user}",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                position_ok = False
+
+        msg = (
+            f"✅ Rolle {new_role.mention} wurde mit den Rechten von {source_role.mention} erstellt."
+        )
+        if copied_channels:
+            msg += f"\n📁 Channel-Rechte in **{copied_channels}** Channel(s) kopiert."
+        elif not had_channel_overwrites:
+            msg += "\nℹ️ Keine Channel-spezifischen Rechte zum Kopieren gefunden."
+        if failed_channels:
+            shown = ", ".join(failed_channels[:15])
+            if len(failed_channels) > 15:
+                shown += f" (+{len(failed_channels) - 15} weitere)"
+            msg += f"\n⚠️ Channel-Rechte fehlgeschlagen: {shown}"
+        if not position_ok:
+            msg += "\n⚠️ Rollenposition konnte nicht übernommen werden."
+
+        await interaction.followup.send(msg, ephemeral=True)
 
     @_dashboard_page(
         name="adminutils",
