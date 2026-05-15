@@ -649,9 +649,9 @@ class AdminUtils(commands.Cog):
         await ctx.interaction.followup.send(msg, ephemeral=True)
 
 
-     # ---- COPY ROLE PERMISSIONS ----
+    # ---- COPY CHANNEL ROLE PERMISSIONS ----
     @app_commands.command(
-        name="copyrole",
+        name="copy-channelrole",
         description="Kopiere die Channel-Rechte einer Rolle auf eine andere Rolle."
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
@@ -661,7 +661,7 @@ class AdminUtils(commands.Cog):
         source_role="Rolle, von der kopiert wird",
         dest_role="Rolle, auf die kopiert wird"
     )
-    async def copyrole(
+    async def copy_channelrole(
         self,
         interaction: discord.Interaction,
         channel: discord.abc.GuildChannel,
@@ -670,7 +670,6 @@ class AdminUtils(commands.Cog):
     ):
         await interaction.response.defer(ephemeral=True)
 
-        # 1) Overwrite holen
         overwrites = channel.overwrites.get(source_role)
         if overwrites is None:
             return await interaction.followup.send(
@@ -678,7 +677,6 @@ class AdminUtils(commands.Cog):
                 ephemeral=True
             )
 
-        # 2) Overwrite für Zielrolle setzen
         try:
             await channel.set_permissions(dest_role, overwrite=overwrites)
         except discord.Forbidden:
@@ -692,9 +690,77 @@ class AdminUtils(commands.Cog):
                 ephemeral=True
             )
 
-        # 3) Erfolg
         await interaction.followup.send(
             f"✅ Rechte von {source_role.mention} wurden für {channel.mention} → {dest_role.mention} kopiert.",
+            ephemeral=True
+        )
+
+    # ---- COPY GUILD ROLE ----
+    @app_commands.command(
+        name="copy-role",
+        description="Erstelle eine neue Rolle mit allen Rechten einer bestehenden Rolle."
+    )
+    @commands.bot_has_guild_permissions(manage_roles=True)
+    @has_perms(manage_roles=True)
+    @app_commands.describe(
+        source_role="Rolle, von der die Rechte kopiert werden",
+        target_role_name="Name der neuen Rolle"
+    )
+    async def copy_role(
+        self,
+        interaction: discord.Interaction,
+        source_role: discord.Role,
+        target_role_name: str,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.followup.send("❌ Nur auf einem Server nutzbar.", ephemeral=True)
+
+        name = target_role_name.strip()
+        if not name or len(name) > 100:
+            return await interaction.followup.send(
+                "❌ Der Rollenname muss zwischen 1 und 100 Zeichen lang sein.",
+                ephemeral=True
+            )
+
+        if discord.utils.get(guild.roles, name=name):
+            return await interaction.followup.send(
+                f"❌ Eine Rolle mit dem Namen `{name}` existiert bereits.",
+                ephemeral=True
+            )
+
+        create_kwargs: Dict[str, Any] = {
+            "name": name,
+            "permissions": source_role.permissions,
+            "colour": source_role.colour,
+            "hoist": source_role.hoist,
+            "mentionable": source_role.mentionable,
+            "reason": f"copy-role from {source_role.name} by {interaction.user}",
+        }
+        if source_role.display_icon is not None:
+            try:
+                create_kwargs["display_icon"] = await source_role.display_icon.read()
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+        try:
+            new_role = await guild.create_role(**create_kwargs)
+        except discord.Forbidden:
+            return await interaction.followup.send(
+                "❌ Ich habe nicht genügend Berechtigungen, um diese Rolle zu erstellen "
+                "(Rolle des Bots muss über der Quellrolle liegen).",
+                ephemeral=True
+            )
+        except discord.HTTPException as e:
+            return await interaction.followup.send(
+                f"❌ Fehler von Discord: `{e}`",
+                ephemeral=True
+            )
+
+        await interaction.followup.send(
+            f"✅ Rolle {new_role.mention} wurde mit den Rechten von {source_role.mention} erstellt.",
             ephemeral=True
         )
 

@@ -19,7 +19,7 @@ As you can read from my grammar, you see the reason why :D
 
 | Cog | Status / Version | Description | Commands | Author |
 |---|---|---|---|---|
-| AdminUtils | Beta 0.2.0 | Commands for Admins and Moderators. | `kick`, `ban`, `timeout`, `purge`, `purgefast`, `messagemove`, `move-memberall`, `move-member`, `copyrole` | Domekologe |
+| AdminUtils | Beta 0.2.0 | Commands for Admins and Moderators. | `kick`, `ban`, `timeout`, `purge`, `purgefast`, `messagemove`, `move-memberall`, `move-member`, `copy-channelrole`, `copy-role` | Domekologe |
 | eventmessages | Release 0.0.1 | Notifications for join, leave, kick, ban, timeout. | `em-enabled`, `em-channel`, `em-status` | Domekologe |
 | GuildTools | Beta 0.1.1 | Some tools for Guilds | `whois`, `setblizzard`, `set-wow-defaults`, `get-absence`, `list-absence`, `add-absence`, `export-userlist`, `export-poll`, `get-readytimes`, `set-readytimes` | Domekologe |
 | Misc | Info 0.0.1 | Contains only a ping :D Was my first Cog to test | `ping` | Domekologe |
