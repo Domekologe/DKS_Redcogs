@@ -165,7 +165,9 @@ class WowGuildAutomation(commands.Cog):
                 "auto_verify": True,
                 "ready_times": True,
                 "sync_rank": True,
+                "allied_guilds": False,
             },
+            allied_guilds=[],
             wow={"region": "eu", "version": "retail", "realm": "", "guild_name": ""},
             wow_profiles={
                 "retail": {"region": "eu", "version": "retail", "realm": "", "guild_name": ""}
@@ -179,6 +181,7 @@ class WowGuildAutomation(commands.Cog):
                 "member_role_id": 0,
                 "onboarding_new_role_id": 0,
                 "onboarding_complete_role_id": 0,
+                "allied_role_id": 0,
             },
             rank_mapping={},
             rank_titles={},
@@ -1360,6 +1363,9 @@ class WowGuildAutomation(commands.Cog):
                     welcome_text_en = wtforms.StringField("Onboarding Text EN")
                     guest_role_id = wtforms.SelectField("Guest Role")
                     create_guest_role = wtforms.BooleanField("Create Guest Role if missing")
+                    allied_role_id = wtforms.SelectField("Allied Role")
+                    allied_guilds_enabled = wtforms.BooleanField("Allied Guilds Enabled")
+                    allied_guilds = wtforms.TextAreaField("Allied Guilds (one per line)")
                     member_role_id = wtforms.SelectField("Member Role")
                     create_member_role = wtforms.BooleanField("Create Member Role if missing")
                     onboarding_new_role_id = wtforms.SelectField("Onboarding New Role")
@@ -1466,6 +1472,7 @@ class WowGuildAutomation(commands.Cog):
                     else [("__none__", "all versions already configured")]
                 )
                 form.guest_role_id.choices = role_choices
+                form.allied_role_id.choices = role_choices
                 form.member_role_id.choices = role_choices
                 form.onboarding_new_role_id.choices = role_choices
                 form.onboarding_complete_role_id.choices = role_choices
@@ -1508,6 +1515,9 @@ class WowGuildAutomation(commands.Cog):
                     form.welcome_text_de.data = onboarding.get("welcome_text_de", "")
                     form.welcome_text_en.data = onboarding.get("welcome_text_en", "")
                     form.guest_role_id.data = str(roles.get("guest_role_id", 0))
+                    form.allied_role_id.data = str(roles.get("allied_role_id", 0))
+                    form.allied_guilds_enabled.data = bool(cfg.get("features", {}).get("allied_guilds", False))
+                    form.allied_guilds.data = "\n".join(cfg.get("allied_guilds", []))
                     form.member_role_id.data = str(roles.get("member_role_id", 0))
                     form.onboarding_new_role_id.data = str(roles.get("onboarding_new_role_id", 0))
                     form.onboarding_complete_role_id.data = str(roles.get("onboarding_complete_role_id", 0))
@@ -1767,8 +1777,13 @@ class WowGuildAutomation(commands.Cog):
                         "welcome_text_de": str(form.welcome_text_de.data or "").strip(),
                         "welcome_text_en": str(form.welcome_text_en.data or "").strip(),
                     }
+                    cfg["features"] = dict(cfg.get("features") or {})
+                    cfg["features"]["allied_guilds"] = bool(form.allied_guilds_enabled.data)
+                    guilds_lines = str(form.allied_guilds.data or "").splitlines()
+                    cfg["allied_guilds"] = [ln.strip() for ln in guilds_lines if ln.strip()]
                     cfg["roles"] = {
                         "guest_role_id": int(form.guest_role_id.data or 0),
+                        "allied_role_id": int(form.allied_role_id.data or 0),
                         "member_role_id": int(form.member_role_id.data or 0),
                         "onboarding_new_role_id": int(form.onboarding_new_role_id.data or 0),
                         "onboarding_complete_role_id": int(form.onboarding_complete_role_id.data or 0),
@@ -1949,7 +1964,7 @@ class WowGuildAutomation(commands.Cog):
 .wow-wrap h2, .wow-wrap h3 {{ color: #ffffff; margin: 4px 0 16px 0; font-weight: 600; letter-spacing: -0.02em; }}
 .wow-wrap p {{ margin-top: 0; margin-bottom: 14px; line-height: 1.5; color: #a0aec0; }}
 .wow-wrap label {{ color: #cbd5e0; font-weight: 500; font-size: 13.5px; margin-bottom: 6px; display: inline-block; }}
-.wow-wrap input, .wow-wrap select {{
+.wow-wrap input, .wow-wrap select, .wow-wrap textarea {{
   background: rgba(0, 0, 0, 0.25);
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1960,7 +1975,7 @@ class WowGuildAutomation(commands.Cog):
   transition: all 0.2s ease;
   box-sizing: border-box;
 }}
-.wow-wrap input:focus, .wow-wrap select:focus {{
+.wow-wrap input:focus, .wow-wrap select:focus, .wow-wrap textarea:focus {{
   outline: none;
   border-color: #4299e1;
   box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.25);
@@ -2065,6 +2080,13 @@ class WowGuildAutomation(commands.Cog):
         <p><label>Member Role</label><br>{form.member_role_id()}<br><label>{form.create_member_role()} Auto-create</label></p>
         <p><label>Onboarding New Role</label><br>{form.onboarding_new_role_id()}<br><label>{form.create_onboarding_new_role()} Auto-create</label></p>
         <p><label>Onboarding Complete Role</label><br>{form.onboarding_complete_role_id()}<br><label>{form.create_onboarding_complete_role()} Auto-create</label></p>
+      </div>
+
+      <div class="wow-card">
+        <h3>Verbündete Gilden</h3>
+        <p><label>{form.allied_guilds_enabled()} Verbündete Gilden abfragen</label></p>
+        <p><label>Rolle für Verbündete</label><br>{form.allied_role_id()}</p>
+        <p><label>Verbündete Gilden (eine pro Zeile)</label><br>{form.allied_guilds(rows=6)}</p>
       </div>
 
       <div class="wow-card">

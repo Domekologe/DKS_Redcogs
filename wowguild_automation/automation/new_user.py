@@ -18,6 +18,11 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "lang_timeout": "Onboarding abgebrochen (Zeit abgelaufen).",
         "role_prompt": "Bist du Gast oder neues Gildenmitglied?",
         "guest_done": "Du wurdest als Gast markiert.",
+        "guest_type_prompt": "Bist du ein reiner Gast oder von einer verbündeten Gilde?",
+        "guest_pure": "Reiner Gast",
+        "guest_allied": "Verbündete Gilde",
+        "allied_guild_select": "Von welcher verbündeten Gilde bist du?",
+        "allied_done": "Du wurdest als Verbündeter von `{guild}` markiert.",
         "rules_channel_hint": (
             "**Damit ist das Onboarding hier beendet.** Bitte gehe jetzt zu {rules_channel} und bestätige die Regeln mit {emoji} "
             "auf der **bereits vorhandenen** Regelnachricht (den bestehenden Post mit dem Hinweis zum Abhaken). "
@@ -43,6 +48,11 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "lang_timeout": "Onboarding cancelled (timeout).",
         "role_prompt": "Are you a guest or a new guild member?",
         "guest_done": "You are marked as a guest.",
+        "guest_type_prompt": "Are you a pure guest or from an allied guild?",
+        "guest_pure": "Pure Guest",
+        "guest_allied": "Allied Guild",
+        "allied_guild_select": "Which allied guild are you from?",
+        "allied_done": "You have been marked as an ally from `{guild}`.",
         "rules_channel_hint": (
             "**This finishes onboarding here.** Please go to {rules_channel} now and confirm the rules with {emoji} "
             "on the **existing** rules post (the one that already asks for the checkmark). "
@@ -95,6 +105,36 @@ class ChoiceButton(discord.ui.Button):
                     child.disabled = True
             await interaction.response.edit_message(view=view)
             view.stop()
+
+
+class AlliedGuildSelect(discord.ui.Select):
+    def __init__(self, options: List[str], placeholder: str) -> None:
+        select_options = [
+            discord.SelectOption(label=opt[:100], value=opt) for opt in options[:25]
+        ]
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=select_options)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if isinstance(view, AlliedGuildSelectView):
+            view.value = self.values[0]
+            self.disabled = True
+            await interaction.response.edit_message(view=view)
+            view.stop()
+
+
+class AlliedGuildSelectView(discord.ui.View):
+    def __init__(self, user_id: int, options: List[str], placeholder: str, timeout: int = 180) -> None:
+        super().__init__(timeout=timeout)
+        self.user_id = user_id
+        self.value: Optional[str] = None
+        self.add_item(AlliedGuildSelect(options, placeholder))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This interaction is not for you.", ephemeral=True)
+            return False
+        return True
 
 
 class MainCharModal(discord.ui.Modal, title="Main Character"):
@@ -318,6 +358,7 @@ async def handle_new_member_onboarding(
 
     roles = guild_config.get("roles", {})
     guest_role = member.guild.get_role(roles.get("guest_role_id", 0))
+    allied_role = member.guild.get_role(roles.get("allied_role_id", 0))
     member_role = member.guild.get_role(roles.get("member_role_id", 0))
     rules_cfg = guild_config.get("rules", {})
     rule_channel = member.guild.get_channel(rules_cfg.get("rule_channel_id", 0))
@@ -349,16 +390,51 @@ async def handle_new_member_onboarding(
         return (not await confirm_view.wait()) and confirm_view.value == "confirmed"
 
     if role_view.value == "guest":
-        if guest_role:
-            await member.add_roles(guest_role, reason="WoW onboarding: guest")
-        await destination.send(t["guest_done"])
+        is_allied = False
+        selected_allied_guild = ""
+        features = guild_config.get("features", {})
+        allied_enabled = features.get("allied_guilds", False)
+        allied_guilds = guild_config.get("allied_guilds", [])
+
+        if allied_enabled and allied_guilds:
+            guest_type_view = ChoiceView(
+                member.id,
+                [
+                    (t["guest_pure"], "pure"),
+                    (t["guest_allied"], "allied"),
+                ],
+                timeout=180,
+            )
+            await destination.send(t["guest_type_prompt"], view=guest_type_view)
+            if not await guest_type_view.wait() and guest_type_view.value == "allied":
+                select_view = AlliedGuildSelectView(
+                    member.id,
+                    allied_guilds,
+                    placeholder=t["allied_guild_select"],
+                    timeout=180,
+                )
+                await destination.send(t["allied_guild_select"], view=select_view)
+                if not await select_view.wait() and select_view.value:
+                    is_allied = True
+                    selected_allied_guild = select_view.value
+
+        if is_allied:
+            if allied_role:
+                await member.add_roles(allied_role, reason=f"WoW onboarding: allied ({selected_allied_guild})")
+            await destination.send(t["allied_done"].format(guild=selected_allied_guild))
+        else:
+            if guest_role:
+                await member.add_roles(guest_role, reason="WoW onboarding: guest")
+            await destination.send(t["guest_done"])
+
         rules_confirmed = await confirm_rules()
         return {
             "language": lang,
             "selected_game": "retail",
             "registration": {
-                "type": "guest",
+                "type": "allied_member" if is_allied else "guest",
                 "char_name": "",
+                "allied_guild": selected_allied_guild if is_allied else "",
                 "verified": False,
                 "requires_manual_verification": False,
                 "rules_confirmed": rules_confirmed,
