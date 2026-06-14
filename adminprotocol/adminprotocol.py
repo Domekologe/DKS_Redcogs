@@ -936,17 +936,17 @@ class AdminProtocol(commands.Cog):
         role_map = {str(r.id): r.name for r in roles}
         user_map = {str(m.id): m.display_name for m in guild_members}
         
-        channel_map_json = html.escape(json.dumps(channel_map))
-        role_map_json = html.escape(json.dumps(role_map))
-        user_map_json = html.escape(json.dumps(user_map))
-        initial_data_json = html.escape(json.dumps({
+        channel_map_json = json.dumps(channel_map).replace("</", "<\\/")
+        role_map_json = json.dumps(role_map).replace("</", "<\\/")
+        user_map_json = json.dumps(user_map).replace("</", "<\\/")
+        initial_data_json = json.dumps({
             ev: {
-                "ignored_channels": events[ev].get("ignored_channels", []),
-                "ignored_roles": events[ev].get("ignored_roles", []),
-                "ignored_users": events[ev].get("ignored_users", [])
+                "ignored_channels": [str(x) for x in events[ev].get("ignored_channels", [])],
+                "ignored_roles": [str(x) for x in events[ev].get("ignored_roles", [])],
+                "ignored_users": [str(x) for x in events[ev].get("ignored_users", [])]
             }
             for ev in EVENTS
-        }))
+        }).replace("</", "<\\/")
 
         # Categorize events into groups
         categories = {
@@ -1094,10 +1094,10 @@ class AdminProtocol(commands.Cog):
 </div>
 
 <script>
-const channelNames = JSON.parse("{channel_map_json}");
-const roleNames = JSON.parse("{role_map_json}");
-const userNames = JSON.parse("{user_map_json}");
-const initData = JSON.parse("{initial_data_json}");
+const channelNames = {channel_map_json};
+const roleNames = {role_map_json};
+const userNames = {user_map_json};
+const initData = {initial_data_json};
 
 // Switch tabs
 function switchTab(tabName, btnElement) {{
@@ -1109,10 +1109,13 @@ function switchTab(tabName, btnElement) {{
         if (defaultBtn) defaultBtn.classList.add('active');
     }}
     document.querySelectorAll('.event-card').forEach(card => {{
-        if (card.dataset.tab === tabName) {{
-            card.closest('form').style.display = 'block';
-        }} else {{
-            card.closest('form').style.display = 'none';
+        const parentForm = card.closest('form');
+        if (parentForm) {{
+            if (card.dataset.tab === tabName) {{
+                parentForm.style.display = 'block';
+            }} else {{
+                parentForm.style.display = 'none';
+            }}
         }}
     }});
 }}
@@ -1137,9 +1140,9 @@ const tagData = {{}};
 function initTags() {{
     Object.keys(initData).forEach(ev => {{
         tagData[ev] = {{
-            channel: [...initData[ev].ignored_channels],
-            role: [...initData[ev].ignored_roles],
-            user: [...initData[ev].ignored_users]
+            channel: [...(initData[ev]?.ignored_channels || [])],
+            role: [...(initData[ev]?.ignored_roles || [])],
+            user: [...(initData[ev]?.ignored_users || [])]
         }};
         renderTags(ev, 'channel');
         renderTags(ev, 'role');
@@ -1164,7 +1167,7 @@ function renderTags(ev, type) {{
 
         const tag = document.createElement("span");
         tag.className = "tag";
-        tag.innerHTML = `${{name}} <span class="remove" onclick="removeTag('${{ev}}', '${{type}}', ${{id}})">&times;</span>`;
+        tag.innerHTML = `${{name}} <span class="remove" onclick="removeTag('${{ev}}', '${{type}}', '${{id}}')">&times;</span>`;
         container.appendChild(tag);
     }});
 }}
@@ -1174,15 +1177,14 @@ function addTag(select, type, ev) {{
     if (!id) return;
     select.value = ""; // reset dropdown
 
-    const numId = parseInt(id);
     if (!tagData[ev]) {{
         tagData[ev] = {{ channel: [], role: [], user: [] }};
     }}
     if (!tagData[ev][type]) {{
         tagData[ev][type] = [];
     }}
-    if (!tagData[ev][type].includes(numId)) {{
-        tagData[ev][type].push(numId);
+    if (!tagData[ev][type].includes(id)) {{
+        tagData[ev][type].push(id);
         renderTags(ev, type);
     }}
 }}
