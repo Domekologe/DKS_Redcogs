@@ -870,12 +870,24 @@ class AdminProtocol(commands.Cog):
 
         events = await self.config.guild(guild).events()
 
+        # Generate CSRF token if Form class is provided by dashboard
+        Form = kwargs.get("Form")
+        csrf_token_html = ""
+        if Form is not None:
+            try:
+                class DummyForm(Form):
+                    pass
+                csrf_token_html = DummyForm().hidden_tag()
+            except Exception as e:
+                log.debug(f"Failed to generate CSRF token: {e}")
+
         # Handle POST configuration save
         if method.upper() == "POST" and data:
             form = dict(data.get("form", {}))
             
-            new_events = {}
-            for ev in EVENTS:
+            target_event = form.get("save_event")
+            if target_event and target_event in EVENTS:
+                ev = target_event
                 enabled = str(form.get(f"enabled_{ev}", "off")).lower() in ("on", "true", "1", "yes")
                 
                 ch_raw = form.get(f"channel_{ev}", "")
@@ -890,37 +902,43 @@ class AdminProtocol(commands.Cog):
                 ignored_us_raw = form.get(f"ignored_users_{ev}", "")
                 ignored_users = [int(x) for x in ignored_us_raw.split(",") if x.strip().isdigit()]
                 
-                new_events[ev] = {
+                # Update only this specific event
+                event_data = {
                     "enabled": enabled,
                     "channel": channel_id,
                     "ignored_channels": ignored_channels,
                     "ignored_users": ignored_users,
                     "ignored_roles": ignored_roles
                 }
-            
-            await self.config.guild(guild).events.set(new_events)
-            return {
-                "status": 0,
-                "notifications": [{"message": "AdminProtocol Einstellungen erfolgreich gespeichert.", "category": "success"}],
-                "redirect_url": kwargs.get("request_url"),
-            }
+                await self.config.guild(guild).events.set_raw(ev, value=event_data)
+                
+                return {
+                    "status": 0,
+                    "notifications": [{"message": f"Einstellungen für '{EVENTS[ev]}' erfolgreich gespeichert.", "category": "success"}],
+                    "redirect_url": kwargs.get("request_url"),
+                }
 
         # Build dropdown options
         text_channels = [c for c in guild.text_channels]
         # Include all channel types (text, voice, stage, threads) for ignore lists
         all_channels = [c for c in guild.channels if isinstance(c, (discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread))]
         roles = [r for r in guild.roles if not r.is_default()]
+        # Get all members in the guild (excluding bots)
+        guild_members = [m for m in guild.members if not m.bot]
+        guild_members = sorted(guild_members, key=lambda m: m.display_name.lower())
 
-        text_channel_options = "".join([f'<option value="{c.id}">#{html.escape(c.name)} ({c.id})</option>' for c in text_channels])
         all_channel_options = "".join([f'<option value="{c.id}">#{html.escape(c.name)} ({c.type.name} - {c.id})</option>' for c in all_channels])
         role_options = "".join([f'<option value="{r.id}">{html.escape(r.name)} ({r.id})</option>' for r in roles])
+        user_options = "".join([f'<option value="{m.id}">{html.escape(m.display_name)} ({m.id})</option>' for m in guild_members])
 
-        # Prepare JSON values of channels and roles to map IDs to names in JavaScript
+        # Prepare JSON values of channels, roles and users to map IDs to names in JavaScript
         channel_map = {str(c.id): f"#{c.name} ({c.type.name})" for c in all_channels}
         role_map = {str(r.id): r.name for r in roles}
+        user_map = {str(m.id): m.display_name for m in guild_members}
         
         channel_map_json = html.escape(json.dumps(channel_map))
         role_map_json = html.escape(json.dumps(role_map))
+        user_map_json = html.escape(json.dumps(user_map))
         initial_data_json = html.escape(json.dumps({
             ev: {
                 "ignored_channels": events[ev].get("ignored_channels", []),
@@ -955,58 +973,63 @@ class AdminProtocol(commands.Cog):
                 ch_dropdown = "".join(ch_select_options)
 
                 rows.append(f"""
-<div class="event-card" data-tab="{cat}">
-    <div class="event-header" onclick="toggleAccordion(this)">
-        <div class="title-wrap">
-            <span class="indicator {'active' if ev_data.get('enabled') and ev_data.get('channel') else ''}"></span>
-            <h4>{html.escape(ev_name)} <code>({ev})</code></h4>
+<form method="post">
+    {csrf_token_html}
+    <input type="hidden" name="save_event" value="{ev}">
+    <div class="event-card" data-tab="{cat}">
+        <div class="event-header" onclick="toggleAccordion(this)">
+            <div class="title-wrap">
+                <span class="indicator {'active' if ev_data.get('enabled') and ev_data.get('channel') else ''}"></span>
+                <h4>{html.escape(ev_name)} <code>({ev})</code></h4>
+            </div>
+            <span class="chevron">&#9662;</span>
         </div>
-        <span class="chevron">&#9662;</span>
-    </div>
-    <div class="event-content" style="display: none;">
-        <div class="form-grid">
-            <div class="form-sec">
-                <label class="switch-label">
-                    <input type="checkbox" name="enabled_{ev}" {enabled_checked}>
-                    <span class="switch-custom"></span>
-                    Aktiviert
-                </label>
-                <div style="margin-top:12px;">
-                    <label>Log-Kanal (Dropdown)</label>
-                    <select name="channel_{ev}">{ch_dropdown}</select>
-                    <small style="color:#a0aec0;font-size:11.5px;display:block;margin-top:2px;">* Keine Auswahl deaktiviert die Funktion unabhängig des Status.</small>
+        <div class="event-content" style="display: none;">
+            <div class="form-grid">
+                <div class="form-sec">
+                    <label class="switch-label">
+                        <input type="checkbox" name="enabled_{ev}" {enabled_checked}>
+                        <span class="switch-custom"></span>
+                        Aktiviert
+                    </label>
+                    <div style="margin-top:12px;">
+                        <label>Log-Kanal (Dropdown)</label>
+                        <select name="channel_{ev}">{ch_dropdown}</select>
+                        <small style="color:#a0aec0;font-size:11.5px;display:block;margin-top:2px;">* Keine Auswahl deaktiviert die Funktion unabhängig des Status.</small>
+                    </div>
+                </div>
+                <div class="form-sec">
+                    <label>Ignorierte Kanäle (Text & Voice)</label>
+                    <select class="ch-ignore-select" onchange="addTag(this, 'channel', '{ev}')">
+                        <option value="">-- Kanal hinzufügen --</option>
+                        {all_channel_options}
+                    </select>
+                    <div id="tags_channel_{ev}" class="tags-container"></div>
+                    <input type="hidden" id="ignored_channels_{ev}" name="ignored_channels_{ev}" value="">
+                </div>
+                <div class="form-sec">
+                    <label>Ignorierte Rollen</label>
+                    <select class="role-ignore-select" onchange="addTag(this, 'role', '{ev}')">
+                        <option value="">-- Rolle hinzufügen --</option>
+                        {role_options}
+                    </select>
+                    <div id="tags_role_{ev}" class="tags-container"></div>
+                    <input type="hidden" id="ignored_roles_{ev}" name="ignored_roles_{ev}" value="">
+                </div>
+                <div class="form-sec">
+                    <label>Ignorierte Benutzer</label>
+                    <select class="user-ignore-select" onchange="addTag(this, 'user', '{ev}')">
+                        <option value="">-- Benutzer hinzufügen --</option>
+                        {user_options}
+                    </select>
+                    <div id="tags_user_{ev}" class="tags-container"></div>
+                    <input type="hidden" id="ignored_users_{ev}" name="ignored_users_{ev}" value="">
                 </div>
             </div>
-            <div class="form-sec">
-                <label>Ignorierte Kanäle (Text & Voice)</label>
-                <select class="ch-ignore-select" onchange="addTag(this, 'channel', '{ev}')">
-                    <option value="">-- Kanal hinzufügen --</option>
-                    {all_channel_options}
-                </select>
-                <div id="tags_channel_{ev}" class="tags-container"></div>
-                <input type="hidden" id="ignored_channels_{ev}" name="ignored_channels_{ev}" value="">
-            </div>
-            <div class="form-sec">
-                <label>Ignorierte Rollen</label>
-                <select class="role-ignore-select" onchange="addTag(this, 'role', '{ev}')">
-                    <option value="">-- Rolle hinzufügen --</option>
-                    {role_options}
-                </select>
-                <div id="tags_role_{ev}" class="tags-container"></div>
-                <input type="hidden" id="ignored_roles_{ev}" name="ignored_roles_{ev}" value="">
-            </div>
-            <div class="form-sec">
-                <label>Ignorierte Benutzer-IDs</label>
-                <div class="user-add-row">
-                    <input type="text" placeholder="User ID eingeben" class="user-id-input" onkeydown="if(event.key==='Enter'){{event.preventDefault(); addUserTag(this, '{ev}');}}">
-                    <button type="button" class="btn-sec" onclick="addUserTag(this.previousElementSibling, '{ev}')">Hinzufügen</button>
-                </div>
-                <div id="tags_user_{ev}" class="tags-container"></div>
-                <input type="hidden" id="ignored_users_{ev}" name="ignored_users_{ev}" value="">
-            </div>
+            <button type="submit" class="btn-primary" style="margin-top: 16px; padding: 10px 24px !important; font-size: 13.5px !important; border-radius: 8px !important; width: auto !important; display: block !important;">Einstellungen speichern</button>
         </div>
     </div>
-</div>
+</form>
 """)
 
         content = "".join(rows)
@@ -1037,16 +1060,14 @@ class AdminProtocol(commands.Cog):
 .ap-dashboard label {{ font-size: 13px !important; font-weight: 600 !important; color: #cbd5e1 !important; margin-bottom: 8px !important; display: block !important; }}
 .ap-dashboard input, .ap-dashboard select {{ width: 100% !important; padding: 11px 15px !important; border-radius: 8px !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; background: #111625 !important; color: #ffffff !important; font-size: 13.5px !important; transition: all 0.2s ease !important; }}
 .ap-dashboard input:focus, .ap-dashboard select:focus {{ outline: none !important; border-color: #6366f1 !important; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35) !important; background: #171f35 !important; }}
-.ap-dashboard .user-add-row {{ display: flex !important; gap: 8px !important; }}
-.ap-dashboard .user-add-row input {{ flex-grow: 1 !important; }}
 .ap-dashboard .btn-sec {{ padding: 11px 18px !important; border-radius: 8px !important; border: 1px solid rgba(255, 255, 255, 0.18) !important; background: #1c2338 !important; color: #ffffff !important; cursor: pointer !important; font-size: 13.5px !important; transition: all 0.2s ease !important; font-weight: 600 !important; white-space: nowrap !important; }}
 .ap-dashboard .btn-sec:hover {{ background: #283250 !important; border-color: rgba(255, 255, 255, 0.3) !important; }}
 .ap-dashboard .btn-primary {{ padding: 12px 36px !important; border-radius: 30px !important; border: none !important; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important; color: #ffffff !important; font-weight: 600 !important; cursor: pointer !important; transition: all 0.25s ease !important; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4) !important; font-size: 14.5px !important; margin-top: 14px !important; }}
 .ap-dashboard .btn-primary:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5) !important; background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important; }}
 .ap-dashboard .tags-container {{ display: flex !important; flex-wrap: wrap !important; gap: 8px !important; margin-top: 10px !important; min-height: 20px !important; }}
-.ap-dashboard .tag {{ display: inline-flex !important; align-items: center !important; gap: 6px !important; padding: 4px 10px !important; background: #171f35 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; border-radius: 12px !important; font-size: 12px !important; color: #e2e8f0 !important; }}
-.ap-dashboard .tag .remove {{ cursor: pointer !important; color: #ff8a8a !important; font-weight: bold !important; font-size: 13px !important; padding: 0 2px !important; }}
-.ap-dashboard .tag .remove:hover {{ color: #ffb3b3 !important; }}
+.ap-dashboard .tag {{ display: inline-flex !important; align-items: center !important; gap: 8px !important; padding: 6px 12px !important; background: #6366f1 !important; border: none !important; border-radius: 8px !important; font-size: 13.5px !important; color: #ffffff !important; font-weight: 500 !important; box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2) !important; }}
+.ap-dashboard .tag .remove {{ cursor: pointer !important; color: rgba(255, 255, 255, 0.7) !important; font-weight: bold !important; font-size: 14px !important; transition: color 0.15s ease !important; }}
+.ap-dashboard .tag .remove:hover {{ color: #ffffff !important; }}
 .ap-dashboard .switch-label {{ display: inline-flex !important; align-items: center !important; gap: 10px !important; cursor: pointer !important; font-size: 14px !important; font-weight: 600 !important; color: #ffffff !important; }}
 .ap-dashboard .switch-label input {{ display: none !important; }}
 .ap-dashboard .switch-custom {{ width: 38px !important; height: 22px !important; background: #3e4859 !important; border-radius: 20px !important; position: relative !important; transition: all 0.3s ease !important; display: inline-block !important; }}
@@ -1060,35 +1081,38 @@ class AdminProtocol(commands.Cog):
     <p>Konfiguriere hier die automatischen Logs für verschiedene Server-Aktivitäten. Für jede Funktion können spezifische Ignorier-Listen gepflegt werden.</p>
     
     <div class="tab-container">
-        <button type="button" class="tab-btn active" onclick="switchTab('messages')">Nachrichten & Kanäle</button>
-        <button type="button" class="tab-btn" onclick="switchTab('members')">Mitglieder & Rollen</button>
-        <button type="button" class="tab-btn" onclick="switchTab('moderation')">Moderation</button>
-        <button type="button" class="tab-btn" onclick="switchTab('voice')">Sprachkanäle & Einladungen</button>
+        <button type="button" class="tab-btn" onclick="switchTab('messages', this)">Nachrichten & Kanäle</button>
+        <button type="button" class="tab-btn" onclick="switchTab('members', this)">Mitglieder & Rollen</button>
+        <button type="button" class="tab-btn" onclick="switchTab('moderation', this)">Moderation</button>
+        <button type="button" class="tab-btn" onclick="switchTab('voice', this)">Sprachkanäle & Einladungen</button>
     </div>
 
-    <form method="post">
-        <div id="events_list">
-            {content}
-        </div>
-        <button type="submit" class="btn-primary">Alle Einstellungen speichern</button>
-    </form>
+    <div id="events_list">
+        {content}
+    </div>
 </div>
 </div>
 
 <script>
 const channelNames = JSON.parse("{channel_map_json}");
 const roleNames = JSON.parse("{role_map_json}");
+const userNames = JSON.parse("{user_map_json}");
 const initData = JSON.parse("{initial_data_json}");
 
 // Switch tabs
-function switchTab(tabName) {{
+function switchTab(tabName, btnElement) {{
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    event.currentTarget.classList.add('active');
+    if (btnElement) {{
+        btnElement.classList.add('active');
+    }} else {{
+        const defaultBtn = document.querySelector(`.tab-btn[onclick*="'${{tabName}}'"]`);
+        if (defaultBtn) defaultBtn.classList.add('active');
+    }}
     document.querySelectorAll('.event-card').forEach(card => {{
         if (card.dataset.tab === tabName) {{
-            card.style.display = 'block';
+            card.closest('form').style.display = 'block';
         }} else {{
-            card.style.display = 'none';
+            card.closest('form').style.display = 'none';
         }}
     }});
 }}
@@ -1134,9 +1158,9 @@ function renderTags(ev, type) {{
 
     list.forEach(id => {{
         let name = id;
-        if (type === 'channel') name = channelNames[id] || `Channel #${{id}}`;
+        if (type === 'channel') name = channelNames[id] || `Kanal #${{id}}`;
         if (type === 'role') name = roleNames[id] || `Rolle #${{id}}`;
-        if (type === 'user') name = `User ID: ${{id}}`;
+        if (type === 'user') name = userNames[id] || `Benutzer #${{id}}`;
 
         const tag = document.createElement("span");
         tag.className = "tag";
@@ -1151,34 +1175,28 @@ function addTag(select, type, ev) {{
     select.value = ""; // reset dropdown
 
     const numId = parseInt(id);
+    if (!tagData[ev]) {{
+        tagData[ev] = {{ channel: [], role: [], user: [] }};
+    }}
+    if (!tagData[ev][type]) {{
+        tagData[ev][type] = [];
+    }}
     if (!tagData[ev][type].includes(numId)) {{
         tagData[ev][type].push(numId);
         renderTags(ev, type);
     }}
 }}
 
-function addUserTag(input, ev) {{
-    const id = input.value.trim();
-    if (!id || isNaN(id)) return;
-    input.value = ""; // reset input
-
-    const numId = parseInt(id);
-    if (!tagData[ev]['user'].includes(numId)) {{
-        tagData[ev]['user'].push(numId);
-        renderTags(ev, 'user');
+function removeTag(ev, type, id) {{
+    if (tagData[ev] && tagData[ev][type]) {{
+        tagData[ev][type] = tagData[ev][type].filter(item => item !== id);
+        renderTags(ev, type);
     }}
 }}
 
-function removeTag(ev, type, id) {{
-    tagData[ev][type] = tagData[ev][type].filter(item => item !== id);
-    renderTags(ev, type);
-}}
-
-// Start initialization
-document.addEventListener("DOMContentLoaded", () => {{
-    switchTab('messages'); // Default tab
-    initTags();
-}});
+// Start initialization immediately
+switchTab('messages', null);
+initTags();
 </script>
 """
         return {"status": 0, "web_content": {"source": source, "standalone": True}}
