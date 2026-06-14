@@ -1015,44 +1015,44 @@ class AdminProtocol(commands.Cog):
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap');
 .ap-dashboard * {{ font-family: 'Outfit', sans-serif; box-sizing: border-box; }}
-.ap-dashboard {{ color: #e8eefc; padding: 12px; }}
-.ap-dashboard h2 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 8px; letter-spacing: -0.02em; font-size: 24px; }}
-.ap-dashboard p {{ color: #a0aec0; font-size: 14.5px; line-height: 1.5; margin-top: 0; margin-bottom: 24px; }}
-.ap-dashboard .card {{ background: rgba(18, 23, 33, 0.45); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4); border-radius: 16px; padding: 24px; color: #e8eefc; }}
-.ap-dashboard .tab-container {{ display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; overflow-x: auto; }}
-.ap-dashboard .tab-btn {{ padding: 10px 20px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 30px; color: #cbd5e0; font-weight: 500; cursor: pointer; transition: all 0.25s ease; font-size: 13.5px; white-space: nowrap; }}
-.ap-dashboard .tab-btn:hover {{ background: rgba(255, 255, 255, 0.08); color: #fff; border-color: rgba(255, 255, 255, 0.15); }}
-.ap-dashboard .tab-btn.active {{ background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #fff; border-color: transparent; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
-.ap-dashboard .event-card {{ border: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.01); border-radius: 10px; margin-bottom: 12px; overflow: hidden; transition: all 0.2s ease; }}
-.ap-dashboard .event-card:hover {{ border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.02); }}
-.ap-dashboard .event-header {{ padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }}
-.ap-dashboard .event-header h4 {{ margin: 0; font-weight: 500; font-size: 15px; color: #f7fafc; display: flex; align-items: center; gap: 8px; }}
-.ap-dashboard .event-header h4 code {{ background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 4px; font-size: 11.5px; font-family: monospace; color: #63b3ed; }}
-.ap-dashboard .event-header .chevron {{ color: #718096; transition: transform 0.2s ease; font-size: 14px; }}
-.ap-dashboard .event-header .title-wrap {{ display: flex; align-items: center; gap: 12px; }}
-.ap-dashboard .event-header .indicator {{ width: 8px; height: 8px; border-radius: 50%; background: #4a5568; display: inline-block; transition: background 0.3s ease; }}
-.ap-dashboard .event-header .indicator.active {{ background: #48bb78; box-shadow: 0 0 8px #48bb78; }}
-.ap-dashboard .event-content {{ padding: 20px; background: rgba(0, 0, 0, 0.15); border-top: 1px solid rgba(255, 255, 255, 0.05); }}
-.ap-dashboard .form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }}
-.ap-dashboard label {{ font-size: 13px; font-weight: 500; color: #a0aec0; margin-bottom: 6px; display: block; }}
-.ap-dashboard input, .ap-dashboard select {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 13.5px; transition: all 0.2s ease; }}
-.ap-dashboard input:focus, .ap-dashboard select:focus {{ outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25); background: rgba(0, 0, 0, 0.35); }}
-.ap-dashboard .user-add-row {{ display: flex; gap: 8px; }}
-.ap-dashboard .user-add-row input {{ flex-grow: 1; }}
-.ap-dashboard .btn-sec {{ padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.05); color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.2s ease; font-weight: 500; white-space: nowrap; }}
-.ap-dashboard .btn-sec:hover {{ background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.25); color: #fff; }}
-.ap-dashboard .btn-primary {{ padding: 12px 30px; border-radius: 30px; border: none; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); font-size: 14.5px; margin-top: 12px; }}
-.ap-dashboard .btn-primary:hover {{ transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5); background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%); }}
-.ap-dashboard .tags-container {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 20px; }}
-.ap-dashboard .tag {{ display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; font-size: 11.5px; color: #cbd5e0; }}
-.ap-dashboard .tag .remove {{ cursor: pointer; color: #ff8a8a; font-weight: bold; font-size: 12px; padding: 0 2px; }}
-.ap-dashboard .tag .remove:hover {{ color: #ffb3b3; }}
-.ap-dashboard .switch-label {{ display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #e2e8f0; }}
-.ap-dashboard .switch-label input {{ display: none; }}
-.ap-dashboard .switch-custom {{ width: 36px; height: 20px; background: #4a5568; border-radius: 20px; position: relative; transition: all 0.3s ease; display: inline-block; }}
-.ap-dashboard .switch-custom::after {{ content: ''; width: 14px; height: 14px; background: #fff; border-radius: 50%; position: absolute; top: 3px; left: 3px; transition: all 0.25s cubic-bezier(0.5, 1.6, 0.4, 0.7); }}
-.ap-dashboard .switch-label input:checked + .switch-custom {{ background: #48bb78; }}
-.ap-dashboard .switch-label input:checked + .switch-custom::after {{ left: 19px; }}
+.ap-dashboard {{ background: #0b0f19 !important; color: #e8eefc !important; padding: 24px !important; border-radius: 16px !important; border: 1px solid rgba(255, 255, 255, 0.08) !important; }}
+.ap-dashboard h2 {{ color: #ffffff !important; font-weight: 600 !important; margin-top: 0 !important; margin-bottom: 8px !important; letter-spacing: -0.02em !important; font-size: 26px !important; }}
+.ap-dashboard p {{ color: #9aa5b1 !important; font-size: 14.5px !important; line-height: 1.5 !important; margin-top: 0 !important; margin-bottom: 24px !important; }}
+.ap-dashboard .card {{ background: #111625 !important; border: 1px solid rgba(255, 255, 255, 0.08) !important; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important; border-radius: 16px !important; padding: 24px !important; color: #e8eefc !important; }}
+.ap-dashboard .tab-container {{ display: flex !important; gap: 10px !important; margin-bottom: 20px !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important; padding-bottom: 12px !important; overflow-x: auto !important; }}
+.ap-dashboard .tab-btn {{ padding: 10px 22px !important; background: #1c2338 !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 30px !important; color: #cbd5e1 !important; font-weight: 600 !important; cursor: pointer !important; transition: all 0.25s ease !important; font-size: 13.5px !important; white-space: nowrap !important; }}
+.ap-dashboard .tab-btn:hover {{ background: #283250 !important; color: #ffffff !important; border-color: rgba(255, 255, 255, 0.2) !important; }}
+.ap-dashboard .tab-btn.active {{ background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important; color: #ffffff !important; border-color: transparent !important; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4) !important; }}
+.ap-dashboard .event-card {{ border: 1px solid rgba(255, 255, 255, 0.08) !important; background: #171f35 !important; border-radius: 12px !important; margin-bottom: 14px !important; overflow: hidden !important; transition: all 0.2s ease !important; }}
+.ap-dashboard .event-card:hover {{ border-color: rgba(255, 255, 255, 0.18) !important; background: #1e2844 !important; }}
+.ap-dashboard .event-header {{ padding: 18px 22px !important; display: flex !important; justify-content: space-between !important; align-items: center !important; cursor: pointer !important; user-select: none !important; }}
+.ap-dashboard .event-header h4 {{ margin: 0 !important; font-weight: 600 !important; font-size: 15.5px !important; color: #ffffff !important; display: flex !important; align-items: center !important; gap: 10px !important; }}
+.ap-dashboard .event-header h4 code {{ background: #0b0f19 !important; padding: 3px 8px !important; border-radius: 6px !important; font-size: 12px !important; font-family: monospace !important; color: #63b3ed !important; border: 1px solid rgba(255, 255, 255, 0.06) !important; }}
+.ap-dashboard .event-header .chevron {{ color: #a0aec0 !important; transition: transform 0.2s ease !important; font-size: 15px !important; }}
+.ap-dashboard .event-header .title-wrap {{ display: flex !important; align-items: center !important; gap: 12px !important; }}
+.ap-dashboard .event-header .indicator {{ width: 10px; height: 10px; border-radius: 50%; background: #4a5568 !important; display: inline-block !important; transition: background 0.3s ease !important; }}
+.ap-dashboard .event-header .indicator.active {{ background: #48bb78 !important; box-shadow: 0 0 10px #48bb78 !important; }}
+.ap-dashboard .event-content {{ padding: 22px !important; background: #0c0f1a !important; border-top: 1px solid rgba(255, 255, 255, 0.08) !important; }}
+.ap-dashboard .form-grid {{ display: grid !important; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important; gap: 20px !important; }}
+.ap-dashboard label {{ font-size: 13px !important; font-weight: 600 !important; color: #cbd5e1 !important; margin-bottom: 8px !important; display: block !important; }}
+.ap-dashboard input, .ap-dashboard select {{ width: 100% !important; padding: 11px 15px !important; border-radius: 8px !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; background: #111625 !important; color: #ffffff !important; font-size: 13.5px !important; transition: all 0.2s ease !important; }}
+.ap-dashboard input:focus, .ap-dashboard select:focus {{ outline: none !important; border-color: #6366f1 !important; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35) !important; background: #171f35 !important; }}
+.ap-dashboard .user-add-row {{ display: flex !important; gap: 8px !important; }}
+.ap-dashboard .user-add-row input {{ flex-grow: 1 !important; }}
+.ap-dashboard .btn-sec {{ padding: 11px 18px !important; border-radius: 8px !important; border: 1px solid rgba(255, 255, 255, 0.18) !important; background: #1c2338 !important; color: #ffffff !important; cursor: pointer !important; font-size: 13.5px !important; transition: all 0.2s ease !important; font-weight: 600 !important; white-space: nowrap !important; }}
+.ap-dashboard .btn-sec:hover {{ background: #283250 !important; border-color: rgba(255, 255, 255, 0.3) !important; }}
+.ap-dashboard .btn-primary {{ padding: 12px 36px !important; border-radius: 30px !important; border: none !important; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important; color: #ffffff !important; font-weight: 600 !important; cursor: pointer !important; transition: all 0.25s ease !important; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4) !important; font-size: 14.5px !important; margin-top: 14px !important; }}
+.ap-dashboard .btn-primary:hover {{ transform: translateY(-1px) !important; box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5) !important; background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important; }}
+.ap-dashboard .tags-container {{ display: flex !important; flex-wrap: wrap !important; gap: 8px !important; margin-top: 10px !important; min-height: 20px !important; }}
+.ap-dashboard .tag {{ display: inline-flex !important; align-items: center !important; gap: 6px !important; padding: 4px 10px !important; background: #171f35 !important; border: 1px solid rgba(255, 255, 255, 0.12) !important; border-radius: 12px !important; font-size: 12px !important; color: #e2e8f0 !important; }}
+.ap-dashboard .tag .remove {{ cursor: pointer !important; color: #ff8a8a !important; font-weight: bold !important; font-size: 13px !important; padding: 0 2px !important; }}
+.ap-dashboard .tag .remove:hover {{ color: #ffb3b3 !important; }}
+.ap-dashboard .switch-label {{ display: inline-flex !important; align-items: center !important; gap: 10px !important; cursor: pointer !important; font-size: 14px !important; font-weight: 600 !important; color: #ffffff !important; }}
+.ap-dashboard .switch-label input {{ display: none !important; }}
+.ap-dashboard .switch-custom {{ width: 38px !important; height: 22px !important; background: #3e4859 !important; border-radius: 20px !important; position: relative !important; transition: all 0.3s ease !important; display: inline-block !important; }}
+.ap-dashboard .switch-custom::after {{ content: '' !important; width: 16px !important; height: 16px !important; background: #fff !important; border-radius: 50% !important; position: absolute !important; top: 3px !important; left: 3px !important; transition: all 0.25s cubic-bezier(0.5, 1.6, 0.4, 0.7) !important; }}
+.ap-dashboard .switch-label input:checked + .switch-custom {{ background: #48bb78 !important; }}
+.ap-dashboard .switch-label input:checked + .switch-custom::after {{ left: 19px !important; }}
 </style>
 <div class="ap-dashboard">
 <div class="card">
