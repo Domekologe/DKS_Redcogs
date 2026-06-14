@@ -1,0 +1,24 @@
+{
+    "name": "AdminProtocol",
+    "short": "Detailliertes Administrations- und Aktivitätsprotokoll",
+    "description": "Protokolliert administrative Aktionen und Benutzeraktivitäten auf dem Server in frei wählbaren Kanälen. Vollständig über die WebUI konfigurierbar.",
+    "end_user_data_statement": "Dieses Cog speichert ausschließlich guild-bezogene Einstellungen (Kanalauswahlen, Ignorier-Listen und Aktivierungs-Status). Es werden keine personenbezogenen Daten dauerhaft gespeichert.",
+    "author": [
+        "Domekologe"
+    ],
+    "min_bot_version": "3.5.0",
+    "min_python_version": [
+        3,
+        10,
+        0
+    ],
+    "hidden": false,
+    "disabled": false,
+    "requirements": [],
+    "tags": [
+        "utility",
+        "events",
+        "moderation",
+        "logging"
+    ]
+}

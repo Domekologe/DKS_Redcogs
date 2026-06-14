@@ -1,0 +1,1184 @@
+import logging
+import discord
+from redbot.core import Config, commands
+from typing import Any, Dict, List, Optional, Literal
+from datetime import timedelta
+import asyncio
+import html
+import json
+
+log = logging.getLogger("red.domekologe.adminprotocol")
+
+try:
+    from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+except Exception:
+    try:
+        from dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
+    except Exception:
+        def _dashboard_page(*args: Any, **kwargs: Any):  # type: ignore
+            def decorator(func: Any) -> Any:
+                func.__dashboard_decorator_params__ = (args, kwargs)
+                return func
+            return decorator
+
+EVENTS = {
+    "message_edit": "Nachricht bearbeitet",
+    "user_ban": "Benutzer gebannt",
+    "user_timeout": "Timeout (gegeben / entfernt)",
+    "channel_create": "Kanal erstellt",
+    "thread_create": "Thread erstellt",
+    "role_create": "Rolle angelegt",
+    "channel_delete": "Kanal gelöscht",
+    "thread_delete": "Thread gelöscht",
+    "message_delete": "Nachricht gelöscht",
+    "role_delete": "Rolle gelöscht",
+    "user_kick": "Benutzer gekickt",
+    "voice_move": "Benutzer verschoben (Sprachkanal)",
+    "voice_disconnect": "Sprachkanal-Verbindung getrennt",
+    "user_join": "Benutzer beigetreten",
+    "nickname_change_other": "Nickname verändert (Fremd)",
+    "user_leave": "Benutzer ausgetreten",
+    "nickname_change_self": "Nickname geändert (Selbst)",
+    "mod_command": "Moderationsbefehl verwendet",
+    "role_add": "Rolle vergeben",
+    "role_remove": "Rolle entfernt",
+    "invite_create": "Server-Einladung erstellt",
+    "user_unban": "Benutzer entbannt",
+    "channel_update": "Kanal aktualisiert/modifiziert",
+    "thread_update": "Thread aktualisiert/modifiziert",
+    "voice_join": "Sprachkanal beigetreten",
+    "voice_leave": "Sprachkanal verlassen",
+    "voice_status": "Sprachstatus geändert",
+    "voice_switch": "Sprachkanal gewechselt"
+}
+
+def format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "Permanent / Sofort"
+    parts = []
+    days, remainder = divmod(int(seconds), 86400)
+    if days > 0:
+        parts.append(f"{days} Tage")
+    hours, remainder = divmod(remainder, 3600)
+    if hours > 0:
+        parts.append(f"{hours} Stunden")
+    minutes, secs = divmod(remainder, 60)
+    if minutes > 0:
+        parts.append(f"{minutes} Minuten")
+    if secs > 0 and not parts:
+        parts.append(f"{secs} Sekunden")
+    return " ".join(parts)
+
+class AdminProtocol(commands.Cog):
+    """Protokolliert administrative Aktionen und Benutzeraktivitäten auf dem Server."""
+
+    def __init__(self, bot):
+        self.bot = bot
+        self.config = Config.get_conf(self, identifier=8912389124, force_registration=True)
+        
+        default_events = {
+            ev: {
+                "enabled": False,
+                "channel": None,
+                "ignored_channels": [],
+                "ignored_users": [],
+                "ignored_roles": []
+            }
+            for ev in EVENTS
+        }
+        self.config.register_guild(events=default_events)
+        self._dashboard_attached = False
+
+    async def cog_load(self) -> None:
+        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
+        if dashboard is not None:
+            try:
+                dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)
+                self._dashboard_attached = True
+            except Exception:
+                self._dashboard_attached = False
+
+    async def cog_unload(self) -> None:
+        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
+        if dashboard is not None:
+            try:
+                dashboard.rpc.third_parties_handler.remove_third_party(self)
+            except Exception:
+                pass
+
+    @commands.Cog.listener()
+    async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
+
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        try:
+            cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)
+            self._dashboard_attached = True
+        except Exception:
+            self._dashboard_attached = False
+
+    # ------------------------------------------------------------
+    # Helpers & Ignores
+    # ------------------------------------------------------------
+
+    async def _is_ignored(
+        self,
+        guild: discord.Guild,
+        event_name: str,
+        *,
+        channel: Optional[discord.abc.GuildChannel] = None,
+        member: Optional[discord.Member] = None,
+        role: Optional[discord.Role] = None,
+        actor: Optional[discord.Member | discord.User] = None,
+    ) -> bool:
+        event_conf = await self.config.guild(guild).events.get_raw(event_name)
+        
+        ignored_channels = event_conf.get("ignored_channels", [])
+        ignored_users = event_conf.get("ignored_users", [])
+        ignored_roles = event_conf.get("ignored_roles", [])
+        
+        # 1. Channel check
+        if channel and channel.id in ignored_channels:
+            return True
+            
+        # 2. Member check (subject)
+        if member:
+            if member.id in ignored_users:
+                return True
+            if hasattr(member, "roles"):
+                for r in member.roles:
+                    if r.id in ignored_roles:
+                        return True
+                        
+        # 3. Role check
+        if role and role.id in ignored_roles:
+            return True
+            
+        # 4. Actor check (moderator/initiator)
+        if actor:
+            if actor.id in ignored_users:
+                return True
+            if hasattr(actor, "roles"):
+                for r in actor.roles:
+                    if r.id in ignored_roles:
+                        return True
+
+        return False
+
+    async def _post_embed(
+        self,
+        guild: discord.Guild,
+        event_name: str,
+        embed: discord.Embed,
+        *,
+        channel: Optional[discord.abc.GuildChannel] = None,
+        member: Optional[discord.Member] = None,
+        role: Optional[discord.Role] = None,
+        actor: Optional[discord.Member | discord.User] = None,
+    ):
+        event_conf = await self.config.guild(guild).events.get_raw(event_name)
+        if not event_conf.get("enabled", False):
+            return
+            
+        dest_channel_id = event_conf.get("channel")
+        if not dest_channel_id:
+            return
+            
+        if await self._is_ignored(guild, event_name, channel=channel, member=member, role=role, actor=actor):
+            return
+            
+        dest_channel = guild.get_channel(dest_channel_id)
+        if dest_channel:
+            try:
+                await dest_channel.send(embed=embed)
+            except discord.Forbidden:
+                log.debug(f"Missing permissions to log to channel {dest_channel_id} for event {event_name}")
+            except Exception as e:
+                log.error(f"Error sending log embed: {e}")
+
+    async def _get_audit_log_entry(
+        self,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+        target_id: Optional[int] = None,
+        max_age_seconds: float = 15.0
+    ) -> Optional[discord.AuditLogEntry]:
+        try:
+            if not guild.me.guild_permissions.view_audit_log:
+                return None
+            now = discord.utils.utcnow()
+            async for entry in guild.audit_logs(action=action, limit=5):
+                if target_id is not None and entry.target and entry.target.id != target_id:
+                    continue
+                age = (now - entry.created_at).total_seconds()
+                if age <= max_age_seconds:
+                    return entry
+        except Exception as e:
+            log.debug(f"Failed to fetch audit log for action {action}: {e}")
+        return None
+
+    def _is_mod_command(self, command_name: str, cog_name: Optional[str]) -> bool:
+        if cog_name in {"Mod", "Admin", "AdminUtils"}:
+            return True
+        if command_name in {"kick", "ban", "timeout", "warn", "mute", "unmute", "unban", "purge", "purgefast", "messagemove"}:
+            return True
+        return False
+
+    # ------------------------------------------------------------
+    # Discord Event Listeners
+    # ------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        if not after.guild or after.author.bot:
+            return
+        if before.content == after.content:
+            return
+
+        embed = discord.Embed(
+            color=0xf1c40f,  # Orange
+            description=f"📝 **Nachricht gesendet von** {after.author.mention} in {after.channel.mention} **bearbeitet.** [Zur Nachricht springen]({after.jump_url})"
+        )
+        embed.set_author(name=str(after.author), icon_url=after.author.display_avatar.url)
+        embed.add_field(name="Alt", value=f">>> {before.content[:1010]}" if before.content else "> *kein Text*", inline=False)
+        embed.add_field(name="Neu", value=f">>> {after.content[:1010]}" if after.content else "> *kein Text*", inline=False)
+        embed.set_footer(text=f"ID: {after.author.id}")
+        embed.timestamp = discord.utils.utcnow()
+
+        await self._post_embed(after.guild, "message_edit", embed, channel=after.channel, member=after.author)
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        if not payload.guild_id:
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+        channel = guild.get_channel(payload.channel_id)
+        if not channel:
+            return
+
+        message = payload.cached_message
+        if message:
+            if message.author.bot:
+                return
+            author = message.author
+            content = message.content[:1010] if message.content else "*Kein Textinhalt oder nur Medien*"
+        else:
+            author = None
+            content = "*Inhalt nicht im Bot-Cache vorhanden (ältere Nachricht)*"
+
+        # Lookup who deleted
+        moderator = None
+        if author:
+            # We look up audit log for message deletion targeting message author
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.message_delete, target_id=author.id)
+            if entry and entry.extra and entry.extra.channel and entry.extra.channel.id == channel.id:
+                moderator = entry.user
+
+        # If no moderator found, assume author did it
+        deleter_str = moderator.mention if moderator else (author.mention if author else "Unbekannt (Selbst/Mod)")
+
+        embed = discord.Embed(
+            color=0xe74c3c,  # Rot
+            description=f"🗑️ **Nachricht gesendet von** {author.mention if author else 'Unbekannt'} in {channel.mention} **gelöscht.**"
+        )
+        if author:
+            embed.set_author(name=str(author), icon_url=author.display_avatar.url)
+        embed.add_field(name="Nachrichteninhalt", value=f">>> {content}", inline=False)
+        embed.add_field(name="Verfasst von", value=author.mention if author else "Unbekannt", inline=True)
+        embed.add_field(name="Gelöscht von", value=deleter_str, inline=True)
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "message_delete", embed, channel=channel, member=author, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member):
+        entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.ban, target_id=user.id)
+        moderator = entry.user if entry else None
+        reason = entry.reason if entry and entry.reason else "Keine Begründung angegeben"
+
+        embed = discord.Embed(
+            color=0xe74c3c,
+            title="🔨 Benutzer gebannt",
+            description=f"👤 **Benutzer:** {user.mention} ({user.id})\n"
+                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
+                        f"📝 **Begründung:** {reason}\n"
+                        f"⏱️ **Dauer:** Unbegrenzt / Permanent"
+        )
+        embed.set_author(name=str(user), icon_url=user.display_avatar.url if user.display_avatar else None)
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "user_ban", embed, member=user, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.unban, target_id=user.id)
+        moderator = entry.user if entry else None
+
+        embed = discord.Embed(
+            color=0x2ecc71,
+            title="🔓 Benutzer entbannt",
+            description=f"👤 **Benutzer:** {user.mention} ({user.id})\n"
+                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}"
+        )
+        embed.set_author(name=str(user), icon_url=user.display_avatar.url if user.display_avatar else None)
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "user_unban", embed, member=user, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        guild = member.guild
+        
+        # Check if member was kicked
+        entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.kick, target_id=member.id)
+        
+        if entry:
+            # Kick event
+            moderator = entry.user
+            reason = entry.reason if entry.reason else "Keine Begründung angegeben"
+            
+            embed = discord.Embed(
+                color=0xe74c3c,
+                title="👢 Benutzer gekickt",
+                description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention}\n"
+                            f"📝 **Begründung:** {reason}"
+            )
+            embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            
+            await self._post_embed(guild, "user_kick", embed, member=member, actor=moderator)
+        else:
+            # Leave event
+            embed = discord.Embed(
+                color=0xe74c3c,
+                description=f"👋 **{member.mention}** ({str(member)}) hat den Server verlassen."
+            )
+            embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text=f"ID: {member.id}")
+            
+            await self._post_embed(guild, "user_leave", embed, member=member)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        guild = member.guild
+        created_at = member.created_at
+        now = discord.utils.utcnow()
+        age_delta = now - created_at
+        
+        # Format account age nicely
+        days = age_delta.days
+        if days > 365:
+            years = round(days / 365.25, 1)
+            age_str = f"{years} Jahre alt"
+        elif days > 30:
+            months = round(days / 30.4, 1)
+            age_str = f"{months} Monate alt"
+        else:
+            age_str = f"{days} Tage alt"
+
+        embed = discord.Embed(
+            color=0x2ecc71,
+            description=f"📥 {member.mention} **trat dem Server bei.**\n\n"
+                        f"🧭 **Alter des Kontos:**\n"
+                        f"`{created_at.strftime('%d/%m/%Y %H:%M')}`\n"
+                        f"*{age_str}*"
+        )
+        embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.timestamp = now
+        embed.set_footer(text=f"ID: {member.id}")
+
+        await self._post_embed(guild, "user_join", embed, member=member)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        guild = after.guild
+
+        # 1. Timeout (gegeben / entfernt)
+        if before.timed_out_until != after.timed_out_until:
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_update, target_id=after.id)
+            moderator = entry.user if entry else None
+            reason = entry.reason if entry and entry.reason else "Keine Begründung angegeben"
+            
+            if after.timed_out_until and after.timed_out_until > discord.utils.utcnow():
+                # Given
+                duration_sec = (after.timed_out_until - discord.utils.utcnow()).total_seconds()
+                duration_str = format_duration(duration_sec)
+                
+                embed = discord.Embed(
+                    color=0xf1c40f,
+                    title="⏱️ Timeout gegeben",
+                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
+                                f"📝 **Begründung:** {reason}\n"
+                                f"⏱️ **Dauer:** {duration_str}"
+                )
+                embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "user_timeout", embed, member=after, actor=moderator)
+            else:
+                # Removed
+                embed = discord.Embed(
+                    color=0x2ecc71,
+                    title="⏱️ Timeout entfernt",
+                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}"
+                )
+                embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "user_timeout", embed, member=after, actor=moderator)
+
+        # 2. Nickname changed
+        if before.nick != after.nick:
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_update, target_id=after.id)
+            # Check if updated by someone else
+            if entry and entry.user and entry.user.id != after.id:
+                # Nickname verändert (Fremd)
+                embed = discord.Embed(
+                    color=0xf1c40f,
+                    title="🏷️ Nickname verändert (Fremd)",
+                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Geändert von:** {entry.user.mention}\n"
+                                f"➖ **Alter Nickname:** `{before.nick or 'Keiner'}`\n"
+                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`"
+                )
+                embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "nickname_change_other", embed, member=after, actor=entry.user)
+            else:
+                # Nickname geändert (Selbst)
+                embed = discord.Embed(
+                    color=0xf1c40f,
+                    title="🏷️ Nickname geändert (Selbst)",
+                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                                f"➖ **Alter Nickname:** `{before.nick or 'Keiner'}`\n"
+                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`"
+                )
+                embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "nickname_change_self", embed, member=after)
+
+        # 3. Roles added
+        added_roles = set(after.roles) - set(before.roles)
+        for role in added_roles:
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_role_update, target_id=after.id)
+            moderator = entry.user if entry else None
+            
+            embed = discord.Embed(
+                color=0x2ecc71,
+                title="🛡️ Rolle vergeben",
+                description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
+                            f"🏷️ **Rolle:** {role.mention} ({role.name})"
+            )
+            embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            await self._post_embed(guild, "role_add", embed, member=after, role=role, actor=moderator)
+
+        # 4. Roles removed
+        removed_roles = set(before.roles) - set(after.roles)
+        for role in removed_roles:
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_role_update, target_id=after.id)
+            moderator = entry.user if entry else None
+            
+            embed = discord.Embed(
+                color=0xe74c3c,
+                title="🛡️ Rolle entfernt",
+                description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
+                            f"🏷️ **Rolle:** {role.mention} ({role.name})"
+            )
+            embed.set_author(name=str(after), icon_url=after.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            await self._post_embed(guild, "role_remove", embed, member=after, role=role, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        guild = channel.guild
+        
+        embed = discord.Embed(
+            color=0x2ecc71,
+            title="🆕 Kanal erstellt",
+            description=f"🌐 **Kanal:** {channel.mention if hasattr(channel, 'mention') else f'#{channel.name}'}\n"
+                        f"🏷️ **Typ:** `{channel.type.name}`\n"
+                        f"🆔 **ID:** `{channel.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "channel_create", embed, channel=channel)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        guild = channel.guild
+
+        embed = discord.Embed(
+            color=0xe74c3c,
+            title="🗑️ Kanal gelöscht",
+            description=f"🌐 **Kanalname:** `#{channel.name}`\n"
+                        f"🏷️ **Typ:** `{channel.type.name}`\n"
+                        f"🆔 **ID:** `{channel.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "channel_delete", embed, channel=channel)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+        guild = after.guild
+        entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.channel_update, target_id=after.id)
+        moderator = entry.user if entry else None
+
+        changes = []
+        if before.name != after.name:
+            changes.append(f"Name: `{before.name}` ➔ `{after.name}`")
+        if hasattr(before, "topic") and hasattr(after, "topic") and before.topic != after.topic:
+            changes.append(f"Thema: `{before.topic or 'Kein Thema'}` ➔ `{after.topic or 'Kein Thema'}`")
+        if hasattr(before, "nsfw") and hasattr(after, "nsfw") and before.nsfw != after.nsfw:
+            changes.append(f"NSFW: `{before.nsfw}` ➔ `{after.nsfw}`")
+
+        if not changes:
+            return # Skip if nothing significant changed (e.g. overrides or positional shifts)
+
+        embed = discord.Embed(
+            color=0xf1c40f,
+            title="⚙️ Kanal aktualisiert/modifiziert",
+            description=f"🌐 **Kanal:** {after.mention if hasattr(after, 'mention') else f'#{after.name}'} ({after.id})\n"
+                        f"🛡️ **Modifiziert von:** {moderator.mention if moderator else 'Unbekannt'}\n\n"
+                        f"📋 **Änderungen:**\n" + "\n".join(changes)
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "channel_update", embed, channel=after, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread: discord.Thread):
+        guild = thread.guild
+
+        embed = discord.Embed(
+            color=0x2ecc71,
+            title="🧵 Thread erstellt",
+            description=f"🌐 **Thread:** {thread.mention} ({thread.name})\n"
+                        f"📁 **Kanal:** {thread.parent.mention if thread.parent else 'Unbekannt'}\n"
+                        f"🆔 **ID:** `{thread.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "thread_create", embed, channel=thread.parent)
+
+    @commands.Cog.listener()
+    async def on_thread_delete(self, thread: discord.Thread):
+        guild = thread.guild
+
+        embed = discord.Embed(
+            color=0xe74c3c,
+            title="🧵 Thread gelöscht",
+            description=f"🌐 **Threadname:** `{thread.name}`\n"
+                        f"📁 **Kanal:** {thread.parent.mention if thread.parent else 'Unbekannt'}\n"
+                        f"🆔 **ID:** `{thread.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "thread_delete", embed, channel=thread.parent)
+
+    @commands.Cog.listener()
+    async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        guild = after.guild
+        entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.thread_update, target_id=after.id)
+        moderator = entry.user if entry else None
+
+        changes = []
+        if before.name != after.name:
+            changes.append(f"Name: `{before.name}` ➔ `{after.name}`")
+        if before.archived != after.archived:
+            changes.append(f"Archiviert: `{before.archived}` ➔ `{after.archived}`")
+
+        if not changes:
+            return
+
+        embed = discord.Embed(
+            color=0xf1c40f,
+            title="⚙️ Thread aktualisiert/modifiziert",
+            description=f"🌐 **Thread:** {after.mention} ({after.id})\n"
+                        f"📁 **Kanal:** {after.parent.mention if after.parent else 'Unbekannt'}\n"
+                        f"🛡️ **Modifiziert von:** {moderator.mention if moderator else 'Unbekannt'}\n\n"
+                        f"📋 **Änderungen:**\n" + "\n".join(changes)
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "thread_update", embed, channel=after.parent, actor=moderator)
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        guild = role.guild
+
+        embed = discord.Embed(
+            color=0x2ecc71,
+            title="🎨 Rolle angelegt",
+            description=f"🏷️ **Rolle:** {role.mention} (`{role.name}`)\n"
+                        f"🆔 **ID:** `{role.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "role_create", embed, role=role)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        guild = role.guild
+
+        embed = discord.Embed(
+            color=0xe74c3c,
+            title="🗑️ Rolle gelöscht",
+            description=f"🏷️ **Rollenname:** `{role.name}`\n"
+                        f"🆔 **ID:** `{role.id}`"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "role_delete", embed, role=role)
+
+    @commands.Cog.listener()
+    async def on_invite_create(self, invite: discord.Invite):
+        guild = invite.guild
+        if not guild:
+            return
+
+        expire_str = format_duration(invite.max_age) if invite.max_age > 0 else "Niemals"
+
+        embed = discord.Embed(
+            color=0x2ecc71,
+            title="🎟️ Server-Einladung erstellt",
+            description=f"👤 **Ersteller:** {invite.inviter.mention if invite.inviter else 'Unbekannt'}\n"
+                        f"🌐 **Kanal:** {invite.channel.mention if hasattr(invite.channel, 'mention') else f'#{invite.channel.name}'}\n"
+                        f"🔗 **Link:** {invite.url}\n"
+                        f"⏱️ **Ablauf:** {expire_str}"
+        )
+        embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text="adminprotocol")
+
+        await self._post_embed(guild, "invite_create", embed, channel=invite.channel, actor=invite.inviter)
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        guild = member.guild
+
+        # 1. Joined voice channel
+        if before.channel is None and after.channel is not None:
+            embed = discord.Embed(
+                color=0x3498db,  # Blau
+                description=f"🔊 {member.mention} **ist dem Sprachkanal** {after.channel.mention} **beigetreten.**"
+            )
+            embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text=f"ID: {member.id}")
+            await self._post_embed(guild, "voice_join", embed, channel=after.channel, member=member)
+
+        # 2. Left voice channel
+        elif before.channel is not None and after.channel is None:
+            # Check if disconnected by a moderator
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_disconnect, target_id=member.id)
+            if entry:
+                # Disconnected by other
+                embed = discord.Embed(
+                    color=0xe74c3c,
+                    title="🔇 Sprachkanal-Verbindung getrennt",
+                    description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                                f"🛡️ **Getrennt von:** {entry.user.mention}\n"
+                                f"🌐 **Kanal:** {before.channel.name}"
+                )
+                embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "voice_disconnect", embed, channel=before.channel, member=member, actor=entry.user)
+            else:
+                # Self leave
+                embed = discord.Embed(
+                    color=0xe74c3c,
+                    description=f"🔊 {member.mention} **hat den Sprachkanal** {before.channel.mention} **verlassen.**"
+                )
+                embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text=f"ID: {member.id}")
+                await self._post_embed(guild, "voice_leave", embed, channel=before.channel, member=member)
+
+        # 3. Switched voice channels / moved by moderator
+        elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
+            # Check if moved by moderator
+            entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_move)
+            # In member_move audit logs, target is often None or the user. We check target_id.
+            if entry and entry.target and entry.target.id == member.id:
+                # Moderator moved
+                embed = discord.Embed(
+                    color=0xf1c40f,
+                    title="🔀 Benutzer in Sprachkanal verschoben",
+                    description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                                f"🛡️ **Verschoben von:** {entry.user.mention}\n"
+                                f"📥 **Von:** {before.channel.name}\n"
+                                f"📤 **Zu:** {after.channel.name}"
+                )
+                embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text="adminprotocol")
+                await self._post_embed(guild, "voice_move", embed, channel=after.channel, member=member, actor=entry.user)
+            else:
+                # Self switch
+                embed = discord.Embed(
+                    color=0xf1c40f,
+                    description=f"🔊 {member.mention} **hat den Sprachkanal gewechselt.**\n"
+                                f"📥 **Herkunft:** {before.channel.mention}\n"
+                                f"📤 **Ziel:** {after.channel.mention}"
+                )
+                embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+                embed.timestamp = discord.utils.utcnow()
+                embed.set_footer(text=f"ID: {member.id}")
+                await self._post_embed(guild, "voice_switch", embed, channel=after.channel, member=member)
+
+        # 4. Voice status changed (stummschaltung)
+        status_changes = []
+        if before.self_mute != after.self_mute:
+            status_changes.append(f"Mute (Selbst): `{'Aktiv' if after.self_mute else 'Inaktiv'}`")
+        if before.self_deaf != after.self_deaf:
+            status_changes.append(f"Deafen (Selbst): `{'Aktiv' if after.self_deaf else 'Inaktiv'}`")
+        if before.mute != after.mute:
+            status_changes.append(f"Mute (Server): `{'Aktiv' if after.mute else 'Inaktiv'}`")
+        if before.deaf != after.deaf:
+            status_changes.append(f"Deafen (Server): `{'Aktiv' if after.deaf else 'Inaktiv'}`")
+        if before.self_stream != after.self_stream:
+            status_changes.append(f"Stream: `{'Start' if after.self_stream else 'Stopp'}`")
+        if before.self_video != after.self_video:
+            status_changes.append(f"Kamera: `{'An' if after.self_video else 'Aus'}`")
+
+        if status_changes:
+            current_channel = after.channel or before.channel
+            embed = discord.Embed(
+                color=0x3498db,
+                title="🎙️ Sprachstatus geändert",
+                description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                            f"🌐 **Sprachkanal:** {current_channel.name if current_channel else 'Unbekannt'}\n\n"
+                            f"📋 **Änderungen:**\n" + "\n".join(status_changes)
+            )
+            embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            await self._post_embed(guild, "voice_status", embed, channel=current_channel, member=member)
+
+    @commands.Cog.listener()
+    async def on_command(self, ctx: commands.Context):
+        if not ctx.guild or ctx.command is None:
+            return
+        cog_name = ctx.cog.qualified_name if ctx.cog else None
+        if self._is_mod_command(ctx.command.name, cog_name):
+            embed = discord.Embed(
+                title="🛡️ Moderationsbefehl verwendet",
+                color=0xf1c40f,
+                description=f"👤 **Benutzer:** {ctx.author.mention} ({ctx.author.id})\n"
+                            f"💬 **Befehl:** `{ctx.message.content}`\n"
+                            f"🌐 **Kanal:** {ctx.channel.mention}"
+            )
+            embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            
+            await self._post_embed(ctx.guild, "mod_command", embed, channel=ctx.channel, actor=ctx.author)
+
+    @commands.Cog.listener()
+    async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command | discord.app_commands.ContextMenu):
+        if not interaction.guild or command is None:
+            return
+        cog_name = command.binding.qualified_name if hasattr(command, "binding") and command.binding else None
+        
+        cmd_repr = f"/{command.name}"
+        if interaction.data:
+            options = interaction.data.get("options", [])
+            if options:
+                opts_str = " ".join([f"{o.get('name')}:{o.get('value')}" for o in options])
+                cmd_repr += f" {opts_str}"
+                
+        if self._is_mod_command(command.name, cog_name):
+            embed = discord.Embed(
+                title="🛡️ Moderationsbefehl verwendet",
+                color=0xf1c40f,
+                description=f"👤 **Benutzer:** {interaction.user.mention} ({interaction.user.id})\n"
+                            f"💬 **Befehl:** `{cmd_repr}`\n"
+                            f"🌐 **Kanal:** {interaction.channel.mention if interaction.channel else 'Unbekannt'}"
+            )
+            embed.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
+            embed.timestamp = discord.utils.utcnow()
+            embed.set_footer(text="adminprotocol")
+            
+            await self._post_embed(interaction.guild, "mod_command", embed, channel=interaction.channel, actor=interaction.user)
+
+    # ------------------------------------------------------------
+    # Standalone Dashboard Page
+    # ------------------------------------------------------------
+
+    @_dashboard_page(
+        name="adminprotocol",
+        description="Verwalte das AdminProtocol und logge administrative Events.",
+        methods=("GET", "POST"),
+        context_ids=["user_id", "guild_id"],
+        hidden=False,
+    )
+    async def dashboard_adminprotocol(
+        self,
+        user_id: Optional[int] = None,
+        guild_id: Optional[int] = None,
+        method: str = "GET",
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if user_id is None or guild_id is None:
+            return {"status": 0, "error_code": 400, "message": "Fehlender Kontext: user_id/guild_id."}
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return {"status": 1, "message": "Server nicht gefunden."}
+        member = guild.get_member(user_id)
+        if member is None or not member.guild_permissions.manage_guild:
+            if user_id not in self.bot.owner_ids:
+                return {"status": 1, "message": "Nicht berechtigt."}
+
+        events = await self.config.guild(guild).events()
+
+        # Handle POST configuration save
+        if method.upper() == "POST" and data:
+            form = dict(data.get("form", {}))
+            
+            new_events = {}
+            for ev in EVENTS:
+                enabled = str(form.get(f"enabled_{ev}", "off")).lower() in ("on", "true", "1", "yes")
+                
+                ch_raw = form.get(f"channel_{ev}", "")
+                channel_id = int(ch_raw) if str(ch_raw).isdigit() else None
+                
+                ignored_ch_raw = form.get(f"ignored_channels_{ev}", "")
+                ignored_channels = [int(x) for x in ignored_ch_raw.split(",") if x.strip().isdigit()]
+                
+                ignored_ro_raw = form.get(f"ignored_roles_{ev}", "")
+                ignored_roles = [int(x) for x in ignored_ro_raw.split(",") if x.strip().isdigit()]
+                
+                ignored_us_raw = form.get(f"ignored_users_{ev}", "")
+                ignored_users = [int(x) for x in ignored_us_raw.split(",") if x.strip().isdigit()]
+                
+                new_events[ev] = {
+                    "enabled": enabled,
+                    "channel": channel_id,
+                    "ignored_channels": ignored_channels,
+                    "ignored_users": ignored_users,
+                    "ignored_roles": ignored_roles
+                }
+            
+            await self.config.guild(guild).events.set(new_events)
+            return {
+                "status": 0,
+                "notifications": [{"message": "AdminProtocol Einstellungen erfolgreich gespeichert.", "category": "success"}],
+                "redirect_url": kwargs.get("request_url"),
+            }
+
+        # Build dropdown options
+        text_channels = [c for c in guild.text_channels]
+        # Include all channel types (text, voice, stage, threads) for ignore lists
+        all_channels = [c for c in guild.channels if isinstance(c, (discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread))]
+        roles = [r for r in guild.roles if not r.is_default()]
+
+        text_channel_options = "".join([f'<option value="{c.id}">#{html.escape(c.name)} ({c.id})</option>' for c in text_channels])
+        all_channel_options = "".join([f'<option value="{c.id}">#{html.escape(c.name)} ({c.type.name} - {c.id})</option>' for c in all_channels])
+        role_options = "".join([f'<option value="{r.id}">{html.escape(r.name)} ({r.id})</option>' for r in roles])
+
+        # Prepare JSON values of channels and roles to map IDs to names in JavaScript
+        channel_map = {str(c.id): f"#{c.name} ({c.type.name})" for c in all_channels}
+        role_map = {str(r.id): r.name for r in roles}
+        
+        channel_map_json = html.escape(json.dumps(channel_map))
+        role_map_json = html.escape(json.dumps(role_map))
+        initial_data_json = html.escape(json.dumps({
+            ev: {
+                "ignored_channels": events[ev].get("ignored_channels", []),
+                "ignored_roles": events[ev].get("ignored_roles", []),
+                "ignored_users": events[ev].get("ignored_users", [])
+            }
+            for ev in EVENTS
+        }))
+
+        # Categorize events into groups
+        categories = {
+            "messages": ["message_edit", "message_delete", "channel_create", "channel_delete", "channel_update", "thread_create", "thread_delete", "thread_update"],
+            "members": ["user_join", "user_leave", "nickname_change_other", "nickname_change_self", "role_create", "role_delete", "role_add", "role_remove"],
+            "moderation": ["user_ban", "user_unban", "user_kick", "user_timeout", "mod_command"],
+            "voice": ["voice_join", "voice_leave", "voice_status", "voice_switch", "voice_move", "voice_disconnect", "invite_create"]
+        }
+
+        # Build Accordion items for each event card
+        rows = []
+        for cat, ev_list in categories.items():
+            for ev in ev_list:
+                ev_name = EVENTS[ev]
+                ev_data = events.get(ev, {})
+                enabled_checked = "checked" if ev_data.get("enabled", False) else ""
+                
+                # Channel dropdown options with selected pre-selected channel
+                current_ch_id = ev_data.get("channel")
+                ch_select_options = [f'<option value="">-- Deaktiviert --</option>']
+                for ch in text_channels:
+                    selected = "selected" if ch.id == current_ch_id else ""
+                    ch_select_options.append(f'<option value="{ch.id}" {selected}>#{html.escape(ch.name)} ({ch.id})</option>')
+                ch_dropdown = "".join(ch_select_options)
+
+                rows.append(f"""
+<div class="event-card" data-tab="{cat}">
+    <div class="event-header" onclick="toggleAccordion(this)">
+        <div class="title-wrap">
+            <span class="indicator {'active' if ev_data.get('enabled') and ev_data.get('channel') else ''}"></span>
+            <h4>{html.escape(ev_name)} <code>({ev})</code></h4>
+        </div>
+        <span class="chevron">&#9662;</span>
+    </div>
+    <div class="event-content" style="display: none;">
+        <div class="form-grid">
+            <div class="form-sec">
+                <label class="switch-label">
+                    <input type="checkbox" name="enabled_{ev}" {enabled_checked}>
+                    <span class="switch-custom"></span>
+                    Aktiviert
+                </label>
+                <div style="margin-top:12px;">
+                    <label>Log-Kanal (Dropdown)</label>
+                    <select name="channel_{ev}">{ch_dropdown}</select>
+                    <small style="color:#a0aec0;font-size:11.5px;display:block;margin-top:2px;">* Keine Auswahl deaktiviert die Funktion unabhängig des Status.</small>
+                </div>
+            </div>
+            <div class="form-sec">
+                <label>Ignorierte Kanäle (Text & Voice)</label>
+                <select class="ch-ignore-select" onchange="addTag(this, 'channel', '{ev}')">
+                    <option value="">-- Kanal hinzufügen --</option>
+                    {all_channel_options}
+                </select>
+                <div id="tags_channel_{ev}" class="tags-container"></div>
+                <input type="hidden" id="ignored_channels_{ev}" name="ignored_channels_{ev}" value="">
+            </div>
+            <div class="form-sec">
+                <label>Ignorierte Rollen</label>
+                <select class="role-ignore-select" onchange="addTag(this, 'role', '{ev}')">
+                    <option value="">-- Rolle hinzufügen --</option>
+                    {role_options}
+                </select>
+                <div id="tags_role_{ev}" class="tags-container"></div>
+                <input type="hidden" id="ignored_roles_{ev}" name="ignored_roles_{ev}" value="">
+            </div>
+            <div class="form-sec">
+                <label>Ignorierte Benutzer-IDs</label>
+                <div class="user-add-row">
+                    <input type="text" placeholder="User ID eingeben" class="user-id-input" onkeydown="if(event.key==='Enter'){{event.preventDefault(); addUserTag(this, '{ev}');}}">
+                    <button type="button" class="btn-sec" onclick="addUserTag(this.previousElementSibling, '{ev}')">Hinzufügen</button>
+                </div>
+                <div id="tags_user_{ev}" class="tags-container"></div>
+                <input type="hidden" id="ignored_users_{ev}" name="ignored_users_{ev}" value="">
+            </div>
+        </div>
+    </div>
+</div>
+""")
+
+        content = "".join(rows)
+
+        source = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap');
+.ap-dashboard * {{ font-family: 'Outfit', sans-serif; box-sizing: border-box; }}
+.ap-dashboard {{ color: #e8eefc; padding: 12px; }}
+.ap-dashboard h2 {{ color: #ffffff; font-weight: 600; margin-top: 0; margin-bottom: 8px; letter-spacing: -0.02em; font-size: 24px; }}
+.ap-dashboard p {{ color: #a0aec0; font-size: 14.5px; line-height: 1.5; margin-top: 0; margin-bottom: 24px; }}
+.ap-dashboard .card {{ background: rgba(18, 23, 33, 0.45); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4); border-radius: 16px; padding: 24px; color: #e8eefc; }}
+.ap-dashboard .tab-container {{ display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; overflow-x: auto; }}
+.ap-dashboard .tab-btn {{ padding: 10px 20px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 30px; color: #cbd5e0; font-weight: 500; cursor: pointer; transition: all 0.25s ease; font-size: 13.5px; white-space: nowrap; }}
+.ap-dashboard .tab-btn:hover {{ background: rgba(255, 255, 255, 0.08); color: #fff; border-color: rgba(255, 255, 255, 0.15); }}
+.ap-dashboard .tab-btn.active {{ background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #fff; border-color: transparent; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); }}
+.ap-dashboard .event-card {{ border: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.01); border-radius: 10px; margin-bottom: 12px; overflow: hidden; transition: all 0.2s ease; }}
+.ap-dashboard .event-card:hover {{ border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.02); }}
+.ap-dashboard .event-header {{ padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }}
+.ap-dashboard .event-header h4 {{ margin: 0; font-weight: 500; font-size: 15px; color: #f7fafc; display: flex; align-items: center; gap: 8px; }}
+.ap-dashboard .event-header h4 code {{ background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 4px; font-size: 11.5px; font-family: monospace; color: #63b3ed; }}
+.ap-dashboard .event-header .chevron {{ color: #718096; transition: transform 0.2s ease; font-size: 14px; }}
+.ap-dashboard .event-header .title-wrap {{ display: flex; align-items: center; gap: 12px; }}
+.ap-dashboard .event-header .indicator {{ width: 8px; height: 8px; border-radius: 50%; background: #4a5568; display: inline-block; transition: background 0.3s ease; }}
+.ap-dashboard .event-header .indicator.active {{ background: #48bb78; box-shadow: 0 0 8px #48bb78; }}
+.ap-dashboard .event-content {{ padding: 20px; background: rgba(0, 0, 0, 0.15); border-top: 1px solid rgba(255, 255, 255, 0.05); }}
+.ap-dashboard .form-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }}
+.ap-dashboard label {{ font-size: 13px; font-weight: 500; color: #a0aec0; margin-bottom: 6px; display: block; }}
+.ap-dashboard input, .ap-dashboard select {{ width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(0, 0, 0, 0.25); color: #fff; font-size: 13.5px; transition: all 0.2s ease; }}
+.ap-dashboard input:focus, .ap-dashboard select:focus {{ outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25); background: rgba(0, 0, 0, 0.35); }}
+.ap-dashboard .user-add-row {{ display: flex; gap: 8px; }}
+.ap-dashboard .user-add-row input {{ flex-grow: 1; }}
+.ap-dashboard .btn-sec {{ padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.05); color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.2s ease; font-weight: 500; white-space: nowrap; }}
+.ap-dashboard .btn-sec:hover {{ background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.25); color: #fff; }}
+.ap-dashboard .btn-primary {{ padding: 12px 30px; border-radius: 30px; border: none; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #fff; font-weight: 600; cursor: pointer; transition: all 0.25s ease; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4); font-size: 14.5px; margin-top: 12px; }}
+.ap-dashboard .btn-primary:hover {{ transform: translateY(-1px); box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5); background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%); }}
+.ap-dashboard .tags-container {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 20px; }}
+.ap-dashboard .tag {{ display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; font-size: 11.5px; color: #cbd5e0; }}
+.ap-dashboard .tag .remove {{ cursor: pointer; color: #ff8a8a; font-weight: bold; font-size: 12px; padding: 0 2px; }}
+.ap-dashboard .tag .remove:hover {{ color: #ffb3b3; }}
+.ap-dashboard .switch-label {{ display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 500; color: #e2e8f0; }}
+.ap-dashboard .switch-label input {{ display: none; }}
+.ap-dashboard .switch-custom {{ width: 36px; height: 20px; background: #4a5568; border-radius: 20px; position: relative; transition: all 0.3s ease; display: inline-block; }}
+.ap-dashboard .switch-custom::after {{ content: ''; width: 14px; height: 14px; background: #fff; border-radius: 50%; position: absolute; top: 3px; left: 3px; transition: all 0.25s cubic-bezier(0.5, 1.6, 0.4, 0.7); }}
+.ap-dashboard .switch-label input:checked + .switch-custom {{ background: #48bb78; }}
+.ap-dashboard .switch-label input:checked + .switch-custom::after {{ left: 19px; }}
+</style>
+<div class="ap-dashboard">
+<div class="card">
+    <h2>AdminProtocol - Guild Dashboard</h2>
+    <p>Konfiguriere hier die automatischen Logs für verschiedene Server-Aktivitäten. Für jede Funktion können spezifische Ignorier-Listen gepflegt werden.</p>
+    
+    <div class="tab-container">
+        <button type="button" class="tab-btn active" onclick="switchTab('messages')">Nachrichten & Kanäle</button>
+        <button type="button" class="tab-btn" onclick="switchTab('members')">Mitglieder & Rollen</button>
+        <button type="button" class="tab-btn" onclick="switchTab('moderation')">Moderation</button>
+        <button type="button" class="tab-btn" onclick="switchTab('voice')">Sprachkanäle & Einladungen</button>
+    </div>
+
+    <form method="post">
+        <div id="events_list">
+            {content}
+        </div>
+        <button type="submit" class="btn-primary">Alle Einstellungen speichern</button>
+    </form>
+</div>
+</div>
+
+<script>
+const channelNames = JSON.parse("{channel_map_json}");
+const roleNames = JSON.parse("{role_map_json}");
+const initData = JSON.parse("{initial_data_json}");
+
+// Switch tabs
+function switchTab(tabName) {{
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    document.querySelectorAll('.event-card').forEach(card => {{
+        if (card.dataset.tab === tabName) {{
+            card.style.display = 'block';
+        }} else {{
+            card.style.display = 'none';
+        }}
+    }});
+}}
+
+// Accordion toggle
+function toggleAccordion(header) {{
+    const card = header.closest('.event-card');
+    const content = card.querySelector('.event-content');
+    const chevron = header.querySelector('.chevron');
+    if (content.style.display === 'none') {{
+        content.style.display = 'block';
+        chevron.style.transform = 'rotate(180deg)';
+    }} else {{
+        content.style.display = 'none';
+        chevron.style.transform = 'rotate(0deg)';
+    }}
+}}
+
+// Tag system logic
+const tagData = {{}};
+
+function initTags() {{
+    Object.keys(initData).forEach(ev => {{
+        tagData[ev] = {{
+            channel: [...initData[ev].ignored_channels],
+            role: [...initData[ev].ignored_roles],
+            user: [...initData[ev].ignored_users]
+        }};
+        renderTags(ev, 'channel');
+        renderTags(ev, 'role');
+        renderTags(ev, 'user');
+    }});
+}}
+
+function renderTags(ev, type) {{
+    const container = document.getElementById(`tags_${{type}}_${{ev}}`);
+    const hiddenInput = document.getElementById(`ignored_${{type}}s_${{ev}}`);
+    if (!container || !hiddenInput) return;
+
+    container.innerHTML = "";
+    const list = tagData[ev][type];
+    hiddenInput.value = list.join(",");
+
+    list.forEach(id => {{
+        let name = id;
+        if (type === 'channel') name = channelNames[id] || `Channel #${{id}}`;
+        if (type === 'role') name = roleNames[id] || `Rolle #${{id}}`;
+        if (type === 'user') name = `User ID: ${{id}}`;
+
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.innerHTML = `${{name}} <span class="remove" onclick="removeTag('${{ev}}', '${{type}}', ${{id}})">&times;</span>`;
+        container.appendChild(tag);
+    }});
+}}
+
+function addTag(select, type, ev) {{
+    const id = select.value;
+    if (!id) return;
+    select.value = ""; // reset dropdown
+
+    const numId = parseInt(id);
+    if (!tagData[ev][type].includes(numId)) {{
+        tagData[ev][type].push(numId);
+        renderTags(ev, type);
+    }}
+}}
+
+function addUserTag(input, ev) {{
+    const id = input.value.trim();
+    if (!id || isNaN(id)) return;
+    input.value = ""; // reset input
+
+    const numId = parseInt(id);
+    if (!tagData[ev]['user'].includes(numId)) {{
+        tagData[ev]['user'].push(numId);
+        renderTags(ev, 'user');
+    }}
+}}
+
+function removeTag(ev, type, id) {{
+    tagData[ev][type] = tagData[ev][type].filter(item => item !== id);
+    renderTags(ev, type);
+}}
+
+// Start initialization
+document.addEventListener("DOMContentLoaded", () => {{
+    switchTab('messages'); // Default tab
+    initTags();
+}});
+</script>
+"""
+        return {"status": 0, "web_content": {"source": source, "standalone": True}}
