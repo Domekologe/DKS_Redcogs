@@ -62,7 +62,18 @@ except Exception:  # pragma: no cover - webdashboard nicht installiert
         return deco
 
     # Decorators werden zu No-ops; markierte Methoden bleiben normale Methoden.
-    dashboard_widget = dashboard_panel = dashboard_page = _noop_decorator  # type: ignore
+    def _noop_panel(*_args, **_kwargs):
+        def deco(func):
+            def on_submit(sub):
+                return sub
+
+            func.on_submit = on_submit
+            return func
+
+        return deco
+
+    dashboard_widget = dashboard_page = _noop_decorator  # type: ignore
+    dashboard_panel = _noop_panel  # type: ignore
 
     class _Stub:
         """Platzhalter, falls die Datenklassen ohne geladenes Dashboard genutzt werden."""

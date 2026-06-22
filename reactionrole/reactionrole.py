@@ -6,7 +6,8 @@ import json
 import html
 
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel, WidgetData,
+    PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
 
@@ -60,6 +61,36 @@ class ReactionRole(commands.Cog):
             return WidgetData.kpi(value=len(data), label="ReactionRoles")
         except Exception:
             return WidgetData.kpi(value="–", label="ReactionRoles")
+
+    # --- Guild-Panel: Erfolgs-Nachrichten anpassen ----------------------- #
+    @dashboard_panel(
+        "templates", "ReactionRole-Nachrichten", mount="guild_settings", permission="guild_admin"
+    )
+    async def reactionrole_templates_panel(self, ctx):
+        t = await self.config.guild(ctx.guild).templates()
+        variables = [
+            {"token": "{id}", "desc": "ID"},
+            {"token": "{emoji}", "desc": "Emoji"},
+            {"token": "{role}", "desc": "Rolle"},
+        ]
+        return PanelSchema(
+            description="Antworten beim Erstellen/Entfernen von ReactionRoles.",
+            fields=[
+                Field.textarea("set_success", "Erstellt", value=t.get("set_success", ""),
+                               max_length=500, variables=variables),
+                Field.textarea("remove_success", "Entfernt", value=t.get("remove_success", ""),
+                               max_length=500, variables=[{"token": "{id}", "desc": "ID"}]),
+            ],
+        )
+
+    @reactionrole_templates_panel.on_submit
+    async def _save_reactionrole_templates(self, ctx, data):
+        cur = await self.config.guild(ctx.guild).templates()
+        for k in ("set_success", "remove_success"):
+            if k in data:
+                cur[k] = str(data[k])[:500]
+        await self.config.guild(ctx.guild).templates.set(cur)
+        return SubmitResult.ok("Vorlagen gespeichert.")
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

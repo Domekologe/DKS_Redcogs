@@ -3,7 +3,8 @@ from redbot.core import Config, app_commands, commands
 from typing import Any, Dict, Optional
 
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel, WidgetData,
+    PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
 
@@ -82,6 +83,64 @@ class EventMessages(commands.Cog):
             return WidgetData.kpi(value=count, label="Aktive Events")
         except Exception:
             return WidgetData.kpi(value="–", label="Aktive Events")
+
+    # --- Guild-Panel: pro Event aktivieren, Kanal & Nachricht ------------ #
+    @dashboard_panel(
+        "events", "Event-Nachrichten", mount="guild_settings", permission="guild_admin"
+    )
+    async def eventmessages_panel(self, ctx):
+        events = await self.config.guild(ctx.guild).events()
+        templates = await self.config.guild(ctx.guild).templates()
+        if not isinstance(events, dict):
+            events = {}
+        if not isinstance(templates, dict):
+            templates = {}
+        labels = {
+            "join": "Beitritt", "leave": "Verlassen", "kick": "Kick", "ban": "Ban",
+            "unban": "Entbann", "timeout": "Timeout", "timeout_end": "Timeout-Ende",
+        }
+        variables = [
+            {"token": "{display_name}", "desc": "Anzeigename"},
+            {"token": "{username}", "desc": "Username"},
+            {"token": "{moderator}", "desc": "Moderator"},
+            {"token": "{reason}", "desc": "Grund"},
+            {"token": "{duration}", "desc": "Dauer"},
+        ]
+        channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+        ]
+        fields = []
+        for ev in EVENTS:
+            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
+            name = labels.get(ev, ev)
+            fields.append(Field.switch(f"{ev}__enabled", f"{name} – aktiv", value=bool(cfg.get("enabled"))))
+            fields.append(Field.select(f"{ev}__channel", f"{name} – Kanal", channel_options,
+                                       value=str(cfg.get("channel") or "")))
+            fields.append(Field.textarea(f"{ev}__tmpl", f"{name} – Nachricht",
+                                         value=templates.get(ev, ""), max_length=1000, variables=variables))
+        return PanelSchema(description="Pro Event: aktivieren, Kanal wählen und Nachricht festlegen.", fields=fields)
+
+    @eventmessages_panel.on_submit
+    async def _save_eventmessages(self, ctx, data):
+        events = await self.config.guild(ctx.guild).events()
+        templates = await self.config.guild(ctx.guild).templates()
+        if not isinstance(events, dict):
+            events = {}
+        if not isinstance(templates, dict):
+            templates = {}
+        for ev in EVENTS:
+            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
+            if f"{ev}__enabled" in data:
+                cfg["enabled"] = bool(data[f"{ev}__enabled"])
+            if f"{ev}__channel" in data:
+                ch = data[f"{ev}__channel"]
+                cfg["channel"] = int(ch) if ch else None
+            events[ev] = cfg
+            if f"{ev}__tmpl" in data:
+                templates[ev] = str(data[f"{ev}__tmpl"])[:1000]
+        await self.config.guild(ctx.guild).events.set(events)
+        await self.config.guild(ctx.guild).templates.set(templates)
+        return SubmitResult.ok("Event-Nachrichten gespeichert.")
 
     # ------------------------------------------------------------
     # Autocomplete
