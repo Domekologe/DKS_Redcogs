@@ -798,13 +798,28 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
         target = next((m for m in installed if m.name == cog_name), None)
         if target is None:
             raise RpcError(INVALID_PARAMS, f"Cog '{cog_name}' ist nicht installiert")
-        repo = dl._repo_manager.get_repo(getattr(target, "repo_name", ""))
-        if repo is None:
-            raise RpcError(INVALID_PARAMS, "Zugehöriges Repo nicht gefunden")
-        cogs, message = await dl._filter_incorrect_cogs_by_names(repo, [cog_name])
-        if not cogs:
-            raise RpcError(INVALID_PARAMS, message or f"Cog '{cog_name}' nicht im Repo")
-        installed_cogs, failed = await dl._install_cogs(cogs)
+        # WICHTIG: NICHT den Install-Pfad (_filter_incorrect_cogs_by_names) nutzen –
+        # der lehnt bereits installierte Cogs ab ("bereits installiert"). Für ein
+        # Update das Installable direkt neu installieren (überschreibt die Dateien).
+        cog_obj = None
+        try:
+            res = await dl._available_updates(installed)
+            updatable = res[0] if isinstance(res, (tuple, list)) else res
+            cog_obj = next((c for c in (updatable or []) if getattr(c, "name", None) == cog_name), None)
+        except Exception:
+            cog_obj = None
+        if cog_obj is None:
+            # Kein erkanntes Update mehr → direkt aus dem (aktualisierten) Repo-Checkout holen.
+            repo = dl._repo_manager.get_repo(getattr(target, "repo_name", ""))
+            if repo is None:
+                raise RpcError(INVALID_PARAMS, "Zugehöriges Repo nicht gefunden")
+            cog_obj = next(
+                (c for c in getattr(repo, "available_cogs", []) if getattr(c, "name", None) == cog_name),
+                None,
+            )
+        if cog_obj is None:
+            raise RpcError(INVALID_PARAMS, f"Cog '{cog_name}' nicht im Repo gefunden")
+        installed_cogs, failed = await dl._install_cogs([cog_obj])
         if hasattr(dl, "_save_to_installed"):
             await dl._save_to_installed(installed_cogs)
         if failed:
@@ -1151,6 +1166,90 @@ async def pages_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         pages[:] = [p for p in pages if p["slug"] != slug]
     gateway.audit("pages.delete", ctx, {"slug": slug})
     return {"ok": True}
+
+
+# ----- Server-Statistiken (WebServerStats-Cog) ----------------------------- #
+def _serverstats(gateway: Any):
+    return gateway.bot.get_cog("WebServerStats")
+
+
+async def _stats_call(gateway: Any, params: Dict[str, Any], method_name: str, *extra_keys):
+    """Gemeinsamer Helfer: Kontext + Recht + Cog-Methode aufrufen."""
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    cog = _serverstats(gateway)
+    if cog is None:
+        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+    args = params.get("args") or {}
+    days = int(args.get("days", 30) or 30)
+    fn = getattr(cog, method_name)
+    call_args = [ctx.guild]
+    for k in extra_keys:
+        call_args.append(args.get(k))
+    call_args.append(days)
+    return await fn(*call_args)
+
+
+@dispatcher.method("serverstats.overview")
+async def serverstats_overview(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_overview")
+
+
+@dispatcher.method("serverstats.messages")
+async def serverstats_messages(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_messages")
+
+
+@dispatcher.method("serverstats.voice")
+async def serverstats_voice(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_voice")
+
+
+@dispatcher.method("serverstats.status")
+async def serverstats_status(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_status")
+
+
+@dispatcher.method("serverstats.invites")
+async def serverstats_invites(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_invites")
+
+
+@dispatcher.method("serverstats.activity")
+async def serverstats_activity(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_activity")
+
+
+@dispatcher.method("serverstats.member_drilldown")
+async def serverstats_member_drilldown(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    args = params.get("args") or {}
+    mid = args.get("member_id")
+    member_id = int(mid) if mid and str(mid).isdigit() else 0
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    cog = _serverstats(gateway)
+    if cog is None:
+        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+    return await cog.stats_member_drilldown(ctx.guild, member_id, int(args.get("days", 30) or 30))
+
+
+@dispatcher.method("serverstats.channel_drilldown")
+async def serverstats_channel_drilldown(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    args = params.get("args") or {}
+    cid = args.get("channel_id")
+    channel_id = int(cid) if cid and str(cid).isdigit() else 0
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    cog = _serverstats(gateway)
+    if cog is None:
+        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+    return await cog.stats_channel_drilldown(ctx.guild, channel_id, int(args.get("days", 30) or 30))
 
 
 def _maybe_integration_base():

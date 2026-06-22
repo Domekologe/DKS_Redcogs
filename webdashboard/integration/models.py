@@ -102,6 +102,9 @@ class Field:
     placeholder: Optional[str] = None
     # Optionale Variablen-Buttons für TEXTAREA: [{"token": "{member}", "desc": "Mitglied"}]
     variables: Optional[List[Dict[str, Any]]] = None
+    # Bei SELECT: löst beim Ändern sofort ein Speichern + Neuladen des Panels aus
+    # (z. B. Profil wechseln → Felder laden neu).
+    reload_on_change: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -117,6 +120,7 @@ class Field:
             "max_length": self.max_length,
             "placeholder": self.placeholder,
             "variables": self.variables,
+            "reload_on_change": self.reload_on_change or None,
         }
         return {k: v for k, v in d.items() if v is not None}
 

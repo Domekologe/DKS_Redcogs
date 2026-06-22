@@ -88,6 +88,7 @@ def dashboard_panel(
     scope: str = "guild",
     description: Optional[str] = None,
     icon: Optional[str] = None,
+    order: int = 100,  # Tab-Reihenfolge im Modul (kleiner = weiter links)
 ) -> Callable:
     """Registriert eine Methode als kontextuelles Panel (Formular).
 
@@ -98,7 +99,7 @@ def dashboard_panel(
         meta = _ContributionMeta(
             "panel", identifier, name,
             permission=permission, description=description, icon=icon,
-            extra={"mount": mount, "scope": scope},
+            extra={"mount": mount, "scope": scope, "order": order},
         )
         setattr(func, PANEL_ATTR, meta)
 
@@ -123,6 +124,7 @@ def dashboard_list(
     scope: str = "guild",
     description: Optional[str] = None,
     icon: Optional[str] = None,
+    order: int = 100,  # Tab-Reihenfolge im Modul (kleiner = weiter links)
 ) -> Callable:
     """Registriert eine Methode als verwaltbare Liste (Tabelle mit Löschen).
 
@@ -134,7 +136,7 @@ def dashboard_list(
         meta = _ContributionMeta(
             "list", identifier, name,
             permission=permission, description=description, icon=icon,
-            extra={"mount": mount, "scope": scope, "columns": columns or []},
+            extra={"mount": mount, "scope": scope, "columns": columns or [], "order": order},
         )
         setattr(func, LIST_ATTR, meta)
 

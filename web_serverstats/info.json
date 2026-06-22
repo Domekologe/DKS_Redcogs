@@ -1,0 +1,12 @@
+{
+  "name": "WebServerStats",
+  "short": "Server-Statistiken für das DKS Web-Dashboard.",
+  "description": "Sammelt Nachrichten-, Voice-, Mitglieder-, Status-, Einladungs- und Aktivitätsstatistiken pro Server und stellt sie dem DKS Web-Dashboard (Seite /stats) bereit. Speichert zeitliche Tagesbuckets mit Aufbewahrungsfrist.",
+  "tags": ["stats", "analytics", "dashboard", "web"],
+  "author": ["Domekologe"],
+  "requirements": [],
+  "hidden": false,
+  "disabled": false,
+  "min_bot_version": "3.5.0",
+  "install_msg": "WebServerStats installiert. Aktiviere Presence-/Member-Intents für volle Status-/Aktivitätsdaten. Im Web-Dashboard erscheint die Seite 'Statistiken'."
+}

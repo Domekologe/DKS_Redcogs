@@ -413,7 +413,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild-Panel: Profil --------------------------------------------- #
     @dashboard_panel(
-        "wga_profile", "Profil", mount="guild_settings", permission="guild_admin",
+        "wga_profile", "Profil", mount="guild_settings", permission="guild_admin", order=1,
     )
     async def wga_profile_panel(self, ctx):
         language = await self.config.guild(ctx.guild).language()
@@ -442,7 +442,11 @@ class WowGuildAutomation(commands.Cog):
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=str(language or "de-DE"),
                 ),
-                Field.select("active_profile_key", "Aktives Profil", profile_options, value=prof),
+                Field.select(
+                    "active_profile_key", "Aktives Profil", profile_options, value=prof,
+                    reload_on_change=True,
+                    description="Profil wechseln – die Werte unten laden automatisch neu.",
+                ),
                 Field.text(
                     "new_profile_key", "Neues Profil (Schlüssel)", value="",
                     placeholder="leer lassen wenn nicht neu",
@@ -496,7 +500,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild-Liste: WoW-Profile (alle ansehen/bearbeiten/löschen) ------ #
     @dashboard_list(
-        "wga_profiles", "Profile", mount="guild_settings", permission="guild_admin",
+        "wga_profiles", "Profile", mount="guild_settings", permission="guild_admin", order=2,
         columns=[
             {"key": "key", "label": "Profil"},
             {"key": "version", "label": "Version"},

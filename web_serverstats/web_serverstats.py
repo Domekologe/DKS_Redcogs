@@ -1,0 +1,488 @@
+"""WebServerStats – sammelt Server-Statistiken für das DKS Web-Dashboard.
+
+Daten werden in Tages-Buckets (und für Status/Activity in Stunden-Samples) in der
+Red-Config gespeichert und über öffentliche Lese-Methoden (``stats_*``) vom
+WebDashboard-Gateway abgefragt. Die Diagramm-Darstellung passiert in der Web-App.
+
+Hinweise:
+- Bots werden bei Nachrichten/Voice/Activity ignoriert (User Type = Users).
+- Status/Activity benötigen die Presence- und Member-Intents für volle Daten.
+- Alte Buckets werden nach RETENTION_DAYS automatisch entfernt.
+"""
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+import discord
+from discord.ext import tasks
+from redbot.core import Config, commands
+from redbot.core.bot import Red
+
+log = logging.getLogger("red.dks.web_serverstats")
+
+RETENTION_DAYS = 400          # wie lange Tages-Buckets aufbewahrt werden
+SAMPLE_MINUTES = 30           # Intervall der Status-/Activity-Snapshots
+STATUS_RETENTION = 60 * 24 * 60 // SAMPLE_MINUTES  # ~60 Tage an Status-Samples
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _daykey(dt: Optional[datetime] = None) -> str:
+    return (dt or _utcnow()).strftime("%Y-%m-%d")
+
+
+class WebServerStats(commands.Cog):
+    """Server-Statistiken für das DKS Web-Dashboard."""
+
+    def __init__(self, bot: Red) -> None:
+        self.bot = bot
+        self.config = Config.get_conf(self, identifier=0x57_57_53_01, force_registration=True)
+        self.config.register_guild(
+            enabled=True,
+            days={},            # {daykey: {messages, joins, leaves, members, voice_minutes}}
+            msg_channels={},     # {daykey: {channel_id: count}}
+            msg_members={},      # {daykey: {member_id: count}}
+            voice_channels={},   # {daykey: {channel_id: minutes}}
+            voice_members={},    # {daykey: {member_id: minutes}}
+            status_samples=[],   # [{"t": iso, "on": int, "idle": int, "dnd": int, "off": int}]
+            activity={},         # {daykey: {game_name: minutes}}
+            invites={},          # {code: {"uses": int, "inviter_id": int}}
+            invite_daily={},     # {daykey: {code: joins}}
+            invite_logs=[],      # [{"date","user_id","username","code"}]
+            invite_members={},   # {member_id: count}  (Beigetretene je Einlader-Mitglied)
+        )
+        # Laufende Voice-Sessions: {(guild_id, member_id): (channel_id, start_dt)}
+        self._voice: Dict[Tuple[int, int], Tuple[int, datetime]] = {}
+        self._snapshot_loop.start()
+
+    def cog_unload(self) -> None:
+        self._snapshot_loop.cancel()
+
+    # ------------------------------------------------------------------ #
+    # Schreib-Helfer
+    # ------------------------------------------------------------------ #
+    async def _bump_day(self, guild: discord.Guild, field: str, amount: float = 1) -> None:
+        key = _daykey()
+        async with self.config.guild(guild).days() as days:
+            d = days.get(key)
+            if not isinstance(d, dict):
+                d = {}
+            d[field] = d.get(field, 0) + amount
+            days[key] = d
+
+    async def _bump_nested(self, guild: discord.Guild, group: str, sub: str, amount: float = 1) -> None:
+        key = _daykey()
+        async with getattr(self.config.guild(guild), group)() as data:
+            day = data.get(key)
+            if not isinstance(day, dict):
+                day = {}
+            day[sub] = day.get(sub, 0) + amount
+            data[key] = day
+
+    # ------------------------------------------------------------------ #
+    # Listener: Nachrichten
+    # ------------------------------------------------------------------ #
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.guild is None or message.author.bot:
+            return
+        if not await self.config.guild(message.guild).enabled():
+            return
+        try:
+            await self._bump_day(message.guild, "messages")
+            ch_id = getattr(message.channel, "id", None)
+            if ch_id:
+                await self._bump_nested(message.guild, "msg_channels", str(ch_id))
+            await self._bump_nested(message.guild, "msg_members", str(message.author.id))
+        except Exception:
+            log.debug("on_message stats failed", exc_info=True)
+
+    # ------------------------------------------------------------------ #
+    # Listener: Mitglieder
+    # ------------------------------------------------------------------ #
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        if member.bot:
+            return
+        if not await self.config.guild(member.guild).enabled():
+            return
+        try:
+            await self._bump_day(member.guild, "joins")
+            await self._track_invite_use(member)
+        except Exception:
+            log.debug("on_member_join stats failed", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        if member.bot:
+            return
+        if not await self.config.guild(member.guild).enabled():
+            return
+        try:
+            await self._bump_day(member.guild, "leaves")
+        except Exception:
+            log.debug("on_member_remove stats failed", exc_info=True)
+
+    # ------------------------------------------------------------------ #
+    # Listener: Voice
+    # ------------------------------------------------------------------ #
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ) -> None:
+        if member.bot or member.guild is None:
+            return
+        if not await self.config.guild(member.guild).enabled():
+            return
+        key = (member.guild.id, member.id)
+        try:
+            before_ch = before.channel.id if before.channel else None
+            after_ch = after.channel.id if after.channel else None
+            if before_ch == after_ch:
+                return
+            # Alte Session beenden + verbuchen.
+            if before_ch is not None and key in self._voice:
+                await self._end_voice_session(member.guild, member.id, key)
+            # Neue Session starten.
+            if after_ch is not None:
+                self._voice[key] = (after_ch, _utcnow())
+        except Exception:
+            log.debug("voice stats failed", exc_info=True)
+
+    async def _end_voice_session(self, guild: discord.Guild, member_id: int, key) -> None:
+        ch_id, start = self._voice.pop(key, (None, None))
+        if ch_id is None or start is None:
+            return
+        minutes = max(0.0, (_utcnow() - start).total_seconds() / 60.0)
+        if minutes <= 0:
+            return
+        await self._bump_day(guild, "voice_minutes", minutes)
+        await self._bump_nested(guild, "voice_channels", str(ch_id), minutes)
+        await self._bump_nested(guild, "voice_members", str(member_id), minutes)
+
+    # ------------------------------------------------------------------ #
+    # Listener: Einladungen
+    # ------------------------------------------------------------------ #
+    @commands.Cog.listener()
+    async def on_invite_create(self, invite: discord.Invite) -> None:
+        if invite.guild is None:
+            return
+        try:
+            async with self.config.guild(invite.guild).invites() as inv:
+                inv[invite.code] = {
+                    "uses": invite.uses or 0,
+                    "inviter_id": invite.inviter.id if invite.inviter else 0,
+                }
+        except Exception:
+            log.debug("invite_create stats failed", exc_info=True)
+
+    async def _track_invite_use(self, member: discord.Member) -> None:
+        """Vergleicht gespeicherte Invite-Uses mit den aktuellen, um den genutzten Code zu finden."""
+        guild = member.guild
+        try:
+            current = await guild.invites()
+        except Exception:
+            return
+        stored = await self.config.guild(guild).invites()
+        used_code = None
+        inviter_id = 0
+        for inv in current:
+            old = stored.get(inv.code, {}) if isinstance(stored, dict) else {}
+            if (inv.uses or 0) > int(old.get("uses", 0)):
+                used_code = inv.code
+                inviter_id = inv.inviter.id if inv.inviter else 0
+                break
+        # Speicher aktualisieren.
+        async with self.config.guild(guild).invites() as inv_store:
+            for inv in current:
+                inv_store[inv.code] = {
+                    "uses": inv.uses or 0,
+                    "inviter_id": inv.inviter.id if inv.inviter else 0,
+                }
+        if not used_code:
+            return
+        key = _daykey()
+        async with self.config.guild(guild).invite_daily() as daily:
+            day = daily.get(key) if isinstance(daily.get(key), dict) else {}
+            day[used_code] = day.get(used_code, 0) + 1
+            daily[key] = day
+        async with self.config.guild(guild).invite_logs() as logs:
+            logs.append({
+                "date": _utcnow().isoformat(),
+                "user_id": member.id,
+                "username": member.name,
+                "code": used_code,
+            })
+            del logs[:-500]  # nur die letzten 500 behalten
+        if inviter_id:
+            async with self.config.guild(guild).invite_members() as im:
+                im[str(inviter_id)] = im.get(str(inviter_id), 0) + 1
+
+    # ------------------------------------------------------------------ #
+    # Periodischer Snapshot: Mitgliederzahl, Status, Activity
+    # ------------------------------------------------------------------ #
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        # Invite-Cache initial befüllen.
+        for guild in self.bot.guilds:
+            try:
+                if not await self.config.guild(guild).enabled():
+                    continue
+                current = await guild.invites()
+                async with self.config.guild(guild).invites() as inv_store:
+                    for inv in current:
+                        inv_store[inv.code] = {
+                            "uses": inv.uses or 0,
+                            "inviter_id": inv.inviter.id if inv.inviter else 0,
+                        }
+            except Exception:
+                continue
+
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:  # noqa: D401
+        pass
+
+    async def _do_snapshot(self) -> None:
+        for guild in list(self.bot.guilds):
+            try:
+                if not await self.config.guild(guild).enabled():
+                    continue
+                # Mitgliederzahl (letzter Wert des Tages).
+                await self._set_day(guild, "members", guild.member_count or 0)
+                # Status-Zählung.
+                on = idle = dnd = off = 0
+                games: Dict[str, int] = defaultdict(int)
+                for m in guild.members:
+                    if m.bot:
+                        continue
+                    st = getattr(m, "status", discord.Status.offline)
+                    if st == discord.Status.online:
+                        on += 1
+                    elif st == discord.Status.idle:
+                        idle += 1
+                    elif st == discord.Status.dnd:
+                        dnd += 1
+                    else:
+                        off += 1
+                    for act in getattr(m, "activities", []) or []:
+                        if isinstance(act, discord.Game) or getattr(act, "type", None) == discord.ActivityType.playing:
+                            name = getattr(act, "name", None)
+                            if name:
+                                games[name] += 1
+                async with self.config.guild(guild).status_samples() as samples:
+                    samples.append({
+                        "t": _utcnow().isoformat(), "on": on, "idle": idle, "dnd": dnd, "off": off,
+                    })
+                    del samples[:-STATUS_RETENTION]
+                if games:
+                    key = _daykey()
+                    async with self.config.guild(guild).activity() as act_store:
+                        day = act_store.get(key) if isinstance(act_store.get(key), dict) else {}
+                        for name, count in games.items():
+                            # Jeder Snapshot ≈ SAMPLE_MINUTES Spielzeit je spielendem Mitglied.
+                            day[name] = day.get(name, 0) + count * SAMPLE_MINUTES
+                        act_store[key] = day
+                await self._prune(guild)
+            except Exception:
+                log.debug("snapshot failed for guild %s", guild.id, exc_info=True)
+
+    async def _set_day(self, guild: discord.Guild, field: str, value: float) -> None:
+        key = _daykey()
+        async with self.config.guild(guild).days() as days:
+            d = days.get(key) if isinstance(days.get(key), dict) else {}
+            d[field] = value
+            days[key] = d
+
+    async def _prune(self, guild: discord.Guild) -> None:
+        cutoff = _daykey(_utcnow() - timedelta(days=RETENTION_DAYS))
+        for group in ("days", "msg_channels", "msg_members", "voice_channels", "voice_members", "activity", "invite_daily"):
+            async with getattr(self.config.guild(guild), group)() as data:
+                for k in [k for k in data.keys() if k < cutoff]:
+                    data.pop(k, None)
+
+    @tasks.loop(minutes=SAMPLE_MINUTES)
+    async def _snapshot_loop(self) -> None:
+        await self._do_snapshot()
+
+    @_snapshot_loop.before_loop
+    async def _before_snapshot(self) -> None:
+        await self.bot.wait_until_red_ready()
+
+    # ================================================================== #
+    # Lese-API (vom WebDashboard-Gateway aufgerufen)
+    # ================================================================== #
+    def _range_keys(self, days: int) -> List[str]:
+        days = max(1, min(int(days or 30), RETENTION_DAYS))
+        today = _utcnow().date()
+        return [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1)]
+
+    def _top(self, guild: discord.Guild, totals: Dict[str, float], kind: str, limit: int = 10) -> List[Dict[str, Any]]:
+        items = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:limit]
+        out = []
+        for id_str, val in items:
+            name = str(id_str)
+            try:
+                if kind == "member":
+                    m = guild.get_member(int(id_str))
+                    name = m.display_name if m else str(id_str)
+                else:
+                    c = guild.get_channel(int(id_str))
+                    name = c.name if c else str(id_str)
+            except Exception:
+                name = str(id_str)
+            out.append({"id": str(id_str), "name": name,
+                        "value": round(val, 2) if isinstance(val, float) else val})
+        return out
+
+    async def stats_overview(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        daysd = await self.config.guild(guild).days()
+        daysd = daysd if isinstance(daysd, dict) else {}
+
+        def day(k):
+            d = daysd.get(k, {})
+            return d if isinstance(d, dict) else {}
+
+        members = [day(k).get("members") or None for k in keys]
+        joins = [int(day(k).get("joins", 0)) for k in keys]
+        leaves = [int(day(k).get("leaves", 0)) for k in keys]
+        last7 = keys[-7:]
+        return {
+            "labels": keys,
+            "members": members,
+            "joins": joins,
+            "leaves": leaves,
+            "kpi": {
+                "members": guild.member_count or 0,
+                "joins_7d": sum(int(day(k).get("joins", 0)) for k in last7),
+                "leaves_7d": sum(int(day(k).get("leaves", 0)) for k in last7),
+                "messages_7d": sum(int(day(k).get("messages", 0)) for k in last7),
+                "voice_hours_7d": round(sum(float(day(k).get("voice_minutes", 0)) for k in last7) / 60.0, 1),
+            },
+        }
+
+    async def stats_messages(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        daysd = await self.config.guild(guild).days()
+        ch = await self.config.guild(guild).msg_channels()
+        mem = await self.config.guild(guild).msg_members()
+        series = [int((daysd.get(k, {}) or {}).get("messages", 0)) for k in keys]
+        ch_tot: Dict[str, float] = defaultdict(int)
+        mem_tot: Dict[str, float] = defaultdict(int)
+        uniq_ch, uniq_mem = set(), set()
+        for k in keys:
+            for cid, c in (ch.get(k, {}) or {}).items():
+                ch_tot[cid] += c
+                uniq_ch.add(cid)
+            for mid, c in (mem.get(k, {}) or {}).items():
+                mem_tot[mid] += c
+                uniq_mem.add(mid)
+        return {
+            "labels": keys, "values": series, "total": sum(series),
+            "unique_members": len(uniq_mem), "unique_channels": len(uniq_ch),
+            "top_members": self._top(guild, mem_tot, "member"),
+            "top_channels": self._top(guild, ch_tot, "channel"),
+        }
+
+    async def stats_voice(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        daysd = await self.config.guild(guild).days()
+        ch = await self.config.guild(guild).voice_channels()
+        mem = await self.config.guild(guild).voice_members()
+        series = [round(float((daysd.get(k, {}) or {}).get("voice_minutes", 0)) / 60.0, 2) for k in keys]
+        ch_tot: Dict[str, float] = defaultdict(float)
+        mem_tot: Dict[str, float] = defaultdict(float)
+        uniq_ch, uniq_mem = set(), set()
+        for k in keys:
+            for cid, c in (ch.get(k, {}) or {}).items():
+                ch_tot[cid] += c / 60.0
+                uniq_ch.add(cid)
+            for mid, c in (mem.get(k, {}) or {}).items():
+                mem_tot[mid] += c / 60.0
+                uniq_mem.add(mid)
+        return {
+            "labels": keys, "values": series, "total": round(sum(series), 2),
+            "unique_members": len(uniq_mem), "unique_channels": len(uniq_ch),
+            "top_members": self._top(guild, mem_tot, "member"),
+            "top_channels": self._top(guild, ch_tot, "channel"),
+        }
+
+    async def stats_status(self, guild: discord.Guild, days: int = 14) -> Dict[str, Any]:
+        cutoff = (_utcnow() - timedelta(days=max(1, int(days or 14)))).isoformat()
+        samples = await self.config.guild(guild).status_samples()
+        out = [s for s in (samples or []) if str(s.get("t", "")) >= cutoff]
+        return {"samples": out}
+
+    async def stats_invites(self, guild: discord.Guild, days: int = 14) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        daily = await self.config.guild(guild).invite_daily()
+        logs = await self.config.guild(guild).invite_logs()
+        inv_members = await self.config.guild(guild).invite_members()
+        codes = set()
+        for k in keys:
+            for code in (daily.get(k, {}) or {}).keys():
+                codes.add(code)
+        series = {code: [int((daily.get(k, {}) or {}).get(code, 0)) for k in keys] for code in codes}
+        top = sorted(((code, sum(series[code])) for code in codes), key=lambda x: x[1], reverse=True)[:10]
+        return {
+            "labels": keys,
+            "series": series,
+            "top_invites": [{"code": c, "count": n} for c, n in top],
+            "recent_logs": list(reversed((logs or [])[-25:])),
+            "top_members": self._top(guild, {k: v for k, v in (inv_members or {}).items()}, "member"),
+        }
+
+    async def stats_activity(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        act = await self.config.guild(guild).activity()
+        tot: Dict[str, float] = defaultdict(float)
+        for k in keys:
+            for name, mins in (act.get(k, {}) or {}).items():
+                tot[name] += mins
+        top = sorted(tot.items(), key=lambda x: x[1], reverse=True)[:15]
+        return {"top_games": [{"name": n, "minutes": round(m)} for n, m in top]}
+
+    async def _entity_options(self, guild: discord.Guild, group: str, kind: str) -> List[Dict[str, str]]:
+        data = await getattr(self.config.guild(guild), group)()
+        tot: Dict[str, float] = defaultdict(float)
+        for day in (data or {}).values():
+            for _id, c in (day or {}).items():
+                tot[_id] += c
+        return [{"id": e["id"], "name": e["name"]} for e in self._top(guild, tot, kind, limit=200)]
+
+    async def stats_member_drilldown(self, guild: discord.Guild, member_id: int, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        mem = await self.config.guild(guild).msg_members()
+        vmem = await self.config.guild(guild).voice_members()
+        options = await self._entity_options(guild, "msg_members", "member")
+        if not member_id and options:
+            member_id = int(options[0]["id"])
+        msgs = [int((mem.get(k, {}) or {}).get(str(member_id), 0)) for k in keys]
+        voice = [round(float((vmem.get(k, {}) or {}).get(str(member_id), 0)) / 60.0, 2) for k in keys]
+        m = guild.get_member(int(member_id)) if member_id else None
+        return {
+            "labels": keys, "messages": msgs, "voice_hours": voice,
+            "name": (m.display_name if m else str(member_id)),
+            "member_id": str(member_id), "options": options,
+        }
+
+    async def stats_channel_drilldown(self, guild: discord.Guild, channel_id: int, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        ch = await self.config.guild(guild).msg_channels()
+        vch = await self.config.guild(guild).voice_channels()
+        options = await self._entity_options(guild, "msg_channels", "channel")
+        if not channel_id and options:
+            channel_id = int(options[0]["id"])
+        msgs = [int((ch.get(k, {}) or {}).get(str(channel_id), 0)) for k in keys]
+        voice = [round(float((vch.get(k, {}) or {}).get(str(channel_id), 0)) / 60.0, 2) for k in keys]
+        c = guild.get_channel(int(channel_id)) if channel_id else None
+        return {
+            "labels": keys, "messages": msgs, "voice_hours": voice,
+            "name": (c.name if c else str(channel_id)),
+            "channel_id": str(channel_id), "options": options,
+        }

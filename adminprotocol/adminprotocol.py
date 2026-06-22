@@ -58,6 +58,27 @@ EVENTS = {
     "voice_switch": "Sprachkanal gewechselt"
 }
 
+# Gruppierung der Events in Kategorien (für übersichtliche Tabs im Dashboard).
+EVENT_CATEGORIES = {
+    "messages": ("Nachrichten & Kanäle", [
+        "message_edit", "message_delete",
+        "channel_create", "channel_delete", "channel_update",
+        "thread_create", "thread_delete", "thread_update",
+    ]),
+    "members": ("Mitglieder & Rollen", [
+        "user_join", "user_leave",
+        "nickname_change_other", "nickname_change_self",
+        "role_create", "role_delete", "role_add", "role_remove",
+    ]),
+    "moderation": ("Moderation", [
+        "user_ban", "user_unban", "user_kick", "user_timeout", "mod_command",
+    ]),
+    "voice": ("Sprachkanäle & Einladungen", [
+        "voice_join", "voice_leave", "voice_switch", "voice_move",
+        "voice_disconnect", "voice_status", "invite_create",
+    ]),
+}
+
 def format_duration(seconds: float) -> str:
     if seconds <= 0:
         return "Permanent / Sofort"
@@ -114,11 +135,8 @@ class AdminProtocol(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Aktive Log-Events")
 
-    # --- Guild-Panel: Log-Events (aktiv + Kanal je Event) ---------------- #
-    @dashboard_panel(
-        "events", "Log-Events", mount="guild_settings", permission="guild_admin"
-    )
-    async def adminprotocol_panel(self, ctx):
+    # --- Guild-Panels: Log-Events nach Kategorie (übersichtliche Tabs) ---- #
+    async def _ap_events_schema(self, ctx, keys):
         events = await self.config.guild(ctx.guild).events()
         if not isinstance(events, dict):
             events = {}
@@ -126,19 +144,19 @@ class AdminProtocol(commands.Cog):
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
         fields = []
-        for ev, label in EVENTS.items():
+        for ev in keys:
+            label = EVENTS.get(ev, ev)
             cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
             fields.append(Field.switch(f"{ev}__enabled", f"{label} – aktiv", value=bool(cfg.get("enabled"))))
             fields.append(Field.select(f"{ev}__channel", f"{label} – Kanal", channel_options,
                                        value=str(cfg.get("channel") or "")))
         return PanelSchema(description="Pro Ereignis aktivieren und Ziel-Kanal wählen.", fields=fields)
 
-    @adminprotocol_panel.on_submit
-    async def _save_adminprotocol(self, ctx, data):
+    async def _ap_events_save(self, ctx, data, keys):
         events = await self.config.guild(ctx.guild).events()
         if not isinstance(events, dict):
             events = {}
-        for ev in EVENTS:
+        for ev in keys:
             cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
             if f"{ev}__enabled" in data:
                 cfg["enabled"] = bool(data[f"{ev}__enabled"])
@@ -152,9 +170,41 @@ class AdminProtocol(commands.Cog):
         await self.config.guild(ctx.guild).events.set(events)
         return SubmitResult.ok("Log-Events gespeichert.")
 
+    @dashboard_panel("events_messages", "Nachrichten & Kanäle", mount="guild_settings", permission="guild_admin", order=1)
+    async def ap_panel_messages(self, ctx):
+        return await self._ap_events_schema(ctx, EVENT_CATEGORIES["messages"][1])
+
+    @ap_panel_messages.on_submit
+    async def _ap_save_messages(self, ctx, data):
+        return await self._ap_events_save(ctx, data, EVENT_CATEGORIES["messages"][1])
+
+    @dashboard_panel("events_members", "Mitglieder & Rollen", mount="guild_settings", permission="guild_admin", order=2)
+    async def ap_panel_members(self, ctx):
+        return await self._ap_events_schema(ctx, EVENT_CATEGORIES["members"][1])
+
+    @ap_panel_members.on_submit
+    async def _ap_save_members(self, ctx, data):
+        return await self._ap_events_save(ctx, data, EVENT_CATEGORIES["members"][1])
+
+    @dashboard_panel("events_moderation", "Moderation", mount="guild_settings", permission="guild_admin", order=3)
+    async def ap_panel_moderation(self, ctx):
+        return await self._ap_events_schema(ctx, EVENT_CATEGORIES["moderation"][1])
+
+    @ap_panel_moderation.on_submit
+    async def _ap_save_moderation(self, ctx, data):
+        return await self._ap_events_save(ctx, data, EVENT_CATEGORIES["moderation"][1])
+
+    @dashboard_panel("events_voice", "Sprachkanäle & Einladungen", mount="guild_settings", permission="guild_admin", order=4)
+    async def ap_panel_voice(self, ctx):
+        return await self._ap_events_schema(ctx, EVENT_CATEGORIES["voice"][1])
+
+    @ap_panel_voice.on_submit
+    async def _ap_save_voice(self, ctx, data):
+        return await self._ap_events_save(ctx, data, EVENT_CATEGORIES["voice"][1])
+
     # --- Guild-Panel: Ausnahmen je (aktivem) Event ----------------------- #
     @dashboard_panel(
-        "events_exceptions", "Ausnahmen", mount="guild_settings", permission="guild_admin"
+        "events_exceptions", "Ausnahmen", mount="guild_settings", permission="guild_admin", order=5
     )
     async def adminprotocol_exceptions_panel(self, ctx):
         """Ignorierte Kanäle/Rollen/User pro aktivem Log-Event.
