@@ -464,16 +464,26 @@ class WowGuildAutomation(commands.Cog):
         realm = str(data.get("realm", "")).strip()
         guild_name = str(data.get("guild_name", "")).strip()
         selected = str(data.get("active_profile_key", "")).strip()
+        current = await self._wga_active_profile(ctx)
+        msg = "Profil gespeichert."
         async with self.config.guild(ctx.guild).wow_profiles() as profiles:
             if not isinstance(profiles, dict):
                 profiles.clear()
             if new_key:
+                # Neues Profil anlegen + aktiv schalten.
                 profiles[new_key] = {
-                    "region": region, "version": version, "realm": realm, "guild_name": guild_name,
+                    "region": region or "eu", "version": version, "realm": realm, "guild_name": guild_name,
                 }
                 active_key = new_key
+                msg = f"Profil '{new_key}' angelegt und aktiviert."
+            elif selected and selected != current:
+                # Reines Umschalten: die Felder gehören noch zum ALTEN Profil –
+                # NICHT überschreiben, nur aktiv wechseln (lädt beim nächsten Öffnen).
+                active_key = selected
+                msg = f"Profil '{selected}' geladen."
             else:
-                active_key = selected or await self._wga_active_profile(ctx)
+                # Gleiches Profil bearbeiten.
+                active_key = current
                 entry = profiles.get(active_key)
                 if not isinstance(entry, dict):
                     entry = {}
@@ -482,7 +492,93 @@ class WowGuildAutomation(commands.Cog):
                 )
                 profiles[active_key] = entry
         await self.config.guild(ctx.guild).active_profile_key.set(active_key)
-        return SubmitResult.ok("Profil gespeichert.")
+        return SubmitResult.ok(msg)
+
+    # --- Guild-Liste: WoW-Profile (alle ansehen/bearbeiten/löschen) ------ #
+    @dashboard_list(
+        "wga_profiles", "Profile", mount="guild_settings", permission="guild_admin",
+        columns=[
+            {"key": "key", "label": "Profil"},
+            {"key": "version", "label": "Version"},
+            {"key": "realm", "label": "Realm"},
+            {"key": "guild", "label": "Gilde"},
+            {"key": "active", "label": "Aktiv"},
+        ],
+        description="Alle WoW-Profile dieses Servers. Bearbeiten oder löschen pro Zeile; Anlegen im Tab „Profil".",
+    )
+    async def wga_profiles_list(self, ctx):
+        profiles = await self.config.guild(ctx.guild).wow_profiles()
+        active = await self._wga_active_profile(ctx)
+        if not isinstance(profiles, dict):
+            profiles = {}
+        rows = []
+        for key, p in profiles.items():
+            p = p if isinstance(p, dict) else {}
+            rows.append({"id": str(key), "cells": {
+                "key": str(key),
+                "version": str(p.get("version", "")),
+                "realm": str(p.get("realm", "") or "—"),
+                "guild": str(p.get("guild_name", "") or "—"),
+                "active": "✅" if key == active else "",
+            }})
+        return rows
+
+    @wga_profiles_list.edit_form
+    async def _wga_profiles_edit_form(self, ctx, item_id):
+        profiles = await self.config.guild(ctx.guild).wow_profiles()
+        p = (profiles.get(str(item_id)) or {}) if isinstance(profiles, dict) else {}
+        if not isinstance(p, dict):
+            p = {}
+        version_options = [
+            {"value": "retail", "label": "Retail"},
+            {"value": "classic", "label": "Classic"},
+            {"value": "classic_era", "label": "Classic Era"},
+            {"value": "mop_classic", "label": "MoP Classic"},
+            {"value": "sod", "label": "SoD"},
+        ]
+        return PanelSchema(
+            description=f"Profil '{item_id}' bearbeiten.",
+            fields=[
+                Field.text("region", "Region", value=str(p.get("region", "eu"))),
+                Field.select("version", "Version", version_options, value=str(p.get("version", "retail"))),
+                Field.text("realm", "Realm", value=str(p.get("realm", ""))),
+                Field.text("guild_name", "Gildenname", value=str(p.get("guild_name", ""))),
+            ],
+        )
+
+    @wga_profiles_list.on_edit
+    async def _wga_profiles_edit(self, ctx, item_id, data):
+        async with self.config.guild(ctx.guild).wow_profiles() as profiles:
+            if not isinstance(profiles, dict):
+                return SubmitResult.fail("Keine Profile vorhanden.")
+            entry = profiles.get(str(item_id))
+            if not isinstance(entry, dict):
+                entry = {}
+            entry.update({
+                "region": str(data.get("region", "")).strip() or "eu",
+                "version": str(data.get("version", "retail")).strip() or "retail",
+                "realm": str(data.get("realm", "")).strip(),
+                "guild_name": str(data.get("guild_name", "")).strip(),
+            })
+            profiles[str(item_id)] = entry
+        return SubmitResult.ok("Profil aktualisiert.")
+
+    @wga_profiles_list.on_delete
+    async def _wga_profiles_delete(self, ctx, item_id):
+        key = str(item_id)
+        async with self.config.guild(ctx.guild).wow_profiles() as profiles:
+            if not isinstance(profiles, dict) or key not in profiles:
+                return SubmitResult.fail("Profil nicht gefunden.")
+            if len(profiles) <= 1:
+                return SubmitResult.fail("Das letzte Profil kann nicht gelöscht werden.")
+            profiles.pop(key, None)
+        # Falls das aktive Profil gelöscht wurde, auf ein anderes umschalten.
+        active = await self._wga_active_profile(ctx)
+        if active == key:
+            remaining = await self.config.guild(ctx.guild).wow_profiles()
+            if isinstance(remaining, dict) and remaining:
+                await self.config.guild(ctx.guild).active_profile_key.set(next(iter(remaining.keys())))
+        return SubmitResult.ok("Profil gelöscht.")
 
     # --- Guild-Panel: Onboarding ----------------------------------------- #
     @dashboard_panel(
