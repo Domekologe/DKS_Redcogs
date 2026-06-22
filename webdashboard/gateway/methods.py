@@ -1170,7 +1170,21 @@ async def pages_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ----- Server-Statistiken (WebServerStats-Cog) ----------------------------- #
 def _serverstats(gateway: Any):
-    return gateway.bot.get_cog("WebServerStats")
+    bot = gateway.bot
+    cog = bot.get_cog("WebServerStats")
+    if cog is not None:
+        return cog
+    # Fallback: Cog über Klassennamen oder Modul (web_serverstats) finden,
+    # falls der qualifizierte Name abweicht.
+    for c in bot.cogs.values():
+        try:
+            if type(c).__name__ == "WebServerStats":
+                return c
+            if str(getattr(type(c), "__module__", "")).split(".")[0] == "web_serverstats":
+                return c
+        except Exception:
+            continue
+    return None
 
 
 async def _stats_call(gateway: Any, params: Dict[str, Any], method_name: str, *extra_keys):
