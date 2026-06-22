@@ -83,6 +83,7 @@ from .functions.blizzard import BlizzardService
 from .dks_dashboard import (
     dashboard_widget,
     dashboard_panel,
+    dashboard_list,
     WidgetData,
     PanelSchema,
     Field,
@@ -335,6 +336,48 @@ class WowGuildAutomation(commands.Cog):
         except Exception:
             pass
         return SubmitResult.ok("Gespeichert.")
+
+    # --- Guild-Panel: Verbündete Gilde hinzufügen ------------------------ #
+    @dashboard_panel(
+        "allied_add", "Verbündete Gilde hinzufügen", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_allied_add_panel(self, ctx):
+        return PanelSchema(
+            description="Gildennamen eingeben und speichern, um ihn zur Liste hinzuzufügen.",
+            fields=[Field.text("guild_name", "Gildenname", value="", placeholder="z. B. Meine-Gilde")],
+            submit_label="Hinzufügen",
+        )
+
+    @wga_allied_add_panel.on_submit
+    async def _wga_allied_add(self, ctx, data):
+        name = str(data.get("guild_name", "")).strip()
+        if not name:
+            return SubmitResult.fail("Bitte einen Gildennamen eingeben.")
+        async with self.config.guild(ctx.guild).allied_guilds() as gl:
+            if name in gl:
+                return SubmitResult.fail("Gilde ist bereits in der Liste.")
+            gl.append(name)
+        return SubmitResult.ok("Gilde hinzugefügt.")
+
+    # --- Guild-Liste: Verbündete Gilden (ansehen/löschen) ---------------- #
+    @dashboard_list(
+        "allied_guilds", "Verbündete Gilden", mount="guild_settings", permission="guild_admin",
+        columns=[{"key": "guild", "label": "Gilde"}],
+        description="Verbündete Gilden, die abgefragt werden. Hinzufügen über das Hinzufügen-Tab.",
+    )
+    async def wga_allied_list(self, ctx):
+        guilds = await self.config.guild(ctx.guild).allied_guilds()
+        return [{"id": str(g), "cells": {"guild": str(g)}} for g in (guilds or [])]
+
+    @wga_allied_list.on_delete
+    async def _wga_allied_delete(self, ctx, item_id):
+        async with self.config.guild(ctx.guild).allied_guilds() as gl:
+            matches = [g for g in gl if str(g) == str(item_id)]
+            if not matches:
+                return SubmitResult.fail("Eintrag nicht gefunden.")
+            for g in matches:
+                gl.remove(g)
+        return SubmitResult.ok("Verbündete Gilde entfernt.")
 
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
         cfg = await self.config.guild(guild).all()

@@ -33,6 +33,7 @@ from .comparechars import CompareChars
 from .dks_dashboard import (
     dashboard_widget,
     dashboard_panel,
+    dashboard_list,
     WidgetData,
     PanelSchema,
     Field,
@@ -586,6 +587,31 @@ class WoWTools(
         except Exception:
             pass
         return SubmitResult.ok("API-Tokens gespeichert.")
+
+    # --- Guild-Liste: Scoreboard-Blacklist (Charakternamen) -------------- #
+    @dashboard_list(
+        "scoreboard_blacklist", "Scoreboard-Blacklist", mount="guild_settings",
+        permission="guild_admin",
+        columns=[{"key": "name", "label": "Charakter"}],
+        description="Vom Scoreboard ausgeschlossene Charaktere. Hinzufügen per Befehl.",
+    )
+    async def wowtools_blacklist_list(self, ctx):
+        names = await self.config.guild(ctx.guild).scoreboard_blacklist()
+        return [
+            {"id": str(n), "cells": {"name": str(n)}}
+            for n in (names or [])
+        ]
+
+    @wowtools_blacklist_list.on_delete
+    async def _wowtools_blacklist_delete(self, ctx, item_id):
+        async with self.config.guild(ctx.guild).scoreboard_blacklist() as bl:
+            # nach Wert entfernen (Liste von Namen)
+            matches = [n for n in bl if str(n) == str(item_id)]
+            if not matches:
+                return SubmitResult.fail("Eintrag nicht gefunden.")
+            for n in matches:
+                bl.remove(n)
+        return SubmitResult.ok("Von der Blacklist entfernt.")
 
     async def cog_unload(self):
         unregister_dashboard(self)

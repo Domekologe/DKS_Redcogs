@@ -12,6 +12,7 @@ Dritt-Cogs importieren von hier::
 from .base import DashboardIntegration
 from .context import DashboardContext
 from .decorators import (
+    dashboard_list,
     dashboard_page,
     dashboard_panel,
     dashboard_widget,
@@ -40,6 +41,7 @@ __all__ = [
     "dashboard_widget",
     "dashboard_panel",
     "dashboard_page",
+    "dashboard_list",
     "iter_contributions",
     "WidgetData",
     "WidgetKind",

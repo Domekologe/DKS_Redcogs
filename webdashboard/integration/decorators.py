@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional
 WIDGET_ATTR = "__dashboard_widget__"
 PANEL_ATTR = "__dashboard_panel__"
 PAGE_ATTR = "__dashboard_page__"
+LIST_ATTR = "__dashboard_list__"
 
 
 class _ContributionMeta:
@@ -36,6 +37,10 @@ class _ContributionMeta:
         self.extra = extra or {}
         # wird bei Panels gesetzt
         self.submit_handler: Optional[Callable] = None
+        # wird bei Listen gesetzt
+        self.delete_handler: Optional[Callable] = None
+        self.edit_handler: Optional[Callable] = None
+        self.edit_form_handler: Optional[Callable] = None
 
     def manifest(self) -> dict:
         return {
@@ -108,6 +113,53 @@ def dashboard_panel(
     return decorator
 
 
+def dashboard_list(
+    identifier: str,
+    name: str,
+    *,
+    columns: Optional[List[dict]] = None,  # [{"key": "...", "label": "..."}]
+    mount: str = "guild_settings",
+    permission: str = "guild_admin",
+    scope: str = "guild",
+    description: Optional[str] = None,
+    icon: Optional[str] = None,
+) -> Callable:
+    """Registriert eine Methode als verwaltbare Liste (Tabelle mit Löschen).
+
+    Die Methode liefert Zeilen ``[{"id": "...", "cells": {col_key: wert, ...}}]``.
+    Der Lösch-Handler wird über ``@<list>.on_delete`` gesetzt und erhält ``(ctx, id)``.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        meta = _ContributionMeta(
+            "list", identifier, name,
+            permission=permission, description=description, icon=icon,
+            extra={"mount": mount, "scope": scope, "columns": columns or []},
+        )
+        setattr(func, LIST_ATTR, meta)
+
+        def on_delete(delete_func: Callable) -> Callable:
+            meta.delete_handler = delete_func
+            return delete_func
+
+        def edit_form(form_func: Callable) -> Callable:
+            """Liefert das Bearbeiten-Formular für eine Zeile: ``(ctx, id) -> PanelSchema``."""
+            meta.edit_form_handler = form_func
+            return form_func
+
+        def on_edit(edit_func: Callable) -> Callable:
+            """Speichert die Änderungen einer Zeile: ``(ctx, id, data) -> SubmitResult``."""
+            meta.edit_handler = edit_func
+            return edit_func
+
+        func.on_delete = on_delete  # type: ignore[attr-defined]
+        func.edit_form = edit_form  # type: ignore[attr-defined]
+        func.on_edit = on_edit  # type: ignore[attr-defined]
+        return func
+
+    return decorator
+
+
 def dashboard_page(
     identifier: str,
     name: str,
@@ -143,7 +195,7 @@ def iter_contributions(cog: Any) -> List[tuple]:
         if not callable(member):
             continue
         func = getattr(member, "__func__", member)
-        for marker in (WIDGET_ATTR, PANEL_ATTR, PAGE_ATTR):
+        for marker in (WIDGET_ATTR, PANEL_ATTR, PAGE_ATTR, LIST_ATTR):
             meta = getattr(func, marker, None)
             if meta is not None:
                 found.append((attr_name, meta, member))

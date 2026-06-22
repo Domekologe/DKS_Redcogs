@@ -6,7 +6,7 @@ import json
 import html
 
 from .dks_dashboard import (
-    dashboard_widget, dashboard_panel, WidgetData,
+    dashboard_widget, dashboard_panel, dashboard_list, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
@@ -167,6 +167,86 @@ class ReactionRole(commands.Cog):
                 "role_id": role.id,
             }
         return SubmitResult.ok(f"ReactionRole angelegt (ID {rr_id}).")
+
+    # --- Guild-Liste: bestehende ReactionRoles ansehen/löschen ----------- #
+    @dashboard_list(
+        "rr_list", "Bestehende ReactionRoles", mount="guild_settings", permission="guild_admin",
+        columns=[
+            {"key": "channel", "label": "Kanal"},
+            {"key": "message", "label": "Nachricht-ID"},
+            {"key": "emoji", "label": "Emoji"},
+            {"key": "role", "label": "Rolle"},
+        ],
+    )
+    async def reactionrole_list(self, ctx):
+        data = await self.config.guild(ctx.guild).reactionroles()
+        rows = []
+        for rid, e in (data or {}).items():
+            if not isinstance(e, dict):
+                continue
+            ch = ctx.guild.get_channel(e.get("channel_id"))
+            role = ctx.guild.get_role(e.get("role_id"))
+            rows.append({
+                "id": rid,
+                "cells": {
+                    "channel": ("#" + ch.name) if ch else str(e.get("channel_id")),
+                    "message": str(e.get("message_id")),
+                    "emoji": str(e.get("emoji", "")),
+                    "role": role.name if role else str(e.get("role_id")),
+                },
+            })
+        return rows
+
+    @reactionrole_list.on_delete
+    async def _delete_reactionrole(self, ctx, item_id):
+        entry = None
+        async with self.config.guild(ctx.guild).reactionroles() as d:
+            entry = d.pop(item_id, None)
+        if entry is None:
+            return SubmitResult.fail("Eintrag nicht gefunden.")
+        # Reaktion an der Nachricht aufräumen (best effort).
+        try:
+            ch = ctx.guild.get_channel(entry.get("channel_id"))
+            if ch:
+                msg = await ch.fetch_message(entry.get("message_id"))
+                await msg.clear_reaction(entry.get("emoji"))
+        except Exception:
+            pass
+        return SubmitResult.ok("ReactionRole entfernt.")
+
+    @reactionrole_list.edit_form
+    async def _edit_reactionrole_form(self, ctx, item_id):
+        """Bearbeiten: nur die zugewiesene Rolle ist sinnvoll änderbar.
+
+        Kanal/Nachricht/Emoji bestimmen die Reaktion selbst – diese zu ändern
+        entspräche einem neuen Eintrag (dafür das Anlegen-Panel nutzen).
+        """
+        data = await self.config.guild(ctx.guild).reactionroles()
+        entry = (data or {}).get(item_id) or {}
+        role_options = [
+            {"value": str(r.id), "label": r.name}
+            for r in ctx.guild.roles if r.name != "@everyone"
+        ]
+        return PanelSchema(
+            description="Zugewiesene Rolle ändern. Kanal/Nachricht/Emoji bleiben unverändert.",
+            fields=[
+                Field.select("role_id", "Zugewiesene Rolle", role_options,
+                             value=str(entry.get("role_id") or "")),
+            ],
+        )
+
+    @reactionrole_list.on_edit
+    async def _edit_reactionrole(self, ctx, item_id, data):
+        new_role = data.get("role_id")
+        if not new_role or not str(new_role).isdigit():
+            return SubmitResult.fail("Bitte eine gültige Rolle wählen.")
+        async with self.config.guild(ctx.guild).reactionroles() as d:
+            entry = d.get(item_id)
+            if not isinstance(entry, dict):
+                return SubmitResult.fail("Eintrag nicht gefunden.")
+            entry["role_id"] = int(new_role)
+            d[item_id] = entry
+        return SubmitResult.ok("Rolle aktualisiert.")
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

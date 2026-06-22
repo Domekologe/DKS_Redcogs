@@ -363,6 +363,69 @@ async def page_schema(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Cog-Verwaltung (nur Bot-Owner)
 # --------------------------------------------------------------------------- #
+@dispatcher.method("list.rows")
+async def list_rows(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    key = (params.get("args") or {}).get("key")
+    contrib = gateway.registry.get(key)
+    if contrib is None or contrib.kind != "list":
+        raise RpcError(INVALID_PARAMS, "Unbekannte Liste")
+    await _require(gateway, ctx, contrib.meta.permission)
+    rows = await contrib.handler(ctx)
+    return {"rows": rows, "columns": contrib.meta.extra.get("columns", [])}
+
+
+@dispatcher.method("list.delete")
+async def list_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    args = params.get("args") or {}
+    key = args.get("key")
+    item_id = args.get("id")
+    contrib = gateway.registry.get(key)
+    if contrib is None or contrib.kind != "list":
+        raise RpcError(INVALID_PARAMS, "Unbekannte Liste")
+    await _require(gateway, ctx, contrib.meta.permission)
+    if contrib.delete is None:
+        raise RpcError(INVALID_PARAMS, "Liste ist schreibgeschützt (kein on_delete)")
+    result = await contrib.delete(ctx, item_id)
+    gateway.audit("list.delete", ctx, {"key": key, "id": item_id})
+    return {"result": result.to_dict() if hasattr(result, "to_dict") else result}
+
+
+@dispatcher.method("list.edit_form")
+async def list_edit_form(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    args = params.get("args") or {}
+    key = args.get("key")
+    item_id = args.get("id")
+    contrib = gateway.registry.get(key)
+    if contrib is None or contrib.kind != "list":
+        raise RpcError(INVALID_PARAMS, "Unbekannte Liste")
+    await _require(gateway, ctx, contrib.meta.permission)
+    if contrib.edit_form is None:
+        raise RpcError(INVALID_PARAMS, "Liste ist nicht bearbeitbar (kein edit_form)")
+    schema = await contrib.edit_form(ctx, item_id)
+    return {"schema": schema.to_dict() if hasattr(schema, "to_dict") else schema}
+
+
+@dispatcher.method("list.edit")
+async def list_edit(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    args = params.get("args") or {}
+    key = args.get("key")
+    item_id = args.get("id")
+    data = args.get("data") or {}
+    contrib = gateway.registry.get(key)
+    if contrib is None or contrib.kind != "list":
+        raise RpcError(INVALID_PARAMS, "Unbekannte Liste")
+    await _require(gateway, ctx, contrib.meta.permission)
+    if contrib.edit is None:
+        raise RpcError(INVALID_PARAMS, "Liste ist nicht bearbeitbar (kein on_edit)")
+    result = await contrib.edit(ctx, item_id, data)
+    gateway.audit("list.edit", ctx, {"key": key, "id": item_id})
+    return {"result": result.to_dict() if hasattr(result, "to_dict") else result}
+
+
 @dispatcher.method("cogs.list")
 async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Alle installierten Cogs mit Ladezustand (Owner)."""
@@ -552,6 +615,14 @@ def _downloader(gateway: Any):
     return gateway.bot.get_cog("Downloader")
 
 
+def _iter_repos(dl):
+    """Repos je nach Red-Version: dict {name: Repo} ODER Tuple/Liste von Repo."""
+    repos = dl._repo_manager.repos
+    if isinstance(repos, dict):
+        return list(repos.values())
+    return list(repos)
+
+
 async def _installed_cogs(dl):
     try:
         return list(await dl.installed_cogs())
@@ -575,7 +646,7 @@ async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, An
                 "name": m.name, "commit": getattr(m, "commit", None),
             })
         repos = []
-        for repo in dl._repo_manager.repos.values():
+        for repo in _iter_repos(dl):
             avail = [
                 {"name": inst.name, "description": (getattr(inst, "short", "") or "").strip()}
                 for inst in getattr(repo, "available_cogs", [])
@@ -647,10 +718,10 @@ async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[
     if dl is None:
         raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
     try:
-        before = {r.name: getattr(r, "commit", None) for r in dl._repo_manager.repos.values()}
+        before = {r.name: getattr(r, "commit", None) for r in _iter_repos(dl)}
         updated = await dl._repo_manager.update_all_repos()
         changed = [r.name for r in updated] if updated else [
-            r.name for r in dl._repo_manager.repos.values() if before.get(r.name) != getattr(r, "commit", None)
+            r.name for r in _iter_repos(dl) if before.get(r.name) != getattr(r, "commit", None)
         ]
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Update-Check fehlgeschlagen: {e}")

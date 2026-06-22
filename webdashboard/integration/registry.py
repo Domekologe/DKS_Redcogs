@@ -17,8 +17,11 @@ class Contribution:
     kind: str            # widget | panel | page
     identifier: str
     meta: Any            # _ContributionMeta
-    handler: Callable    # gebundene Methode (liefert Daten/Schema)
+    handler: Callable    # gebundene Methode (liefert Daten/Schema/Zeilen)
     submit: Optional[Callable] = None  # nur Panels
+    delete: Optional[Callable] = None  # nur Listen
+    edit: Optional[Callable] = None        # nur Listen (Speichern)
+    edit_form: Optional[Callable] = None   # nur Listen (Formular)
 
     @property
     def key(self) -> str:
@@ -28,6 +31,9 @@ class Contribution:
         m = self.meta.manifest()
         m["cog"] = self.cog_name
         m["key"] = self.key
+        if self.kind == "list":
+            m["deletable"] = self.delete is not None
+            m["editable"] = self.edit is not None and self.edit_form is not None
         return m
 
 
@@ -45,6 +51,14 @@ class Registry:
             if meta.kind == "panel" and meta.submit_handler is not None:
                 # gebundenen Submit-Handler am Cog auflösen
                 submit = getattr(cog, meta.submit_handler.__name__, None)
+            delete = edit = edit_form = None
+            if meta.kind == "list":
+                if meta.delete_handler is not None:
+                    delete = getattr(cog, meta.delete_handler.__name__, None)
+                if meta.edit_handler is not None:
+                    edit = getattr(cog, meta.edit_handler.__name__, None)
+                if meta.edit_form_handler is not None:
+                    edit_form = getattr(cog, meta.edit_form_handler.__name__, None)
             contrib = Contribution(
                 cog_name=cog_name,
                 cog=cog,
@@ -53,6 +67,9 @@ class Registry:
                 meta=meta,
                 handler=bound,
                 submit=submit,
+                delete=delete,
+                edit=edit,
+                edit_form=edit_form,
             )
             self._contribs[contrib.key] = contrib
             count += 1

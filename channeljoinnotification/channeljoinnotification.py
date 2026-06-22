@@ -12,7 +12,7 @@ from redbot.core import Config, commands
 from redbot.core.bot import Red
 
 from .dks_dashboard import (
-    dashboard_widget, dashboard_panel, WidgetData,
+    dashboard_widget, dashboard_panel, dashboard_list, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
@@ -336,6 +336,74 @@ class ChannelJoinNotification(commands.Cog):
             notifications[str(c.id)] = entry
         await self.config.guild(ctx.guild).notifications.set(notifications)
         return SubmitResult.ok("Gespeichert.")
+
+    # --- Guild-Liste: konfigurierte Join-Benachrichtigungen -------------- #
+    @dashboard_list(
+        "cjn_list", "Konfigurierte Benachrichtigungen", mount="guild_settings",
+        permission="guild_admin",
+        columns=[
+            {"key": "channel", "label": "Sprachkanal"},
+            {"key": "enabled", "label": "Aktiv"},
+            {"key": "text", "label": "DM-Text"},
+        ],
+    )
+    async def cjn_list(self, ctx):
+        data = await self.config.guild(ctx.guild).notifications()
+        rows = []
+        for cid, e in (data or {}).items():
+            if not isinstance(e, dict):
+                continue
+            # Nur Einträge zeigen, die wirklich konfiguriert sind.
+            if not (e.get("enabled") or e.get("text")):
+                continue
+            ch = ctx.guild.get_channel(int(cid)) if str(cid).isdigit() else None
+            txt = str(e.get("text", "") or "")
+            rows.append({
+                "id": str(cid),
+                "cells": {
+                    "channel": ("🔊 " + ch.name) if ch else str(cid),
+                    "enabled": "✅" if e.get("enabled") else "—",
+                    "text": (txt[:60] + "…") if len(txt) > 60 else (txt or "—"),
+                },
+            })
+        return rows
+
+    @cjn_list.edit_form
+    async def _cjn_edit_form(self, ctx, item_id):
+        data = await self.config.guild(ctx.guild).notifications()
+        entry = (data or {}).get(str(item_id)) or {}
+        variables = [
+            {"token": "<Username>", "desc": "Nutzer"},
+            {"token": "<Channelname>", "desc": "Kanal"},
+        ]
+        return PanelSchema(
+            description="Benachrichtigung für diesen Sprachkanal bearbeiten.",
+            fields=[
+                Field.switch("enabled", "Aktiv", value=bool(entry.get("enabled"))),
+                Field.textarea("text", "DM-Text", value=str(entry.get("text", "")),
+                               max_length=1500, variables=variables),
+            ],
+        )
+
+    @cjn_list.on_edit
+    async def _cjn_edit(self, ctx, item_id, data):
+        async with self.config.guild(ctx.guild).notifications() as notifications:
+            entry = notifications.get(str(item_id)) if isinstance(notifications.get(str(item_id)), dict) else {}
+            if "enabled" in data:
+                entry["enabled"] = bool(data["enabled"])
+            if "text" in data:
+                entry["text"] = str(data["text"])[:1500]
+            notifications[str(item_id)] = entry
+        return SubmitResult.ok("Gespeichert.")
+
+    @cjn_list.on_delete
+    async def _cjn_delete(self, ctx, item_id):
+        async with self.config.guild(ctx.guild).notifications() as notifications:
+            if str(item_id) in notifications:
+                del notifications[str(item_id)]
+            else:
+                return SubmitResult.fail("Eintrag nicht gefunden.")
+        return SubmitResult.ok("Benachrichtigung entfernt.")
 
     async def cog_unload(self) -> None:
         unregister_dashboard(self)

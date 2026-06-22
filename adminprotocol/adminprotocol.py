@@ -152,6 +152,73 @@ class AdminProtocol(commands.Cog):
         await self.config.guild(ctx.guild).events.set(events)
         return SubmitResult.ok("Log-Events gespeichert.")
 
+    # --- Guild-Panel: Ausnahmen je (aktivem) Event ----------------------- #
+    @dashboard_panel(
+        "events_exceptions", "Ausnahmen", mount="guild_settings", permission="guild_admin"
+    )
+    async def adminprotocol_exceptions_panel(self, ctx):
+        """Ignorierte Kanäle/Rollen/User pro aktivem Log-Event.
+
+        Es werden nur AKTIVE Events angezeigt, damit das Formular übersichtlich
+        bleibt. Kanäle/Rollen als Mehrfachauswahl, User als ID-Liste (Komma).
+        """
+        events = await self.config.guild(ctx.guild).events()
+        if not isinstance(events, dict):
+            events = {}
+        channel_opts = [{"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels]
+        role_opts = [
+            {"value": str(r.id), "label": r.name}
+            for r in ctx.guild.roles if r.name != "@everyone"
+        ]
+        fields = []
+        active = [(ev, lbl) for ev, lbl in EVENTS.items()
+                  if isinstance(events.get(ev), dict) and events[ev].get("enabled")]
+        if not active:
+            return PanelSchema(
+                description="Aktiviere zuerst Log-Events im Tab Log-Events. "
+                            "Ausnahmen werden nur für aktive Events angezeigt.",
+                fields=[],
+            )
+        for ev, label in active:
+            cfg = events.get(ev, {})
+            fields.append(Field.multiselect(
+                f"{ev}__ignored_channels", f"{label} – ignorierte Kanäle", channel_opts,
+                value=[str(x) for x in cfg.get("ignored_channels", [])]))
+            fields.append(Field.multiselect(
+                f"{ev}__ignored_roles", f"{label} – ignorierte Rollen", role_opts,
+                value=[str(x) for x in cfg.get("ignored_roles", [])]))
+            fields.append(Field.text(
+                f"{ev}__ignored_users", f"{label} – ignorierte User-IDs",
+                value=", ".join(str(x) for x in cfg.get("ignored_users", [])),
+                placeholder="z. B. 123, 456", description="User-IDs mit Komma getrennt."))
+        return PanelSchema(
+            description="Für aktive Events Kanäle/Rollen/User vom Logging ausnehmen.",
+            fields=fields,
+        )
+
+    @adminprotocol_exceptions_panel.on_submit
+    async def _save_adminprotocol_exceptions(self, ctx, data):
+        events = await self.config.guild(ctx.guild).events()
+        if not isinstance(events, dict):
+            events = {}
+
+        def _ids(raw):
+            if isinstance(raw, list):
+                return [int(x) for x in raw if str(x).strip().isdigit()]
+            return [int(x.strip()) for x in str(raw or "").split(",") if x.strip().isdigit()]
+
+        for ev in EVENTS:
+            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
+            if f"{ev}__ignored_channels" in data:
+                cfg["ignored_channels"] = _ids(data[f"{ev}__ignored_channels"])
+            if f"{ev}__ignored_roles" in data:
+                cfg["ignored_roles"] = _ids(data[f"{ev}__ignored_roles"])
+            if f"{ev}__ignored_users" in data:
+                cfg["ignored_users"] = _ids(data[f"{ev}__ignored_users"])
+            events[ev] = cfg
+        await self.config.guild(ctx.guild).events.set(events)
+        return SubmitResult.ok("Ausnahmen gespeichert.")
+
     async def cog_unload(self) -> None:
         unregister_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
