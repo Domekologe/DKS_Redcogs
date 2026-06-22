@@ -30,6 +30,7 @@ class ReactionRole(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=983472983472, force_registration=True)
         self.config.register_guild(
+            language="de-DE",  # pro-Guild Sprache dieses Cogs (de-DE | en-US)
             reactionroles={},
             panels={},
             templates={
@@ -73,9 +74,15 @@ class ReactionRole(commands.Cog):
             {"token": "{emoji}", "desc": "Emoji"},
             {"token": "{role}", "desc": "Rolle"},
         ]
+        lang = await self.config.guild(ctx.guild).language()
         return PanelSchema(
-            description="Antworten beim Erstellen/Entfernen von ReactionRoles.",
+            description="Sprache und Antworten beim Erstellen/Entfernen von ReactionRoles.",
             fields=[
+                Field.select(
+                    "language", "Sprache (dieses Modul)",
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=lang,
+                ),
                 Field.textarea("set_success", "Erstellt", value=t.get("set_success", ""),
                                max_length=500, variables=variables),
                 Field.textarea("remove_success", "Entfernt", value=t.get("remove_success", ""),
@@ -85,12 +92,81 @@ class ReactionRole(commands.Cog):
 
     @reactionrole_templates_panel.on_submit
     async def _save_reactionrole_templates(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set(
+                "en-US" if data["language"] == "en-US" else "de-DE"
+            )
         cur = await self.config.guild(ctx.guild).templates()
         for k in ("set_success", "remove_success"):
             if k in data:
                 cur[k] = str(data[k])[:500]
         await self.config.guild(ctx.guild).templates.set(cur)
-        return SubmitResult.ok("Vorlagen gespeichert.")
+        return SubmitResult.ok("Gespeichert.")
+
+    # --- Guild-Panel: ReactionRole direkt anlegen ------------------------ #
+    @dashboard_panel(
+        "create_rr", "ReactionRole anlegen", mount="guild_settings", permission="guild_admin"
+    )
+    async def reactionrole_create_panel(self, ctx):
+        ch_opts = [{"value": "", "label": "— Kanal wählen —"}] + [
+            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+        ]
+        role_opts = [{"value": "", "label": "— Rolle wählen —"}] + [
+            {"value": str(r.id), "label": r.name}
+            for r in ctx.guild.roles
+            if not r.is_default() and not r.managed
+        ]
+        return PanelSchema(
+            description="Kanal, Nachrichten-ID, Emoji und Rolle angeben. Speichern legt die "
+                        "ReactionRole an und setzt die Reaktion an der Nachricht.",
+            submit_label="ReactionRole anlegen",
+            fields=[
+                Field.select("channel", "Kanal", ch_opts, value=""),
+                Field.text("message_id", "Nachrichten-ID", value="", placeholder="123456789012345678"),
+                Field.text("emoji", "Emoji", value="", placeholder="👍 oder <:name:id>"),
+                Field.select("role", "Zuweisende Rolle", role_opts, value=""),
+            ],
+        )
+
+    @reactionrole_create_panel.on_submit
+    async def _create_reactionrole(self, ctx, data):
+        guild = ctx.guild
+        ch_id = data.get("channel")
+        role_id = data.get("role")
+        emoji = str(data.get("emoji", "")).strip()
+        msg_raw = str(data.get("message_id", "")).strip()
+        if not ch_id or not role_id or not emoji or not msg_raw:
+            return SubmitResult.fail("Bitte Kanal, Nachrichten-ID, Emoji und Rolle ausfüllen.")
+        channel = guild.get_channel(int(ch_id))
+        if channel is None:
+            return SubmitResult.fail("Kanal nicht gefunden.", errors={"channel": "Ungültig"})
+        role = guild.get_role(int(role_id))
+        if role is None:
+            return SubmitResult.fail("Rolle nicht gefunden.", errors={"role": "Ungültig"})
+        try:
+            message_id = int(msg_raw)
+        except ValueError:
+            return SubmitResult.fail("Nachrichten-ID muss eine Zahl sein.",
+                                     errors={"message_id": "Zahl erwartet"})
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return SubmitResult.fail("Nachricht nicht gefunden.", errors={"message_id": "Nicht gefunden"})
+        except discord.Forbidden:
+            return SubmitResult.fail("Keine Rechte, die Nachricht zu lesen.")
+        try:
+            await message.add_reaction(emoji)
+        except discord.HTTPException:
+            return SubmitResult.fail("Ungültiges Emoji oder keine Rechte.", errors={"emoji": "Ungültig"})
+        rr_id = str(uuid.uuid4())[:8]
+        async with self.config.guild(guild).reactionroles() as d:
+            d[rr_id] = {
+                "message_id": message_id,
+                "channel_id": channel.id,
+                "emoji": str(emoji),
+                "role_id": role.id,
+            }
+        return SubmitResult.ok(f"ReactionRole angelegt (ID {rr_id}).")
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

@@ -32,7 +32,11 @@ from .comparechars import CompareChars
 
 from .dks_dashboard import (
     dashboard_widget,
+    dashboard_panel,
     WidgetData,
+    PanelSchema,
+    Field,
+    SubmitResult,
     register_dashboard,
     unregister_dashboard,
 )
@@ -519,6 +523,69 @@ class WoWTools(
             return WidgetData.kpi(value="An" if enabled else "Aus", label="WoW Auto-Reply")
         except Exception:
             return WidgetData.kpi(value="–", label="WoW Auto-Reply")
+
+    # --- Guild-Panel: Auto-Reply & Kanäle -------------------------------- #
+    @dashboard_panel("settings", "WoWTools (Server)", mount="guild_settings", permission="guild_admin")
+    async def wowtools_guild_panel(self, ctx):
+        g = self.config.guild(ctx.guild)
+        ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
+            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+        ]
+        return PanelSchema(
+            fields=[
+                Field.switch("on_message", "Auto-Reply auf WoW-Begriffe", value=bool(await g.on_message())),
+                Field.select("guild_log_channel", "Log-Kanal", ch_opts, value=str(await g.guild_log_channel() or "")),
+                Field.select("scoreboard_channel", "Scoreboard-Kanal", ch_opts, value=str(await g.scoreboard_channel() or "")),
+                Field.select("countdown_channel", "Countdown-Kanal", ch_opts, value=str(await g.countdown_channel() or "")),
+            ]
+        )
+
+    @wowtools_guild_panel.on_submit
+    async def _save_wowtools_guild(self, ctx, data):
+        g = self.config.guild(ctx.guild)
+        if "on_message" in data:
+            await g.on_message.set(bool(data["on_message"]))
+        if "guild_log_channel" in data:
+            v = data["guild_log_channel"]
+            await g.guild_log_channel.set(int(v) if v else None)
+        if "scoreboard_channel" in data:
+            v = data["scoreboard_channel"]
+            await g.scoreboard_channel.set(int(v) if v else None)
+        if "countdown_channel" in data:
+            v = data["countdown_channel"]
+            await g.countdown_channel.set(int(v) if v else None)
+        return SubmitResult.ok("Gespeichert.")
+
+    # --- Globales Panel (Bot-Owner): API-Tokens -------------------------- #
+    @dashboard_panel("api_tokens", "WoW API-Tokens", scope="global", mount="bot_settings", permission="bot_owner")
+    async def wowtools_api_panel(self, ctx):
+        bliz = await self.bot.get_shared_api_tokens("blizzard")
+        rio = await self.bot.get_shared_api_tokens("raiderio")
+        return PanelSchema(
+            description="Geteilte API-Tokens (Blizzard Battle.net, Raider.IO).",
+            fields=[
+                Field.text("blizzard_client_id", "Blizzard Client ID", value=bliz.get("client_id", "")),
+                Field.text("blizzard_client_secret", "Blizzard Client Secret", value=bliz.get("client_secret", "")),
+                Field.text("raiderio_api_key", "Raider.IO API Key", value=rio.get("api_key", "")),
+            ],
+        )
+
+    @wowtools_api_panel.on_submit
+    async def _save_wowtools_api(self, ctx, data):
+        await self.bot.set_shared_api_tokens(
+            "blizzard",
+            client_id=str(data.get("blizzard_client_id", "")).strip(),
+            client_secret=str(data.get("blizzard_client_secret", "")).strip(),
+        )
+        await self.bot.set_shared_api_tokens(
+            "raiderio", api_key=str(data.get("raiderio_api_key", "")).strip()
+        )
+        try:
+            await self.create_bnet_objs()
+            self.raiderio_api = RaiderIO(api_key=str(data.get("raiderio_api_key", "")).strip())
+        except Exception:
+            pass
+        return SubmitResult.ok("API-Tokens gespeichert.")
 
     async def cog_unload(self):
         unregister_dashboard(self)

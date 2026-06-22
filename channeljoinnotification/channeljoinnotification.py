@@ -12,7 +12,8 @@ from redbot.core import Config, commands
 from redbot.core.bot import Red
 
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel, WidgetData,
+    PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
 
@@ -296,6 +297,45 @@ class ChannelJoinNotification(commands.Cog):
             return WidgetData.kpi(value=count, label="Join-Notify Channels")
         except Exception:
             return WidgetData.kpi(value="–", label="Join-Notify Channels")
+
+    # --- Guild-Panel: pro Sprachkanal DM aktivieren + Text --------------- #
+    @dashboard_panel(
+        "notifications", "Join-Benachrichtigungen", mount="guild_settings", permission="guild_admin"
+    )
+    async def cjn_panel(self, ctx):
+        data = await self.config.guild(ctx.guild).notifications()
+        if not isinstance(data, dict):
+            data = {}
+        variables = [
+            {"token": "<Username>", "desc": "Nutzer"},
+            {"token": "<Channelname>", "desc": "Kanal"},
+        ]
+        voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
+        fields = []
+        for c in voice:
+            entry = data.get(str(c.id), {}) if isinstance(data.get(str(c.id)), dict) else {}
+            fields.append(Field.switch(f"{c.id}__enabled", f"🔊 {c.name} – aktiv", value=bool(entry.get("enabled"))))
+            fields.append(Field.textarea(f"{c.id}__text", f"🔊 {c.name} – DM-Text",
+                                         value=str(entry.get("text", "")), max_length=1500, variables=variables))
+        if not fields:
+            return PanelSchema(description="Keine Sprachkanäle auf diesem Server.")
+        return PanelSchema(description="Pro Sprachkanal: DM beim Beitritt aktivieren und Text festlegen.", fields=fields)
+
+    @cjn_panel.on_submit
+    async def _save_cjn(self, ctx, data):
+        notifications = await self.config.guild(ctx.guild).notifications()
+        if not isinstance(notifications, dict):
+            notifications = {}
+        voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
+        for c in voice:
+            entry = notifications.get(str(c.id), {}) if isinstance(notifications.get(str(c.id)), dict) else {}
+            if f"{c.id}__enabled" in data:
+                entry["enabled"] = bool(data[f"{c.id}__enabled"])
+            if f"{c.id}__text" in data:
+                entry["text"] = str(data[f"{c.id}__text"])[:1500]
+            notifications[str(c.id)] = entry
+        await self.config.guild(ctx.guild).notifications.set(notifications)
+        return SubmitResult.ok("Gespeichert.")
 
     async def cog_unload(self) -> None:
         unregister_dashboard(self)

@@ -1,8 +1,8 @@
 """Drop-in-Hook für die DKS-Web-Dashboard-Integration (keine harte Abhängigkeit).
 
-Diese Datei kann unverändert in jeden Cog kopiert werden. Sie funktioniert auch, wenn
-der ``webdashboard``-Cog nicht installiert ist (Decorators werden dann zu No-ops) und ist
-parallel zum AAA3A-Dashboard nutzbar.
+Diese Datei 1:1 in jeden Cog kopieren. Sie funktioniert auch, wenn der
+``webdashboard``-Cog NICHT installiert ist (Decorators werden dann zu No-ops) und
+ist parallel zum AAA3A-Dashboard nutzbar.
 """
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ except Exception:  # webdashboard nicht installiert
             return cls()
 
         kpi = list = chart = status = markdown = ok = fail = _factory  # type: ignore
+        text = textarea = number = switch = select = multiselect = channel = role = _factory  # type: ignore
 
     WidgetData = PanelSchema = PageSchema = Field = Component = SubmitResult = _Stub  # type: ignore
     DashboardContext = object  # type: ignore

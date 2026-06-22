@@ -32,7 +32,18 @@ except Exception:  # webdashboard nicht installiert
 
         return deco
 
-    dashboard_widget = dashboard_panel = dashboard_page = _noop_decorator  # type: ignore
+    def _noop_panel(*_args, **_kwargs):
+        def deco(func):
+            def on_submit(sub):
+                return sub
+
+            func.on_submit = on_submit
+            return func
+
+        return deco
+
+    dashboard_widget = dashboard_page = _noop_decorator  # type: ignore
+    dashboard_panel = _noop_panel  # type: ignore
 
     class _Stub:
         def __init__(self, *_a, **_k):

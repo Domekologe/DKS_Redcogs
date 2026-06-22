@@ -8,7 +8,8 @@ import html
 import json
 
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel, WidgetData,
+    PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
 
@@ -112,6 +113,44 @@ class AdminProtocol(commands.Cog):
             return WidgetData.kpi(value=count, label="Aktive Log-Events")
         except Exception:
             return WidgetData.kpi(value="–", label="Aktive Log-Events")
+
+    # --- Guild-Panel: Log-Events (aktiv + Kanal je Event) ---------------- #
+    @dashboard_panel(
+        "events", "Log-Events", mount="guild_settings", permission="guild_admin"
+    )
+    async def adminprotocol_panel(self, ctx):
+        events = await self.config.guild(ctx.guild).events()
+        if not isinstance(events, dict):
+            events = {}
+        channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+        ]
+        fields = []
+        for ev, label in EVENTS.items():
+            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
+            fields.append(Field.switch(f"{ev}__enabled", f"{label} – aktiv", value=bool(cfg.get("enabled"))))
+            fields.append(Field.select(f"{ev}__channel", f"{label} – Kanal", channel_options,
+                                       value=str(cfg.get("channel") or "")))
+        return PanelSchema(description="Pro Ereignis aktivieren und Ziel-Kanal wählen.", fields=fields)
+
+    @adminprotocol_panel.on_submit
+    async def _save_adminprotocol(self, ctx, data):
+        events = await self.config.guild(ctx.guild).events()
+        if not isinstance(events, dict):
+            events = {}
+        for ev in EVENTS:
+            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
+            if f"{ev}__enabled" in data:
+                cfg["enabled"] = bool(data[f"{ev}__enabled"])
+            if f"{ev}__channel" in data:
+                ch = data[f"{ev}__channel"]
+                cfg["channel"] = int(ch) if ch else None
+            cfg.setdefault("ignored_channels", [])
+            cfg.setdefault("ignored_users", [])
+            cfg.setdefault("ignored_roles", [])
+            events[ev] = cfg
+        await self.config.guild(ctx.guild).events.set(events)
+        return SubmitResult.ok("Log-Events gespeichert.")
 
     async def cog_unload(self) -> None:
         unregister_dashboard(self)

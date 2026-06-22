@@ -82,7 +82,11 @@ from .functions.automations import RankSyncService
 from .functions.blizzard import BlizzardService
 from .dks_dashboard import (
     dashboard_widget,
+    dashboard_panel,
     WidgetData,
+    PanelSchema,
+    Field,
+    SubmitResult,
     register_dashboard,
     unregister_dashboard,
 )
@@ -291,6 +295,46 @@ class WowGuildAutomation(commands.Cog):
             return WidgetData.kpi(value="An" if enabled else "Aus", label="Onboarding")
         except Exception:
             return WidgetData.kpi(value="–", label="Onboarding")
+
+    # --- Globales Panel (Bot-Owner): Blizzard-API & Defaults --------------- #
+    @dashboard_panel(
+        "blizzard_api", "Blizzard API & Defaults",
+        scope="global", mount="bot_settings", permission="bot_owner",
+    )
+    async def wga_global_panel(self, ctx):
+        s = await self.config.bot_setup()
+        return PanelSchema(
+            description="Globale WoW-Guild-Automation-Einstellungen (Blizzard API).",
+            fields=[
+                Field.text("client_id", "Blizzard Client ID", value=s.get("client_id", "")),
+                Field.text("client_secret", "Blizzard Client Secret", value=s.get("client_secret", "")),
+                Field.select(
+                    "default_region", "Standard-Region",
+                    [{"value": "eu", "label": "EU"}, {"value": "us", "label": "US"}, {"value": "kr", "label": "KR"}],
+                    value=s.get("default_region", "eu"),
+                ),
+                Field.select(
+                    "default_version", "Standard-Version",
+                    [{"value": "retail", "label": "Retail"}, {"value": "classic", "label": "Classic"}],
+                    value=s.get("default_version", "retail"),
+                ),
+                Field.text("default_language", "Standard-Sprache", value=s.get("default_language", "de-DE")),
+            ],
+        )
+
+    @wga_global_panel.on_submit
+    async def _save_wga_global(self, ctx, data):
+        s = await self.config.bot_setup()
+        for k in ("client_id", "client_secret", "default_region", "default_version", "default_language"):
+            if k in data:
+                s[k] = str(data[k]).strip()
+        await self.config.bot_setup.set(s)
+        try:
+            self.blizzard.client_id = s.get("client_id", "")
+            self.blizzard.client_secret = s.get("client_secret", "")
+        except Exception:
+            pass
+        return SubmitResult.ok("Gespeichert.")
 
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
         cfg = await self.config.guild(guild).all()
