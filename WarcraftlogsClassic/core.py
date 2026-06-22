@@ -95,7 +95,7 @@ class WarcraftLogsClassic(commands.Cog):
             return WidgetData.kpi(value="–", label="Benachrichtigungskanal")
 
     # --- Guild-Panel: Benachrichtigungskanal ----------------------------- #
-    @dashboard_panel("wcl_guild", "WarcraftLogs", "guild_settings", permission="guild_admin")
+    @dashboard_panel("wcl_guild", "WarcraftLogs", mount="guild_settings", permission="guild_admin")
     async def wcl_guild_panel(self, ctx):
         current = await self.config.guild(ctx.guild).notification_channel()
         ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
@@ -118,7 +118,7 @@ class WarcraftLogsClassic(commands.Cog):
         return SubmitResult.ok("Gespeichert.")
 
     # --- Guild-Panel (pro Nutzer): WCL-Charakter ------------------------- #
-    @dashboard_panel("wcl_char", "Mein WCL-Charakter", "guild_settings", permission="guild_member")
+    @dashboard_panel("wcl_char", "Mein WCL-Charakter", mount="guild_settings", permission="guild_member")
     async def wcl_char_panel(self, ctx):
         u = self.config.user_from_id(int(ctx.user.id))
         region_opts = [
