@@ -557,15 +557,31 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             pass
         return 1  # chat_input / Slash
 
-    # AKTIV-Status zuverlässig über Tree-Mitgliedschaft: Red entfernt deaktivierte
-    # App-Commands aus dem Tree (deshalb tauchten sie vorher gar nicht auf). Damit
-    # brauchen wir list_enabled_app_commands() nicht (das schlägt je nach Red-Version fehl).
+    # AKTIV-Status: PRIMÄR aus Reds Enabled-Config (spiegelt enable/disable_app_command
+    # SOFORT wider, auch ohne Sync). list_enabled_app_commands() ist je nach Red-Version
+    # sync ODER async → beides abfangen. FALLBACK: Tree-Mitgliedschaft (Steady-State).
     enabled_keys = set()
+    used_cfg = False
+    try:
+        res = bot.list_enabled_app_commands()
+        if hasattr(res, "__await__"):
+            res = await res
+        if isinstance(res, dict):
+            for k, ctype in (("slash", 1), ("user", 2), ("message", 3)):
+                for nm in (res.get(k) or {}).keys():
+                    enabled_keys.add((nm, ctype))
+            used_cfg = True
+    except Exception:
+        used_cfg = False
+
     tree_cmds = []
     try:
         tree_cmds = list(bot.tree.get_commands())
-        for c in tree_cmds:
-            enabled_keys.add((getattr(c, "name", None), _ctype(c)))
+        if not used_cfg:
+            # Kein Config-Zugriff → Tree als Aktiv-Indikator (Red entfernt deaktivierte
+            # App-Commands aus dem Tree).
+            for c in tree_cmds:
+                enabled_keys.add((getattr(c, "name", None), _ctype(c)))
     except Exception:
         pass
 
