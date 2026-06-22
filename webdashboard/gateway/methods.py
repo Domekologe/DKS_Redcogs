@@ -462,10 +462,49 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "name/action fehlt oder ungültig")
     bot = gateway.bot
 
+    # Eigenes Paket (das den Gateway betreibt) ermitteln – ein Self-Reload
+    # würde den Gateway mitten in der Antwort beenden.
+    own_pkg = None
     try:
-        if action in ("load", "reload"):
-            if action == "reload" and name in bot.extensions:
-                bot.unload_extension(name)
+        dcog = bot.get_cog("WebDashboard")
+        if dcog is not None:
+            own_pkg = str(type(dcog).__module__).split(".")[0].lower()
+    except Exception:
+        own_pkg = None
+
+    async def _reload_pkg(pkg: str) -> None:
+        # discord.py 2.x: load/unload/reload_extension sind Coroutines → awaiten!
+        if pkg in bot.extensions:
+            await bot.unload_extension(pkg)
+        spec = await bot._cog_mgr.find_cog(pkg)
+        if spec is None:
+            raise RpcError(INVALID_PARAMS, f"Cog '{pkg}' nicht gefunden")
+        await bot.load_extension(spec)
+        async with bot._config.packages() as pkgs:
+            if pkg not in pkgs:
+                pkgs.append(pkg)
+
+    # Self-Reload des Dashboard-Cogs: verzögert ausführen, damit diese Antwort
+    # noch rausgeht, bevor der Gateway neu startet.
+    if action == "reload" and own_pkg and name == own_pkg:
+        import asyncio
+
+        async def _deferred() -> None:
+            try:
+                await asyncio.sleep(1.0)
+                await _reload_pkg(name)
+            except Exception:
+                logging.getLogger("red.dks.webdashboard.gateway").exception(
+                    "Self-Reload von %s fehlgeschlagen", name
+                )
+
+        asyncio.ensure_future(_deferred())
+        gateway.audit("cogs.reload", ctx, {"name": name, "deferred": True})
+        return {"ok": True, "name": name, "deferred": True,
+                "hint": "Dashboard startet in ~1s neu – Seite danach neu laden."}
+
+    try:
+        if action == "load":
             spec = await bot._cog_mgr.find_cog(name)
             if spec is None:
                 raise RpcError(INVALID_PARAMS, f"Cog '{name}' nicht gefunden")
@@ -473,9 +512,11 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             async with bot._config.packages() as pkgs:
                 if name not in pkgs:
                     pkgs.append(name)
+        elif action == "reload":
+            await _reload_pkg(name)
         elif action == "unload":
             if name in bot.extensions:
-                bot.unload_extension(name)
+                await bot.unload_extension(name)
             async with bot._config.packages() as pkgs:
                 if name in pkgs:
                     pkgs.remove(name)
