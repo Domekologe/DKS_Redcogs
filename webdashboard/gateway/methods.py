@@ -430,35 +430,43 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @dispatcher.method("slash.list")
 async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Registrierte App-Commands mit (best-effort) Aktiv-Status."""
+    """Top-Level-App-Commands mit Cog und Aktiv-Status (Owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
-    enabled_names: set = set()
+
+    enabled = {"slash": set(), "message": set(), "user": set()}
+    has_info = False
     try:
-        enabled = bot.list_enabled_app_commands()  # Red 3.5+
-        for kind in ("slash", "message", "user"):
-            enabled_names |= set((enabled.get(kind) or {}).keys())
+        e = bot.list_enabled_app_commands()  # Red 3.5+
+        for k in ("slash", "message", "user"):
+            enabled[k] = set((e.get(k) or {}).keys())
+        has_info = True
     except Exception:
-        enabled_names = set()
+        has_info = False
 
     items = []
     try:
-        from discord import app_commands
+        from discord import AppCommandType, app_commands
 
-        for c in bot.tree.walk_commands():
-            if not isinstance(c, app_commands.Command):
-                continue
-            top = c.qualified_name.split(" ")[0]
+        for c in bot.tree.get_commands():  # nur Top-Level
+            if isinstance(c, app_commands.ContextMenu):
+                ctype = int(c.type.value)  # 2=user, 3=message
+            else:
+                ctype = int(AppCommandType.chat_input.value)  # 1=slash
+            kind = {1: "slash", 2: "user", 3: "message"}.get(ctype, "slash")
+            binding = getattr(c, "binding", None)
+            cog = type(binding).__name__ if binding is not None else "—"
             items.append({
-                "name": c.qualified_name,
-                "description": (getattr(c, "description", "") or "").strip(),
-                "enabled": (top in enabled_names) if enabled_names else True,
+                "name": c.name,
+                "type": ctype,
+                "cog": cog,
+                "enabled": (c.name in enabled[kind]) if has_info else True,
             })
     except Exception:
         pass
-    items.sort(key=lambda x: x["name"])
-    return {"commands": items, "count": len(items)}
+    items.sort(key=lambda x: (x["cog"].lower(), x["name"]))
+    return {"commands": items, "count": len(items), "managed": has_info}
 
 
 @dispatcher.method("slash.sync")
@@ -472,6 +480,69 @@ async def slash_sync(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "count": len(synced)}
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Sync fehlgeschlagen: {e}")
+
+
+@dispatcher.method("slash.set")
+async def slash_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Einzelnen App-Command aktivieren/deaktivieren (Owner). Danach synchronisieren."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    args = params.get("args") or {}
+    name = str(args.get("name", "")).strip()
+    ctype = int(args.get("type", 1) or 1)
+    enabled = bool(args.get("enabled"))
+    if not name:
+        raise RpcError(INVALID_PARAMS, "name erforderlich")
+    bot = gateway.bot
+    try:
+        from discord import AppCommandType
+
+        t = AppCommandType(ctype)
+        if enabled:
+            await bot.enable_app_command(name, t)
+        else:
+            await bot.disable_app_command(name, t)
+    except RpcError:
+        raise
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Umschalten fehlgeschlagen: {e}")
+    gateway.audit("slash.set", ctx, {"name": name, "type": ctype, "enabled": enabled})
+    return {"ok": True, "name": name, "enabled": enabled}
+
+
+@dispatcher.method("slash.set_cog")
+async def slash_set_cog(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Alle Top-Level-App-Commands eines Cogs aktivieren/deaktivieren (Owner)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    args = params.get("args") or {}
+    cog_name = str(args.get("cog", "")).strip()
+    enabled = bool(args.get("enabled"))
+    if not cog_name:
+        raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    bot = gateway.bot
+    changed = 0
+    try:
+        from discord import AppCommandType, app_commands
+
+        for c in bot.tree.get_commands():
+            binding = getattr(c, "binding", None)
+            if binding is None or type(binding).__name__ != cog_name:
+                continue
+            ctype = int(c.type.value) if isinstance(c, app_commands.ContextMenu) else 1
+            t = AppCommandType(ctype)
+            try:
+                if enabled:
+                    await bot.enable_app_command(c.name, t)
+                else:
+                    await bot.disable_app_command(c.name, t)
+                changed += 1
+            except Exception:
+                pass
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Cog-Umschalten fehlgeschlagen: {e}")
+    gateway.audit("slash.set_cog", ctx, {"cog": cog_name, "enabled": enabled, "changed": changed})
+    return {"ok": True, "cog": cog_name, "enabled": enabled, "changed": changed}
 
 
 # --------------------------------------------------------------------------- #
