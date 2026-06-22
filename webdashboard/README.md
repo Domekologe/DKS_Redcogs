@@ -26,15 +26,15 @@ Beim Laden startet das Gateway automatisch auf `127.0.0.1:6970` (nur localhost).
 Prüfen:
 
 ```
-[p]dashboard status
+[p]dksdashboard status
 ```
 
 Adresse/Port ändern (z. B. wenn 6970 belegt ist):
 
 ```
-[p]dashboard bind 127.0.0.1 6970
-[p]dashboard stop
-[p]dashboard start
+[p]dksdashboard bind 127.0.0.1 6970
+[p]dksdashboard stop
+[p]dksdashboard start
 ```
 
 > **Sicherheit:** Lass das Gateway auf `127.0.0.1`. Mache es nach außen nur über einen
@@ -43,14 +43,14 @@ Adresse/Port ändern (z. B. wenn 6970 belegt ist):
 ### 2. Gateway-Token abrufen
 
 ```
-[p]dashboard token
+[p]dksdashboard token
 ```
 
 Der Bot schickt dir das Token per DM. Dieses Token kennt **nur** der SvelteKit-Server
 (BFF) – niemals der Browser. Neues Token erzeugen (invalidiert das alte):
 
 ```
-[p]dashboard regen
+[p]dksdashboard regen
 ```
 
 ### 3. Web-App konfigurieren
@@ -58,7 +58,7 @@ Der Bot schickt dir das Token per DM. Dieses Token kennt **nur** der SvelteKit-S
 In `DKS_Redbot_WebApp/.env`:
 
 ```dotenv
-GATEWAY_URL=http://127.0.0.1:6970     # gleiche Adresse wie [p]dashboard bind
+GATEWAY_URL=http://127.0.0.1:6970     # gleiche Adresse wie [p]dksdashboard bind
 GATEWAY_TOKEN=<das per DM erhaltene Token>
 DISCORD_CLIENT_ID=...                  # Discord Developer Portal
 DISCORD_CLIENT_SECRET=...
@@ -84,11 +84,11 @@ du berechtigt bist.
 
 | Command | Funktion |
 |---|---|
-| `[p]dashboard status` | Status, Adresse, Anzahl registrierter Beiträge |
-| `[p]dashboard start` / `stop` | Gateway starten/stoppen |
-| `[p]dashboard bind <host> <port>` | Adresse setzen (Neustart nötig) |
-| `[p]dashboard token` | Token per DM |
-| `[p]dashboard regen` | Neues Token erzeugen + Neustart |
+| `[p]dksdashboard status` | Status, Adresse, Anzahl registrierter Beiträge |
+| `[p]dksdashboard start` / `stop` | Gateway starten/stoppen |
+| `[p]dksdashboard bind <host> <port>` | Adresse setzen (Neustart nötig) |
+| `[p]dksdashboard token` | Token per DM |
+| `[p]dksdashboard regen` | Neues Token erzeugen + Neustart |
 
 ## Wie Cogs sich anbinden
 
@@ -100,12 +100,12 @@ Anleitung: [`INTEGRATION.md`](./INTEGRATION.md). Ein lauffähiges Beispiel liegt
 
 ## Konnektivität & Troubleshooting
 
-- **Web-App erreicht das Gateway nicht?** Prüfe `[p]dashboard status` (läuft es?), ob
+- **Web-App erreicht das Gateway nicht?** Prüfe `[p]dksdashboard status` (läuft es?), ob
   `GATEWAY_URL`/Port übereinstimmen und ob `GATEWAY_TOKEN` korrekt ist.
 - **Web-App in Docker, Bot auf dem Host:** Das Gateway lauscht standardmäßig nur auf
   `127.0.0.1` – das ist aus einem Container **nicht** erreichbar. Dann entweder den Bot
   ebenfalls containerisieren und ins selbe Docker-Netz hängen, oder das Gateway bewusst auf
-  eine erreichbare Adresse binden (`[p]dashboard bind 0.0.0.0 6970`) **und** den Port per
+  eine erreichbare Adresse binden (`[p]dksdashboard bind 0.0.0.0 6970`) **und** den Port per
   Firewall absichern. In der Web-App dann `GATEWAY_URL=http://host.docker.internal:6970`.
 - **Keine Server / keine Widgets sichtbar, obwohl berechtigt?** Reds Member-Cache: Ohne den
   privilegierten **Server Members Intent** (im Discord Developer Portal aktivieren) kennt

@@ -99,9 +99,13 @@ class WebDashboard(commands.Cog):
     # Commands (nur Bot-Owner)
     # ------------------------------------------------------------------ #
     @commands.is_owner()
-    @commands.group(name="dashboard", aliases=["webdashboard", "wd"])
+    @commands.group(name="dksdashboard", aliases=["dksdash"])
     async def dashboard_group(self, ctx: commands.Context) -> None:
-        """Verwaltung des Web-Dashboards."""
+        """Verwaltung des DKS Web-Dashboards.
+
+        Hinweis: Eigener Befehlsname, damit es parallel zu AAA3As `[p]dashboard`
+        laufen kann.
+        """
 
     @dashboard_group.command(name="status")
     async def dashboard_status(self, ctx: commands.Context) -> None:
@@ -165,4 +169,4 @@ class WebDashboard(commands.Cog):
         await self.config.token.set(token)
         await self._stop_gateway()
         await self._start_gateway()
-        await ctx.send(_("Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dashboard token`."))
+        await ctx.send(_("Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dksdashboard token`."))

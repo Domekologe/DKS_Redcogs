@@ -55,5 +55,5 @@ msgid "Ich konnte dir keine DM senden. Bitte DMs aktivieren."
 msgstr "Ich konnte dir keine DM senden. Bitte DMs aktivieren."
 
 #: webdashboard.py
-msgid "Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dashboard token`."
-msgstr "Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dashboard token`."
+msgid "Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dksdashboard token`."
+msgstr "Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dksdashboard token`."
