@@ -5,6 +5,11 @@ from typing import Any, Dict, Optional
 import json
 import html
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 try:
     from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
 except Exception:
@@ -34,6 +39,7 @@ class ReactionRole(commands.Cog):
         self._dashboard_attached = False
 
     async def cog_load(self) -> None:
+        register_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is None:
             return
@@ -42,6 +48,18 @@ class ReactionRole(commands.Cog):
             self._dashboard_attached = True
         except Exception:
             self._dashboard_attached = False
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
+
+    @dashboard_widget("reactionrole_count", "ReactionRoles", size="sm", permission="guild_member")
+    async def reactionrole_count_widget(self, ctx):
+        try:
+            guild = getattr(ctx, "guild", None)
+            data = await self.config.guild(guild).reactionroles()
+            return WidgetData.kpi(value=len(data), label="ReactionRoles")
+        except Exception:
+            return WidgetData.kpi(value="–", label="ReactionRoles")
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

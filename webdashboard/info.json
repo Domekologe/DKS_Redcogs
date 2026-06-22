@@ -1,0 +1,14 @@
+{
+    "author": ["Domekologe"],
+    "name": "WebDashboard",
+    "short": "Eigenes, modulares und sicheres Web-Dashboard-System für Red.",
+    "description": "Stellt ein RPC-Gateway und eine Integrations-Registry bereit. Andere Cogs binden sich integriert ein (Widgets + kontextuelle Panels) statt mit einer eigenen Extra-Seite. Frontend: separate SvelteKit-Web-App mit Discord-OAuth2.",
+    "install_msg": "Danke fürs Installieren von WebDashboard!\n\nNächste Schritte:\n1. `[p]load webdashboard`\n2. `[p]dashboard token` (Token per DM für die Web-App)\n3. `[p]dashboard status` prüfen\n\nDie separate Web-App liegt unter DKS_Redbot_WebApp. Details: siehe ARCHITECTURE.md.",
+    "tags": ["dashboard", "web", "rpc", "admin", "ui"],
+    "requirements": [],
+    "min_bot_version": "3.5.0",
+    "type": "COG",
+    "hidden": false,
+    "disabled": false,
+    "end_user_data_statement": "Dieser Cog speichert ein zufällig generiertes Gateway-Token sowie Host/Port-Einstellungen. Er verarbeitet bei aktiver Web-App Discord-Benutzer-IDs zur Berechtigungsprüfung, speichert diese aber nicht dauerhaft."
+}

@@ -8,6 +8,11 @@ from typing import Union
 import re
 from discord.app_commands import Transform
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 
 def has_perms(**perms):
     return commands.has_permissions(**perms)
@@ -55,6 +60,8 @@ class AdminUtils(commands.Cog):
         self._dashboard_attached = False
 
     async def cog_load(self) -> None:
+        # DKS WebDashboard zuerst & unabhängig registrieren (no-op, falls nicht geladen)
+        register_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is None:
             return
@@ -63,6 +70,17 @@ class AdminUtils(commands.Cog):
             self._dashboard_attached = True
         except Exception:
             self._dashboard_attached = False
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
+
+    @dashboard_widget("adminutils_templates", "AdminUtils Templates", size="sm", permission="guild_member")
+    async def adminutils_templates_widget(self, ctx):
+        try:
+            templates = await self.config.guild(ctx.guild).templates()
+            return WidgetData.kpi(value=len(templates), label="AdminUtils Templates")
+        except Exception:
+            return WidgetData.kpi(value="–", label="AdminUtils Templates")
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

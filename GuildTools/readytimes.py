@@ -14,6 +14,8 @@ from discord import app_commands
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
+from .dks_dashboard import register_dashboard, unregister_dashboard
+
 WEEKDAYS = [
     ("monday", "Montag"),
     ("tuesday", "Dienstag"),
@@ -140,6 +142,12 @@ class ReadyTimes(commands.Cog):
             day: {"can": False, "start": None, "end": None} for day, _ in WEEKDAYS
         }
         self.config.register_member(**member_defaults)
+
+    async def cog_load(self) -> None:
+        register_dashboard(self)
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
 
     # ------------------------------
     # Slash: /set-readytimes (ephemeral UI)

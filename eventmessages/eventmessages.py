@@ -2,6 +2,11 @@ import discord
 from redbot.core import Config, app_commands, commands
 from typing import Any, Dict, Optional
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 try:
     from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
 except Exception:
@@ -55,6 +60,7 @@ class EventMessages(commands.Cog):
         self._dashboard_attached = False
 
     async def cog_load(self) -> None:
+        register_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is None:
             return
@@ -63,6 +69,19 @@ class EventMessages(commands.Cog):
             self._dashboard_attached = True
         except Exception:
             self._dashboard_attached = False
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
+
+    @dashboard_widget("eventmessages_enabled", "Aktive Events", size="sm", permission="guild_member")
+    async def eventmessages_enabled_widget(self, ctx):
+        try:
+            guild = getattr(ctx, "guild", None)
+            events = await self.config.guild(guild).events()
+            count = sum(1 for ev in EVENTS if events.get(ev, {}).get("enabled"))
+            return WidgetData.kpi(value=count, label="Aktive Events")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Aktive Events")
 
     # ------------------------------------------------------------
     # Autocomplete

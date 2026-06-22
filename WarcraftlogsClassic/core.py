@@ -19,6 +19,10 @@ from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_g
 from redbot.core.utils.chat_formatting import box, humanize_list
 
 from .autocomplete import REALMS
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
 from .enchantid import ENCHANT_ID
 from .encounterid import DIFFICULTIES, ZONES_BY_ID, ZONES_BY_SHORT_NAME
 from .http import WoWLogsClient, generate_bearer
@@ -78,7 +82,19 @@ class WarcraftLogsClassic(commands.Cog):
             return
         return bearer
 
+    async def cog_load(self) -> None:
+        register_dashboard(self)
+
+    @dashboard_widget("notify_channel_set", "Benachrichtigungskanal", size="sm", permission="guild_member")
+    async def notify_channel_set_widget(self, ctx):
+        try:
+            channel_id = await self.config.guild(ctx.guild).notification_channel()
+            return WidgetData.kpi(value="Ja" if channel_id else "Nein", label="Benachrichtigungskanal")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Benachrichtigungskanal")
+
     def cog_unload(self) -> None:
+        unregister_dashboard(self)
         self.bot.loop.create_task(self.http.session.close())
 
     async def red_get_data_for_user(self, **kwargs):

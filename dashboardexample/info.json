@@ -1,0 +1,14 @@
+{
+    "author": ["Domekologe"],
+    "name": "DashboardExample",
+    "short": "Beispiel-Cog für die DKS-Web-Dashboard-Integration.",
+    "description": "Zeigt ein Widget (KPI) und ein Panel (Formular) für das DKS Web Dashboard. Integriert sich nur, wenn der WebDashboard-Cog geladen ist, und funktioniert auch ohne ihn.",
+    "install_msg": "Lade zusätzlich `webdashboard`, um die Integration im Web-Dashboard zu sehen. Prüfen mit `[p]dashboardexample`.",
+    "tags": ["dashboard", "example", "web"],
+    "requirements": [],
+    "min_bot_version": "3.5.0",
+    "type": "COG",
+    "hidden": true,
+    "disabled": false,
+    "end_user_data_statement": "Dieser Beispiel-Cog speichert pro Server eine optionale Begrüßungsnachricht und einen Kanal. Es werden keine personenbezogenen Daten gespeichert."
+}

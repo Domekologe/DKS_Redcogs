@@ -7,6 +7,11 @@ import asyncio
 import html
 import json
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 log = logging.getLogger("red.domekologe.adminprotocol")
 
 try:
@@ -97,8 +102,19 @@ class AdminProtocol(commands.Cog):
                 self._dashboard_attached = True
             except Exception:
                 self._dashboard_attached = False
+        register_dashboard(self)
+
+    @dashboard_widget("adminprotocol_enabled_events", "Aktive Log-Events", size="sm", permission="guild_member")
+    async def adminprotocol_enabled_events_widget(self, ctx):
+        try:
+            events = await self.config.guild(ctx.guild).events()
+            count = sum(1 for ev in events.values() if isinstance(ev, dict) and ev.get("enabled"))
+            return WidgetData.kpi(value=count, label="Aktive Log-Events")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Aktive Log-Events")
 
     async def cog_unload(self) -> None:
+        unregister_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is not None:
             try:

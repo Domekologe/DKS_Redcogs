@@ -7,6 +7,8 @@ import discord
 from discord import app_commands
 from redbot.core import commands
 
+from .dks_dashboard import register_dashboard, unregister_dashboard
+
 
 # ---- kleine Helper: REST-Call für Voter holen (paged) ----
 async def fetch_answer_voters(
@@ -57,6 +59,12 @@ class GuildToolsPollExport(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        register_dashboard(self)
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
 
     # ---------- Helper innerhalb der Klasse ----------
     def _ans_id(self, ans) -> int:

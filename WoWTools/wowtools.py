@@ -30,6 +30,13 @@ from .talentcheck import TalentCheck
 from .raidinfo import RaidInfo
 from .comparechars import CompareChars
 
+from .dks_dashboard import (
+    dashboard_widget,
+    WidgetData,
+    register_dashboard,
+    unregister_dashboard,
+)
+
 log = logging.getLogger("red.karlo-cogs.wowtools")
 _ = Translator("WoWTools", __file__)
 
@@ -158,6 +165,7 @@ class WoWTools(
                 self._dashboard_attached = True
             except Exception:
                 self._dashboard_attached = False
+        register_dashboard(self)
 
     async def create_bnet_objs(self):
         blizzard_api = await self.bot.get_shared_api_tokens("blizzard")
@@ -504,7 +512,16 @@ class WoWTools(
             return
         await self.create_bnet_objs()
 
+    @dashboard_widget("wowtools_onmessage", "WoW Auto-Reply", size="sm", permission="guild_member")
+    async def wowtools_onmessage_widget(self, ctx):
+        try:
+            enabled = await self.config.guild(ctx.guild).on_message()
+            return WidgetData.kpi(value="An" if enabled else "Aus", label="WoW Auto-Reply")
+        except Exception:
+            return WidgetData.kpi(value="–", label="WoW Auto-Reply")
+
     async def cog_unload(self):
+        unregister_dashboard(self)
         self.bot.loop.create_task(self.session.close())
         self.update_dungeon_scoreboard.cancel()
         self.guild_log.cancel()

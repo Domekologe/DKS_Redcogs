@@ -15,6 +15,11 @@ try:
 except ImportError:
     aiohttp = None
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 ONLINE_STATES = {discord.Status.online, discord.Status.idle, discord.Status.dnd}
 DATE_FORMATS = ["%d-%m-%Y", "%d.%m.%Y", "%d/%m/%Y"]
 
@@ -65,6 +70,20 @@ class GuildTools(commands.Cog):
         # In-Memory Token Cache (prozesslokal)
         self._token_mem = ""
         self._token_mem_exp = 0
+
+    async def cog_load(self) -> None:
+        register_dashboard(self)
+
+    def cog_unload(self) -> None:
+        unregister_dashboard(self)
+
+    @dashboard_widget("tracked_members", "Erfasste Mitglieder", size="sm", permission="guild_member")
+    async def tracked_members_widget(self, ctx):
+        try:
+            data = await self.config.guild(ctx.guild).last_seen()
+            return WidgetData.kpi(value=int(len(data)), label="Erfasste Mitglieder")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Erfasste Mitglieder")
 
     # ---------- Presence Tracking ----------
     @commands.Cog.listener()

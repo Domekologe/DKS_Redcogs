@@ -80,6 +80,12 @@ from .slash_modals import (
 )
 from .functions.automations import RankSyncService
 from .functions.blizzard import BlizzardService
+from .dks_dashboard import (
+    dashboard_widget,
+    WidgetData,
+    register_dashboard,
+    unregister_dashboard,
+)
 
 I18N = {
     "de-DE": {
@@ -261,8 +267,10 @@ class WowGuildAutomation(commands.Cog):
                 self._rank_auto_sync_loop.start()
         except Exception:
             pass
+        register_dashboard(self)
 
     async def cog_unload(self) -> None:
+        unregister_dashboard(self)
         try:
             self._rank_auto_sync_loop.cancel()
         except Exception:
@@ -274,6 +282,15 @@ class WowGuildAutomation(commands.Cog):
             except Exception:
                 pass
         self._dashboard_attached = False
+
+    @dashboard_widget("wga_onboarding", "Onboarding", size="sm", permission="guild_member")
+    async def wga_onboarding_widget(self, ctx):
+        try:
+            features = await self.config.guild(ctx.guild).features()
+            enabled = bool((features or {}).get("onboarding", True))
+            return WidgetData.kpi(value="An" if enabled else "Aus", label="Onboarding")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Onboarding")
 
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
         cfg = await self.config.guild(guild).all()

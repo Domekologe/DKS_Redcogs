@@ -11,6 +11,11 @@ from discord import app_commands
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 
+from .dks_dashboard import (
+    dashboard_widget, WidgetData,
+    register_dashboard, unregister_dashboard,
+)
+
 try:
     # Late-bound by Dashboard when registering third-party pages.
     from dks_dashboard.rpc.third_parties import dashboard_page as _dashboard_page  # type: ignore
@@ -276,8 +281,24 @@ class ChannelJoinNotification(commands.Cog):
         dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
+        register_dashboard(self)
+
+    @dashboard_widget("cjn_configured_channels", "Join-Notify Channels", size="sm", permission="guild_member")
+    async def cjn_configured_channels_widget(self, ctx):
+        try:
+            data = await self.config.guild(ctx.guild).notifications()
+            if not isinstance(data, dict):
+                data = {}
+            count = sum(
+                1 for v in data.values()
+                if isinstance(v, dict) and v.get("enabled")
+            )
+            return WidgetData.kpi(value=count, label="Join-Notify Channels")
+        except Exception:
+            return WidgetData.kpi(value="–", label="Join-Notify Channels")
 
     async def cog_unload(self) -> None:
+        unregister_dashboard(self)
         dashboard_cog = self._get_dashboard_cog()
         if dashboard_cog is not None:
             try:

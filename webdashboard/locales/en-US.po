@@ -1,0 +1,59 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: web-dashboard\n"
+"POT-Creation-Date: 2026-06-21 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: English\n"
+"Language: en_US\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: webdashboard.py
+msgid "Status: {state}"
+msgstr "Status: {state}"
+
+#: webdashboard.py
+msgid "läuft"
+msgstr "running"
+
+#: webdashboard.py
+msgid "gestoppt"
+msgstr "stopped"
+
+#: webdashboard.py
+msgid "Adresse: http://{host}:{port}"
+msgstr "Address: http://{host}:{port}"
+
+#: webdashboard.py
+msgid "Registrierte Beiträge: {n} (aus {c} Cogs)"
+msgstr "Registered contributions: {n} (from {c} cogs)"
+
+#: webdashboard.py
+msgid "Start fehlgeschlagen: {error}"
+msgstr "Start failed: {error}"
+
+#: webdashboard.py
+msgid "Gateway gestartet."
+msgstr "Gateway started."
+
+#: webdashboard.py
+msgid "Gateway gestoppt."
+msgstr "Gateway stopped."
+
+#: webdashboard.py
+msgid "Gespeichert: {host}:{port}. Bitte neu starten."
+msgstr "Saved: {host}:{port}. Please restart."
+
+#: webdashboard.py
+msgid "Token per DM gesendet."
+msgstr "Token sent via DM."
+
+#: webdashboard.py
+msgid "Ich konnte dir keine DM senden. Bitte DMs aktivieren."
+msgstr "I couldn't send you a DM. Please enable DMs."
+
+#: webdashboard.py
+msgid "Neues Token erzeugt und Gateway neu gestartet. Hole es mit `[p]dashboard token`."
+msgstr "New token generated and gateway restarted. Retrieve it with `[p]dashboard token`."
