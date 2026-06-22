@@ -551,46 +551,64 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
     items = []
     seen = set()
-    try:
-        from discord import AppCommandType, app_commands
 
-        def _add(c, cog_name):
-            if isinstance(c, app_commands.ContextMenu):
-                ctype = int(c.type.value)  # 2=user, 3=message
+    # App-Command-Typen robust bestimmen (defensiv gegen API-Unterschiede).
+    try:
+        from discord import app_commands  # type: ignore
+        ContextMenu = app_commands.ContextMenu
+    except Exception:
+        app_commands = None  # type: ignore
+        ContextMenu = ()  # isinstance(..., ()) ist immer False
+
+    def _add(c, cog_name):
+        try:
+            if ContextMenu and isinstance(c, ContextMenu):
+                ctype = int(getattr(c, "type").value)  # 2=user, 3=message
             else:
-                ctype = int(AppCommandType.chat_input.value)  # 1=slash
-            key = (c.name, ctype)
+                ctype = 1  # chat_input / Slash
+            name = getattr(c, "name", None)
+            if not name:
+                return
+            key = (name, ctype)
             if key in seen:
                 return
             seen.add(key)
             kind = {1: "slash", 2: "user", 3: "message"}.get(ctype, "slash")
             items.append({
-                "name": c.name,
+                "name": name,
                 "type": ctype,
                 "cog": cog_name,
-                "enabled": (c.name in enabled[kind]) if has_info else True,
+                "enabled": (name in enabled[kind]) if has_info else True,
             })
+        except Exception:
+            return
 
-        # 1) Alle von Cogs DEFINIERTEN App-Commands – inkl. deaktivierter (nicht im Tree).
-        for cog_name, cog in bot.cogs.items():
+    # 1) Alle von Cogs DEFINIERTEN App-Commands – inkl. deaktivierter (nicht im Tree).
+    try:
+        for cog_name, cog in list(bot.cogs.items()):
             try:
                 cmds = []
                 if hasattr(cog, "get_app_commands"):
                     cmds = list(cog.get_app_commands())
-                # Context-Menüs eines Cogs separat
+                elif hasattr(cog, "walk_app_commands"):
+                    cmds = list(cog.walk_app_commands())
                 cmds += list(getattr(cog, "__cog_context_menus__", []) or [])
                 for c in cmds:
                     _add(c, cog_name)
             except Exception:
                 continue
+    except Exception:
+        pass
 
-        # 2) Tree-Befehle ergänzen (Context-Menüs auf Modulebene / nicht in Cogs).
+    # 2) Tree-Befehle ergänzen (alles, was wirklich registriert/aktiv ist).
+    try:
         for c in bot.tree.get_commands():
             binding = getattr(c, "binding", None)
             cog_name = type(binding).__name__ if binding is not None else "—"
             _add(c, cog_name)
     except Exception:
         pass
+
     items.sort(key=lambda x: (x["cog"].lower(), x["name"]))
     return {"commands": items, "count": len(items), "managed": has_info}
 
