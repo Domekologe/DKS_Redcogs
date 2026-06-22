@@ -379,6 +379,595 @@ class WowGuildAutomation(commands.Cog):
                 gl.remove(g)
         return SubmitResult.ok("Verbündete Gilde entfernt.")
 
+    # --- Dashboard-Helfer: Channel-/Rollen-Optionen ---------------------- #
+    def _wga_channel_options(self, ctx, *, with_none: bool = True) -> List[Dict[str, str]]:
+        opts: List[Dict[str, str]] = []
+        if with_none:
+            opts.append({"value": "", "label": "— keiner —"})
+        try:
+            for ch in ctx.guild.text_channels:
+                opts.append({"value": str(ch.id), "label": f"#{ch.name}"})
+        except Exception:
+            pass
+        return opts
+
+    def _wga_role_options(self, ctx, *, with_none: bool = True) -> List[Dict[str, str]]:
+        opts: List[Dict[str, str]] = []
+        if with_none:
+            opts.append({"value": "", "label": "— keiner —"})
+        try:
+            for role in ctx.guild.roles:
+                if role.is_default():
+                    continue
+                opts.append({"value": str(role.id), "label": role.name})
+        except Exception:
+            pass
+        return opts
+
+    async def _wga_active_profile(self, ctx) -> str:
+        try:
+            prof = await self.config.guild(ctx.guild).active_profile_key()
+        except Exception:
+            prof = ""
+        return str(prof or "retail")
+
+    # --- Guild-Panel: Profil --------------------------------------------- #
+    @dashboard_panel(
+        "wga_profile", "Profil", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_profile_panel(self, ctx):
+        language = await self.config.guild(ctx.guild).language()
+        prof = await self._wga_active_profile(ctx)
+        profiles = await self.config.guild(ctx.guild).wow_profiles()
+        if not isinstance(profiles, dict):
+            profiles = {}
+        active = profiles.get(prof, {})
+        if not isinstance(active, dict):
+            active = {}
+        profile_options = [{"value": k, "label": k} for k in profiles.keys()] or [
+            {"value": prof, "label": prof}
+        ]
+        version_options = [
+            {"value": "retail", "label": "Retail"},
+            {"value": "classic", "label": "Classic"},
+            {"value": "classic_era", "label": "Classic Era"},
+            {"value": "mop_classic", "label": "MoP Classic"},
+            {"value": "sod", "label": "SoD"},
+        ]
+        return PanelSchema(
+            description="Sprache und WoW-Profil (Region/Version/Realm/Gilde) des aktiven Profils.",
+            fields=[
+                Field.select(
+                    "language", "Sprache",
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(language or "de-DE"),
+                ),
+                Field.select("active_profile_key", "Aktives Profil", profile_options, value=prof),
+                Field.text(
+                    "new_profile_key", "Neues Profil (Schlüssel)", value="",
+                    placeholder="leer lassen wenn nicht neu",
+                    description="Leer lassen, wenn kein neues Profil angelegt werden soll.",
+                ),
+                Field.text("region", "Region", value=str(active.get("region", "eu"))),
+                Field.select("version", "Version", version_options, value=str(active.get("version", "retail"))),
+                Field.text("realm", "Realm", value=str(active.get("realm", ""))),
+                Field.text("guild_name", "Gildenname", value=str(active.get("guild_name", ""))),
+            ],
+        )
+
+    @wga_profile_panel.on_submit
+    async def _wga_profile_submit(self, ctx, data):
+        await self.config.guild(ctx.guild).language.set(str(data.get("language", "de-DE")).strip() or "de-DE")
+        new_key = str(data.get("new_profile_key", "")).strip()
+        region = str(data.get("region", "")).strip()
+        version = str(data.get("version", "retail")).strip() or "retail"
+        realm = str(data.get("realm", "")).strip()
+        guild_name = str(data.get("guild_name", "")).strip()
+        selected = str(data.get("active_profile_key", "")).strip()
+        async with self.config.guild(ctx.guild).wow_profiles() as profiles:
+            if not isinstance(profiles, dict):
+                profiles.clear()
+            if new_key:
+                profiles[new_key] = {
+                    "region": region, "version": version, "realm": realm, "guild_name": guild_name,
+                }
+                active_key = new_key
+            else:
+                active_key = selected or await self._wga_active_profile(ctx)
+                entry = profiles.get(active_key)
+                if not isinstance(entry, dict):
+                    entry = {}
+                entry.update(
+                    {"region": region, "version": version, "realm": realm, "guild_name": guild_name}
+                )
+                profiles[active_key] = entry
+        await self.config.guild(ctx.guild).active_profile_key.set(active_key)
+        return SubmitResult.ok("Profil gespeichert.")
+
+    # --- Guild-Panel: Onboarding ----------------------------------------- #
+    @dashboard_panel(
+        "wga_onboarding_cfg", "Onboarding", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_onboarding_cfg_panel(self, ctx):
+        onboarding = await self.config.guild(ctx.guild).onboarding()
+        roles = await self.config.guild(ctx.guild).roles()
+        channels = await self.config.guild(ctx.guild).channels()
+        features = await self.config.guild(ctx.guild).features()
+        if not isinstance(onboarding, dict):
+            onboarding = {}
+        if not isinstance(roles, dict):
+            roles = {}
+        if not isinstance(channels, dict):
+            channels = {}
+        if not isinstance(features, dict):
+            features = {}
+        return PanelSchema(
+            description="Onboarding-Texte, Channel, Rollen und Feature-Schalter.",
+            fields=[
+                Field.textarea(
+                    "welcome_text_de", "Willkommenstext (DE)",
+                    value=str(onboarding.get("welcome_text_de", "")),
+                ),
+                Field.textarea(
+                    "welcome_text_en", "Willkommenstext (EN)",
+                    value=str(onboarding.get("welcome_text_en", "")),
+                ),
+                Field.select(
+                    "onboarding_channel", "Onboarding-Channel",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("onboarding_channel_id", 0) or ""),
+                ),
+                Field.select(
+                    "onboarding_new_role", "Rolle: Onboarding neu",
+                    self._wga_role_options(ctx),
+                    value=str(roles.get("onboarding_new_role_id", 0) or ""),
+                ),
+                Field.select(
+                    "onboarding_complete_role", "Rolle: Onboarding abgeschlossen",
+                    self._wga_role_options(ctx),
+                    value=str(roles.get("onboarding_complete_role_id", 0) or ""),
+                ),
+                Field.switch(
+                    "feature_onboarding", "Feature: Onboarding aktiv",
+                    value=bool(features.get("onboarding", True)),
+                ),
+            ],
+        )
+
+    @wga_onboarding_cfg_panel.on_submit
+    async def _wga_onboarding_cfg_submit(self, ctx, data):
+        async with self.config.guild(ctx.guild).onboarding() as ob:
+            if not isinstance(ob, dict):
+                ob.clear()
+            ob["welcome_text_de"] = str(data.get("welcome_text_de", "")).strip()
+            ob["welcome_text_en"] = str(data.get("welcome_text_en", "")).strip()
+        async with self.config.guild(ctx.guild).roles() as rl:
+            if not isinstance(rl, dict):
+                rl.clear()
+            rl["onboarding_new_role_id"] = int(data["onboarding_new_role"]) if str(data.get("onboarding_new_role", "")).strip() else 0
+            rl["onboarding_complete_role_id"] = int(data["onboarding_complete_role"]) if str(data.get("onboarding_complete_role", "")).strip() else 0
+        async with self.config.guild(ctx.guild).channels() as ch:
+            if not isinstance(ch, dict):
+                ch.clear()
+            ch["onboarding_channel_id"] = int(data["onboarding_channel"]) if str(data.get("onboarding_channel", "")).strip() else 0
+        async with self.config.guild(ctx.guild).features() as ft:
+            if not isinstance(ft, dict):
+                ft.clear()
+            ft["onboarding"] = bool(data.get("feature_onboarding", False))
+        return SubmitResult.ok("Onboarding-Einstellungen gespeichert.")
+
+    # --- Guild-Panel: Rules ---------------------------------------------- #
+    @dashboard_panel(
+        "wga_rules", "Rules", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_rules_panel(self, ctx):
+        rules = await self.config.guild(ctx.guild).rules()
+        if not isinstance(rules, dict):
+            rules = {}
+        return PanelSchema(
+            description="Regel-Channel und Reaktions-Emoji für die Regelbestätigung.",
+            fields=[
+                Field.select(
+                    "rule_channel", "Regel-Channel",
+                    self._wga_channel_options(ctx),
+                    value=str(rules.get("rule_channel_id", 0) or ""),
+                ),
+                Field.text("rule_emoji", "Regel-Emoji", value=str(rules.get("rule_emoji", "✅"))),
+            ],
+        )
+
+    @wga_rules_panel.on_submit
+    async def _wga_rules_submit(self, ctx, data):
+        async with self.config.guild(ctx.guild).rules() as rules:
+            if not isinstance(rules, dict):
+                rules.clear()
+            rules["rule_channel_id"] = int(data["rule_channel"]) if str(data.get("rule_channel", "")).strip() else 0
+            emoji = str(data.get("rule_emoji", "")).strip()
+            rules["rule_emoji"] = emoji or "✅"
+        return SubmitResult.ok("Regel-Einstellungen gespeichert.")
+
+    # --- Guild-Panel: Rollen --------------------------------------------- #
+    @dashboard_panel(
+        "wga_roles", "Rollen", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_roles_panel(self, ctx):
+        roles = await self.config.guild(ctx.guild).roles()
+        features = await self.config.guild(ctx.guild).features()
+        if not isinstance(roles, dict):
+            roles = {}
+        if not isinstance(features, dict):
+            features = {}
+        return PanelSchema(
+            description="Basis-Rollen und Feature-Schalter.",
+            fields=[
+                Field.select(
+                    "guest_role", "Gast-Rolle", self._wga_role_options(ctx),
+                    value=str(roles.get("guest_role_id", 0) or ""),
+                ),
+                Field.select(
+                    "member_role", "Mitglieds-Rolle", self._wga_role_options(ctx),
+                    value=str(roles.get("member_role_id", 0) or ""),
+                ),
+                Field.select(
+                    "allied_role", "Verbündeten-Rolle", self._wga_role_options(ctx),
+                    value=str(roles.get("allied_role_id", 0) or ""),
+                ),
+                Field.switch(
+                    "feature_allied", "Feature: Verbündete Gilden",
+                    value=bool(features.get("allied_guilds", False)),
+                ),
+                Field.switch(
+                    "feature_sync_rank", "Feature: Rang-Sync",
+                    value=bool(features.get("sync_rank", True)),
+                ),
+                Field.switch(
+                    "feature_auto_verify", "Feature: Auto-Verifizierung",
+                    value=bool(features.get("auto_verify", True)),
+                ),
+                Field.switch(
+                    "feature_ready_times", "Feature: Bereitschaftszeiten",
+                    value=bool(features.get("ready_times", True)),
+                ),
+            ],
+        )
+
+    @wga_roles_panel.on_submit
+    async def _wga_roles_submit(self, ctx, data):
+        async with self.config.guild(ctx.guild).roles() as rl:
+            if not isinstance(rl, dict):
+                rl.clear()
+            rl["guest_role_id"] = int(data["guest_role"]) if str(data.get("guest_role", "")).strip() else 0
+            rl["member_role_id"] = int(data["member_role"]) if str(data.get("member_role", "")).strip() else 0
+            rl["allied_role_id"] = int(data["allied_role"]) if str(data.get("allied_role", "")).strip() else 0
+        async with self.config.guild(ctx.guild).features() as ft:
+            if not isinstance(ft, dict):
+                ft.clear()
+            ft["allied_guilds"] = bool(data.get("feature_allied", False))
+            ft["sync_rank"] = bool(data.get("feature_sync_rank", False))
+            ft["auto_verify"] = bool(data.get("feature_auto_verify", False))
+            ft["ready_times"] = bool(data.get("feature_ready_times", False))
+        return SubmitResult.ok("Rollen & Features gespeichert.")
+
+    # --- Guild-Panel: Channels ------------------------------------------- #
+    @dashboard_panel(
+        "wga_channels", "Channels", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_channels_panel(self, ctx):
+        channels = await self.config.guild(ctx.guild).channels()
+        if not isinstance(channels, dict):
+            channels = {}
+        return PanelSchema(
+            description="Benachrichtigungs- und Review-Channels.",
+            fields=[
+                Field.select(
+                    "manual_review_channel", "Manuelle Review",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("manual_review_channel_id", 0) or ""),
+                ),
+                Field.select(
+                    "raid_guest_channel", "Raid-Gäste",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("raid_guest_channel_id", 0) or ""),
+                ),
+                Field.select(
+                    "officer_character_notify_channel", "Offizier: Char-Benachrichtigung",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("officer_character_notify_channel_id", 0) or ""),
+                ),
+                Field.select(
+                    "rank_protected_notify_channel", "Geschützte Ränge: Benachrichtigung",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("rank_protected_notify_channel_id", 0) or ""),
+                ),
+                Field.select(
+                    "rank_lock_notify_channel", "Rank-Lock: Benachrichtigung",
+                    self._wga_channel_options(ctx),
+                    value=str(channels.get("rank_lock_notify_channel_id", 0) or ""),
+                ),
+            ],
+        )
+
+    @wga_channels_panel.on_submit
+    async def _wga_channels_submit(self, ctx, data):
+        mapping = {
+            "manual_review_channel": "manual_review_channel_id",
+            "raid_guest_channel": "raid_guest_channel_id",
+            "officer_character_notify_channel": "officer_character_notify_channel_id",
+            "rank_protected_notify_channel": "rank_protected_notify_channel_id",
+            "rank_lock_notify_channel": "rank_lock_notify_channel_id",
+        }
+        async with self.config.guild(ctx.guild).channels() as ch:
+            if not isinstance(ch, dict):
+                ch.clear()
+            for field_key, cfg_key in mapping.items():
+                v = str(data.get(field_key, "")).strip()
+                ch[cfg_key] = int(v) if v else 0
+        return SubmitResult.ok("Channels gespeichert.")
+
+    # --- Guild-Panel: Texte (Templates) ---------------------------------- #
+    @dashboard_panel(
+        "wga_templates", "Texte", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_templates_panel(self, ctx):
+        templates = await self.config.guild(ctx.guild).templates()
+        if not isinstance(templates, dict):
+            templates = {}
+        rank_vars = [
+            {"token": "{member}", "desc": "Mitglied (Mention)"},
+            {"token": "{game}", "desc": "Spiel/Version"},
+            {"token": "{char}", "desc": "Charaktername"},
+            {"token": "{rank}", "desc": "Ingame-Rang"},
+            {"token": "{profile}", "desc": "Profil-Schlüssel"},
+            {"token": "{detail}", "desc": "Zusatzinfo"},
+        ]
+        return PanelSchema(
+            description="Benachrichtigungs- und Hinweistexte. Platzhalter in geschweiften Klammern.",
+            fields=[
+                Field.textarea(
+                    "duplicate_character_message", "Doppelter Charakter",
+                    value=str(templates.get("duplicate_character_message", "")),
+                    variables=[{"token": "{detail}", "desc": "Zusatzinfo"}],
+                ),
+                Field.textarea(
+                    "member_left_characters_notice", "Mitglied verlassen",
+                    value=str(templates.get("member_left_characters_notice", "")),
+                    variables=[
+                        {"token": "{user}", "desc": "Mitglied (Mention)"},
+                        {"token": "{username}", "desc": "Benutzername"},
+                        {"token": "{chars}", "desc": "Verknüpfte Chars"},
+                    ],
+                ),
+                Field.textarea(
+                    "admin_removed_char_dm", "Admin hat Char entfernt (DM)",
+                    value=str(templates.get("admin_removed_char_dm", "")),
+                    variables=[
+                        {"token": "{chars}", "desc": "Entfernte Chars"},
+                        {"token": "{reason}", "desc": "Grund"},
+                    ],
+                ),
+                Field.textarea(
+                    "protected_rank_sync_notice", "Geschützter Rang: Hinweis",
+                    value=str(templates.get("protected_rank_sync_notice", "")),
+                    variables=rank_vars,
+                ),
+                Field.textarea(
+                    "rank_lock_officer_notice", "Rank-Lock: Offizier-Hinweis",
+                    value=str(templates.get("rank_lock_officer_notice", "")),
+                    variables=rank_vars,
+                ),
+            ],
+        )
+
+    @wga_templates_panel.on_submit
+    async def _wga_templates_submit(self, ctx, data):
+        keys = [
+            "duplicate_character_message",
+            "member_left_characters_notice",
+            "admin_removed_char_dm",
+            "protected_rank_sync_notice",
+            "rank_lock_officer_notice",
+        ]
+        async with self.config.guild(ctx.guild).templates() as tpl:
+            if not isinstance(tpl, dict):
+                tpl.clear()
+            for k in keys:
+                if k in data:
+                    tpl[k] = str(data.get(k, ""))
+        return SubmitResult.ok("Texte gespeichert.")
+
+    # --- Guild-Liste: Rank-Mapping --------------------------------------- #
+    @dashboard_list(
+        "wga_rank_mapping", "Rank-Mapping", mount="guild_settings", permission="guild_admin",
+        columns=[
+            {"key": "index", "label": "Index"},
+            {"key": "title", "label": "Titel"},
+            {"key": "role", "label": "Discord-Rolle"},
+        ],
+        description="Rang 0–9 → Discord-Rolle (aktives Profil).",
+    )
+    async def wga_rank_mapping_list(self, ctx):
+        prof = await self._wga_active_profile(ctx)
+        titles_by = await self.config.guild(ctx.guild).rank_titles_by_profile()
+        mapping_by = await self.config.guild(ctx.guild).rank_mapping_by_profile()
+        titles = titles_by.get(prof, {}) if isinstance(titles_by, dict) else {}
+        mapping = mapping_by.get(prof, {}) if isinstance(mapping_by, dict) else {}
+        if not isinstance(titles, dict):
+            titles = {}
+        if not isinstance(mapping, dict):
+            mapping = {}
+        rows = []
+        for i in range(10):
+            idx = str(i)
+            title = str(titles.get(idx, f"Rank {idx}"))
+            role_name = "—"
+            try:
+                role_id = int(mapping.get(title, 0) or 0)
+                if role_id:
+                    role = ctx.guild.get_role(role_id)
+                    if role is not None:
+                        role_name = role.name
+            except Exception:
+                role_name = "—"
+            rows.append({"id": idx, "cells": {"index": idx, "title": title, "role": role_name}})
+        return rows
+
+    @wga_rank_mapping_list.edit_form
+    async def _wga_rank_mapping_edit_form(self, ctx, item_id):
+        prof = await self._wga_active_profile(ctx)
+        idx = str(item_id)
+        titles_by = await self.config.guild(ctx.guild).rank_titles_by_profile()
+        mapping_by = await self.config.guild(ctx.guild).rank_mapping_by_profile()
+        titles = titles_by.get(prof, {}) if isinstance(titles_by, dict) else {}
+        mapping = mapping_by.get(prof, {}) if isinstance(mapping_by, dict) else {}
+        if not isinstance(titles, dict):
+            titles = {}
+        if not isinstance(mapping, dict):
+            mapping = {}
+        title = str(titles.get(idx, f"Rank {idx}"))
+        cur_role_id = 0
+        try:
+            cur_role_id = int(mapping.get(title, 0) or 0)
+        except Exception:
+            cur_role_id = 0
+        return PanelSchema(
+            description=f"Rang {idx} (Profil {prof}) bearbeiten.",
+            fields=[
+                Field.text("title", "Titel", value=title),
+                Field.select(
+                    "role", "Discord-Rolle", self._wga_role_options(ctx),
+                    value=str(cur_role_id or ""),
+                ),
+            ],
+        )
+
+    @wga_rank_mapping_list.on_edit
+    async def _wga_rank_mapping_edit(self, ctx, item_id, data):
+        prof = await self._wga_active_profile(ctx)
+        idx = str(item_id)
+        new_title = str(data.get("title", "")).strip() or f"Rank {idx}"
+        role_id = int(data["role"]) if str(data.get("role", "")).strip() else 0
+        async with self.config.guild(ctx.guild).rank_titles_by_profile() as titles_by:
+            if not isinstance(titles_by, dict):
+                titles_by.clear()
+            prof_titles = titles_by.get(prof)
+            if not isinstance(prof_titles, dict):
+                prof_titles = {}
+            old_title = str(prof_titles.get(idx, f"Rank {idx}"))
+            prof_titles[idx] = new_title
+            titles_by[prof] = prof_titles
+        async with self.config.guild(ctx.guild).rank_mapping_by_profile() as mapping_by:
+            if not isinstance(mapping_by, dict):
+                mapping_by.clear()
+            prof_map = mapping_by.get(prof)
+            if not isinstance(prof_map, dict):
+                prof_map = {}
+            # Veraltete Zuordnung des alten Titels entfernen, sofern Titel sich änderte.
+            if old_title != new_title and old_title in prof_map:
+                prof_map.pop(old_title, None)
+            if role_id:
+                prof_map[new_title] = role_id
+            else:
+                prof_map.pop(new_title, None)
+            mapping_by[prof] = prof_map
+        return SubmitResult.ok("Rank-Mapping gespeichert.")
+
+    @wga_rank_mapping_list.on_delete
+    async def _wga_rank_mapping_delete(self, ctx, item_id):
+        prof = await self._wga_active_profile(ctx)
+        idx = str(item_id)
+        old_title = f"Rank {idx}"
+        async with self.config.guild(ctx.guild).rank_titles_by_profile() as titles_by:
+            if isinstance(titles_by, dict):
+                prof_titles = titles_by.get(prof)
+                if isinstance(prof_titles, dict):
+                    old_title = str(prof_titles.pop(idx, old_title))
+                    titles_by[prof] = prof_titles
+        async with self.config.guild(ctx.guild).rank_mapping_by_profile() as mapping_by:
+            if isinstance(mapping_by, dict):
+                prof_map = mapping_by.get(prof)
+                if isinstance(prof_map, dict):
+                    prof_map.pop(old_title, None)
+                    mapping_by[prof] = prof_map
+        return SubmitResult.ok("Rank-Eintrag zurückgesetzt.")
+
+    # --- Guild-Panel: Protected & Rank-Lock ------------------------------ #
+    @dashboard_panel(
+        "wga_protected_lock", "Protected & Rank-Lock", mount="guild_settings", permission="guild_admin",
+    )
+    async def wga_protected_lock_panel(self, ctx):
+        prof = await self._wga_active_profile(ctx)
+        protected_by = await self.config.guild(ctx.guild).protected_rank_titles_by_profile()
+        locked_by = await self.config.guild(ctx.guild).locked_rank_titles_by_profile()
+        protected = protected_by.get(prof, []) if isinstance(protected_by, dict) else []
+        locked = locked_by.get(prof, []) if isinstance(locked_by, dict) else []
+        if not isinstance(protected, list):
+            protected = []
+        if not isinstance(locked, list):
+            locked = []
+        return PanelSchema(
+            description=f"Geschützte und gesperrte Ränge (aktives Profil {prof}). Ein Eintrag pro Zeile.",
+            fields=[
+                Field.textarea(
+                    "protected_list", "Geschützte Ränge",
+                    value="\n".join(str(x) for x in protected),
+                ),
+                Field.textarea(
+                    "lock_list", "Gesperrte Ränge (Rank-Lock)",
+                    value="\n".join(str(x) for x in locked),
+                ),
+            ],
+        )
+
+    @wga_protected_lock_panel.on_submit
+    async def _wga_protected_lock_submit(self, ctx, data):
+        prof = await self._wga_active_profile(ctx)
+        protected = [s.strip() for s in str(data.get("protected_list", "")).splitlines() if s.strip()]
+        locked = [s.strip() for s in str(data.get("lock_list", "")).splitlines() if s.strip()]
+        async with self.config.guild(ctx.guild).protected_rank_titles_by_profile() as pb:
+            if not isinstance(pb, dict):
+                pb.clear()
+            pb[prof] = protected
+        async with self.config.guild(ctx.guild).locked_rank_titles_by_profile() as lb:
+            if not isinstance(lb, dict):
+                lb.clear()
+            lb[prof] = locked
+        return SubmitResult.ok("Geschützte & gesperrte Ränge gespeichert.")
+
+    # --- Guild-Liste: Registrierungen ------------------------------------ #
+    @dashboard_list(
+        "wga_registrations", "Registrierungen", mount="guild_settings", permission="guild_admin",
+        columns=[{"key": "member", "label": "Mitglied"}],
+        description="Gespeicherte Onboarding-Registrierungen. Löschen entfernt die Registrierung eines Mitglieds.",
+    )
+    async def wga_registrations_list(self, ctx):
+        all_members = await self.config.all_members(ctx.guild)
+        rows = []
+        for mid, mdata in (all_members or {}).items():
+            reg = (mdata or {}).get("registration")
+            if not reg:
+                continue
+            name = str(mid)
+            try:
+                member = ctx.guild.get_member(int(mid))
+                if member is not None:
+                    name = member.display_name
+            except Exception:
+                name = str(mid)
+            rows.append({"id": str(mid), "cells": {"member": name}})
+        return rows
+
+    @wga_registrations_list.on_delete
+    async def _wga_registrations_delete(self, ctx, item_id):
+        try:
+            member_id = int(item_id)
+        except Exception:
+            return SubmitResult.fail("Ungültige Mitglieds-ID.")
+        try:
+            await self.config.member_from_ids(ctx.guild.id, member_id).registration.clear()
+        except Exception:
+            return SubmitResult.fail("Registrierung konnte nicht entfernt werden.")
+        return SubmitResult.ok("Registrierung entfernt.")
+
     async def _guild_config(self, guild: discord.Guild) -> Dict[str, Any]:
         cfg = await self.config.guild(guild).all()
         wow_profiles = cfg.get("wow_profiles", {})

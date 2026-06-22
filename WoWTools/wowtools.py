@@ -532,12 +532,30 @@ class WoWTools(
         ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
+        region_opts = [
+            {"value": "eu", "label": "eu"},
+            {"value": "us", "label": "us"},
+            {"value": "kr", "label": "kr"},
+        ]
+        dt = await g.dashboard_texts()
+        if not isinstance(dt, dict):
+            dt = {}
+        text_vars = [
+            {"token": "{guild_name}", "desc": "Gildenname"},
+            {"token": "{region}", "desc": "Region"},
+            {"token": "{realm}", "desc": "Realm"},
+        ]
         return PanelSchema(
             fields=[
                 Field.switch("on_message", "Auto-Reply auf WoW-Begriffe", value=bool(await g.on_message())),
+                Field.select("region", "Region", region_opts, value=str(await g.region() or "")),
+                Field.text("realm", "Realm", value=str(await g.realm() or "")),
+                Field.text("real_guild_name", "Gildenname (echt)", value=str(await g.real_guild_name() or "")),
                 Field.select("guild_log_channel", "Log-Kanal", ch_opts, value=str(await g.guild_log_channel() or "")),
                 Field.select("scoreboard_channel", "Scoreboard-Kanal", ch_opts, value=str(await g.scoreboard_channel() or "")),
                 Field.select("countdown_channel", "Countdown-Kanal", ch_opts, value=str(await g.countdown_channel() or "")),
+                Field.textarea("welcome_note", "Willkommens-Text", value=str(dt.get("welcome_note", "")), variables=text_vars),
+                Field.textarea("status_note", "Status-Text", value=str(dt.get("status_note", "")), variables=text_vars),
             ]
         )
 
@@ -546,6 +564,24 @@ class WoWTools(
         g = self.config.guild(ctx.guild)
         if "on_message" in data:
             await g.on_message.set(bool(data["on_message"]))
+        if "region" in data:
+            v = str(data["region"]).lower().strip()
+            await g.region.set(v if v in ("eu", "us", "kr") else None)
+        if "realm" in data:
+            v = str(data["realm"]).strip()
+            await g.realm.set(v or None)
+        if "real_guild_name" in data:
+            v = str(data["real_guild_name"]).strip()
+            await g.real_guild_name.set(v or None)
+        if "welcome_note" in data or "status_note" in data:
+            dt = await g.dashboard_texts()
+            if not isinstance(dt, dict):
+                dt = {}
+            if "welcome_note" in data:
+                dt["welcome_note"] = str(data["welcome_note"])
+            if "status_note" in data:
+                dt["status_note"] = str(data["status_note"])
+            await g.dashboard_texts.set(dt)
         if "guild_log_channel" in data:
             v = data["guild_log_channel"]
             await g.guild_log_channel.set(int(v) if v else None)

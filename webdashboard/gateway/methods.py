@@ -509,23 +509,45 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         has_info = False
 
     items = []
+    seen = set()
     try:
         from discord import AppCommandType, app_commands
 
-        for c in bot.tree.get_commands():  # nur Top-Level
+        def _add(c, cog_name):
             if isinstance(c, app_commands.ContextMenu):
                 ctype = int(c.type.value)  # 2=user, 3=message
             else:
                 ctype = int(AppCommandType.chat_input.value)  # 1=slash
+            key = (c.name, ctype)
+            if key in seen:
+                return
+            seen.add(key)
             kind = {1: "slash", 2: "user", 3: "message"}.get(ctype, "slash")
-            binding = getattr(c, "binding", None)
-            cog = type(binding).__name__ if binding is not None else "—"
             items.append({
                 "name": c.name,
                 "type": ctype,
-                "cog": cog,
+                "cog": cog_name,
                 "enabled": (c.name in enabled[kind]) if has_info else True,
             })
+
+        # 1) Alle von Cogs DEFINIERTEN App-Commands – inkl. deaktivierter (nicht im Tree).
+        for cog_name, cog in bot.cogs.items():
+            try:
+                cmds = []
+                if hasattr(cog, "get_app_commands"):
+                    cmds = list(cog.get_app_commands())
+                # Context-Menüs eines Cogs separat
+                cmds += list(getattr(cog, "__cog_context_menus__", []) or [])
+                for c in cmds:
+                    _add(c, cog_name)
+            except Exception:
+                continue
+
+        # 2) Tree-Befehle ergänzen (Context-Menüs auf Modulebene / nicht in Cogs).
+        for c in bot.tree.get_commands():
+            binding = getattr(c, "binding", None)
+            cog_name = type(binding).__name__ if binding is not None else "—"
+            _add(c, cog_name)
     except Exception:
         pass
     items.sort(key=lambda x: (x["cog"].lower(), x["name"]))
@@ -630,6 +652,36 @@ async def _installed_cogs(dl):
         return []
 
 
+async def _cogs_with_updates(dl, installed):
+    """Namen installierter Cogs, für die ein Update bereitliegt (best effort).
+
+    Nutzt Reds internes ``_available_updates`` (vergleicht installierten Commit mit
+    dem aktuellen Repo-Checkout – kein Netzwerk). Schlägt es fehl, leeres Set.
+    """
+    try:
+        result = await dl._available_updates(installed)
+        cogs_to_update = result[0] if isinstance(result, (tuple, list)) else result
+        return {getattr(c, "name", None) for c in (cogs_to_update or [])}
+    except Exception:
+        return set()
+
+
+async def _update_all_repos(dl):
+    """Aktualisiert alle Repos versions-robust und liefert die Namen geänderter Repos."""
+    before = {r.name: getattr(r, "commit", None) for r in _iter_repos(dl)}
+    rm = dl._repo_manager
+    # Neuere Red-Versionen: update_all_repos(); ältere: pro Repo Repo.update().
+    if hasattr(rm, "update_all_repos"):
+        await rm.update_all_repos()
+    else:
+        for repo in _iter_repos(dl):
+            try:
+                await repo.update()
+            except Exception:
+                continue
+    return [r.name for r in _iter_repos(dl) if before.get(r.name) != getattr(r, "commit", None)]
+
+
 @dispatcher.method("downloader.repos")
 async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Repos mit installierten und verfügbaren Cogs (Owner)."""
@@ -640,10 +692,12 @@ async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, An
         return {"available": False, "repos": []}
     try:
         installed = await _installed_cogs(dl)
+        update_names = await _cogs_with_updates(dl, installed)
         by_repo: Dict[str, list] = {}
         for m in installed:
             by_repo.setdefault(getattr(m, "repo_name", "?"), []).append({
                 "name": m.name, "commit": getattr(m, "commit", None),
+                "update_available": m.name in update_names,
             })
         repos = []
         for repo in _iter_repos(dl):
@@ -718,15 +772,49 @@ async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[
     if dl is None:
         raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
     try:
-        before = {r.name: getattr(r, "commit", None) for r in _iter_repos(dl)}
-        updated = await dl._repo_manager.update_all_repos()
-        changed = [r.name for r in updated] if updated else [
-            r.name for r in _iter_repos(dl) if before.get(r.name) != getattr(r, "commit", None)
-        ]
+        changed = await _update_all_repos(dl)
+        # Nach dem Repo-Update: welche installierten Cogs haben jetzt ein Update?
+        installed = await _installed_cogs(dl)
+        cogs_update = sorted(await _cogs_with_updates(dl, installed))
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Update-Check fehlgeschlagen: {e}")
-    gateway.audit("downloader.update_check", ctx, {"changed": changed})
-    return {"ok": True, "updated_repos": changed}
+    gateway.audit("downloader.update_check", ctx, {"changed": changed, "cogs": cogs_update})
+    return {"ok": True, "updated_repos": changed, "cogs_with_updates": cogs_update}
+
+
+@dispatcher.method("downloader.cog_update")
+async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Einen installierten Cog auf den neuesten Stand des Repos bringen (Owner)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    cog_name = str((params.get("args") or {}).get("cog", "")).strip()
+    if not cog_name:
+        raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    try:
+        installed = await _installed_cogs(dl)
+        target = next((m for m in installed if m.name == cog_name), None)
+        if target is None:
+            raise RpcError(INVALID_PARAMS, f"Cog '{cog_name}' ist nicht installiert")
+        repo = dl._repo_manager.get_repo(getattr(target, "repo_name", ""))
+        if repo is None:
+            raise RpcError(INVALID_PARAMS, "Zugehöriges Repo nicht gefunden")
+        cogs, message = await dl._filter_incorrect_cogs_by_names(repo, [cog_name])
+        if not cogs:
+            raise RpcError(INVALID_PARAMS, message or f"Cog '{cog_name}' nicht im Repo")
+        installed_cogs, failed = await dl._install_cogs(cogs)
+        if hasattr(dl, "_save_to_installed"):
+            await dl._save_to_installed(installed_cogs)
+        if failed:
+            raise RpcError(INTERNAL_ERROR, f"Update fehlgeschlagen: {cog_name}")
+    except RpcError:
+        raise
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Update fehlgeschlagen: {e}")
+    gateway.audit("downloader.cog_update", ctx, {"cog": cog_name})
+    return {"ok": True, "cog": cog_name, "hint": f"Mit [p]reload {cog_name} neu laden."}
 
 
 @dispatcher.method("downloader.cog_install")
@@ -1004,7 +1092,12 @@ async def pages_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Öffentliche Liste der Custom Pages (ohne HTML, für Navigation)."""
     cog = _dashboard_cog(gateway)
     pages = list(await cog.config.custom_pages()) if cog else []
-    return {"pages": [{"slug": p["slug"], "title": p["title"], "nav": p.get("nav", True)} for p in pages]}
+    return {"pages": [{
+        "slug": p["slug"],
+        "title": p["title"],
+        "nav": p.get("nav", True),
+        "visibility": p.get("visibility", "public"),
+    } for p in pages]}
 
 
 @dispatcher.method("pages.get")
@@ -1027,11 +1120,15 @@ async def pages_save(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     slug = str(args.get("slug", "")).strip().lower().replace(" ", "-")
     if not slug:
         raise RpcError(INVALID_PARAMS, "slug erforderlich")
+    visibility = "private" if str(args.get("visibility", "public")).lower() == "private" else "public"
     entry = {
         "slug": slug,
         "title": str(args.get("title", slug)),
+        # Inhalt wird als Markdown gespeichert; `html` bleibt als Legacy-Fallback erhalten.
+        "markdown": str(args.get("markdown", "")),
         "html": str(args.get("html", "")),
         "nav": bool(args.get("nav", True)),
+        "visibility": visibility,
     }
     async with cog.config.custom_pages() as pages:
         for i, p in enumerate(pages):

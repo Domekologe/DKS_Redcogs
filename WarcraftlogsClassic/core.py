@@ -20,7 +20,8 @@ from redbot.core.utils.chat_formatting import box, humanize_list
 
 from .autocomplete import REALMS
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel,
+    WidgetData, PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
 )
 from .enchantid import ENCHANT_ID
@@ -92,6 +93,80 @@ class WarcraftLogsClassic(commands.Cog):
             return WidgetData.kpi(value="Ja" if channel_id else "Nein", label="Benachrichtigungskanal")
         except Exception:
             return WidgetData.kpi(value="–", label="Benachrichtigungskanal")
+
+    # --- Guild-Panel: Benachrichtigungskanal ----------------------------- #
+    @dashboard_panel("wcl_guild", "WarcraftLogs", "guild_settings", permission="guild_admin")
+    async def wcl_guild_panel(self, ctx):
+        current = await self.config.guild(ctx.guild).notification_channel()
+        ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
+            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+        ]
+        return PanelSchema(
+            fields=[
+                Field.select(
+                    "notification_channel", "Benachrichtigungskanal", ch_opts,
+                    value=str(current or ""),
+                ),
+            ]
+        )
+
+    @wcl_guild_panel.on_submit
+    async def _save_wcl_guild(self, ctx, data):
+        if "notification_channel" in data:
+            v = data["notification_channel"]
+            await self.config.guild(ctx.guild).notification_channel.set(int(v) if v else None)
+        return SubmitResult.ok("Gespeichert.")
+
+    # --- Guild-Panel (pro Nutzer): WCL-Charakter ------------------------- #
+    @dashboard_panel("wcl_char", "Mein WCL-Charakter", "guild_settings", permission="guild_member")
+    async def wcl_char_panel(self, ctx):
+        u = self.config.user_from_id(int(ctx.user.id))
+        region_opts = [
+            {"value": "EU", "label": "EU"},
+            {"value": "US", "label": "US"},
+        ]
+        return PanelSchema(
+            fields=[
+                Field.text("charname", "Charaktername", value=str(await u.charname() or "")),
+                Field.text("realm", "Realm", value=str(await u.realm() or "")),
+                Field.select("region", "Region", region_opts, value=str(await u.region() or "")),
+            ]
+        )
+
+    @wcl_char_panel.on_submit
+    async def _save_wcl_char(self, ctx, data):
+        u = self.config.user_from_id(int(ctx.user.id))
+        if "charname" in data:
+            v = str(data["charname"]).strip()
+            await u.charname.set(v or None)
+        if "realm" in data:
+            v = str(data["realm"]).strip()
+            await u.realm.set(v or None)
+        if "region" in data:
+            v = str(data["region"]).strip()
+            await u.region.set(v or None)
+        return SubmitResult.ok("Gespeichert.")
+
+    # --- Globales Panel (Bot-Owner): WarcraftLogs API -------------------- #
+    @dashboard_panel("wcl_api", "WarcraftLogs API", scope="global", mount="bot_settings", permission="bot_owner")
+    async def wcl_api_panel(self, ctx):
+        tokens = await self.bot.get_shared_api_tokens("warcraftlogs")
+        return PanelSchema(
+            description="Geteilte API-Tokens (WarcraftLogs V2 Client).",
+            fields=[
+                Field.text("client_id", "Client ID", value=tokens.get("client_id", "")),
+                Field.text("client_secret", "Client Secret", value=tokens.get("client_secret", "")),
+            ],
+        )
+
+    @wcl_api_panel.on_submit
+    async def _save_wcl_api(self, ctx, data):
+        await self.bot.set_shared_api_tokens(
+            "warcraftlogs",
+            client_id=str(data.get("client_id", "")).strip(),
+            client_secret=str(data.get("client_secret", "")).strip(),
+        )
+        return SubmitResult.ok("API-Tokens gespeichert.")
 
     def cog_unload(self) -> None:
         unregister_dashboard(self)
