@@ -205,13 +205,18 @@ async def _repo_map(bot: Any) -> Dict[str, str]:
     if dl is None:
         return out
     try:
-        for m in await dl.installed_cogs():
+        installed = await dl.installed_cogs()
+    except Exception:
+        installed = []
+    for m in installed or []:
+        try:
             name = getattr(m, "name", None)
-            repo = getattr(m, "repo_name", None)
+            # Je nach Red-Version: repo_name (str) ODER repo.name (Repo-Objekt).
+            repo = getattr(m, "repo_name", None) or getattr(getattr(m, "repo", None), "name", None)
             if name and repo:
                 out[str(name).lower()] = str(repo)
-    except Exception:
-        pass
+        except Exception:
+            continue
     return out
 
 
@@ -965,8 +970,45 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
         raise
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Update fehlgeschlagen: {e}")
-    gateway.audit("downloader.cog_update", ctx, {"cog": cog_name})
-    return {"ok": True, "cog": cog_name, "hint": f"Mit [p]reload {cog_name} neu laden."}
+
+    # Nach dem Update automatisch: 1) Cog neu laden (falls geladen), 2) Slash syncen.
+    pkg = cog_name.lower()
+    own_pkg = None
+    try:
+        dcog = bot.get_cog("WebDashboard")
+        if dcog is not None:
+            own_pkg = str(type(dcog).__module__).split(".")[0].lower()
+    except Exception:
+        own_pkg = None
+
+    reloaded = False
+    reload_error = None
+    if pkg in bot.extensions and pkg != own_pkg:
+        try:
+            await bot.unload_extension(pkg)
+            spec = await bot._cog_mgr.find_cog(pkg)
+            if spec is not None:
+                await bot.load_extension(spec)
+                reloaded = True
+        except Exception as e:
+            reload_error = str(e)
+
+    synced = None
+    try:
+        synced = len(await bot.tree.sync())
+    except Exception:
+        synced = None
+
+    gateway.audit("downloader.cog_update", ctx,
+                  {"cog": cog_name, "reloaded": reloaded, "synced": synced})
+    return {
+        "ok": True,
+        "cog": cog_name,
+        "reloaded": reloaded,
+        "reload_error": reload_error,
+        "synced": synced,
+        "self_skipped": pkg == own_pkg,
+    }
 
 
 @dispatcher.method("downloader.cog_install")
