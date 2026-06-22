@@ -252,6 +252,43 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@dispatcher.method("core.stats")
+async def core_stats(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Öffentliche Bot-Statistik für die Landing/Übersicht (ohne Login)."""
+    bot = gateway.bot
+    cog = _dashboard_cog(gateway)
+    ui = (await cog.config.ui()) if cog else {}
+
+    owner = None
+    try:
+        oid = next(iter(getattr(bot, "owner_ids", []) or []), None)
+        if oid:
+            u = bot.get_user(oid)
+            owner = u.name if u else None
+    except Exception:
+        owner = None
+
+    uptime_s = None
+    up = getattr(bot, "uptime", None)
+    if up is not None:
+        try:
+            now = datetime.now(up.tzinfo) if getattr(up, "tzinfo", None) else datetime.utcnow()
+            uptime_s = int((now - up).total_seconds())
+        except Exception:
+            uptime_s = None
+
+    return {
+        "name": bot.user.name if bot.user else None,
+        "avatar": str(bot.user.display_avatar.url) if bot.user else None,
+        "owner": owner,
+        "description": ui.get("description") or "",
+        "guild_count": len(bot.guilds),
+        "user_count": len(bot.users),
+        "uptime_s": uptime_s,
+        "latency_ms": round(bot.latency * 1000) if bot.latency else None,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Manifest & Beiträge (Widgets / Panels / Pages)
 # --------------------------------------------------------------------------- #

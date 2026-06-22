@@ -100,6 +100,8 @@ class Field:
     max: Optional[float] = None
     max_length: Optional[int] = None
     placeholder: Optional[str] = None
+    # Optionale Variablen-Buttons für TEXTAREA: [{"token": "{member}", "desc": "Mitglied"}]
+    variables: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -114,6 +116,7 @@ class Field:
             "max": self.max,
             "max_length": self.max_length,
             "placeholder": self.placeholder,
+            "variables": self.variables,
         }
         return {k: v for k, v in d.items() if v is not None}
 
