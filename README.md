@@ -15,6 +15,23 @@ As you can read from my grammar, you see the reason why :D
 | Stopped | Stopped work on it for different reasons |
 | … / On Work | Currently working on it. |
 
+## DKS Web Dashboard (eigenes, modulares Web-Panel)
+
+Neben den AAA3A-kompatiblen Cogs gibt es ein **eigenes** Web-Dashboard. Die Web-App
+liegt im separaten Repo **https://github.com/Domekologe/DKS_Redbot_WebApp**; die Bot-Seite
+besteht aus diesen Cogs hier:
+
+| Cog | Zweck |
+|---|---|
+| `webdashboard` | Companion-Cog: RPC-Gateway, Auth, Branding, Custom Pages, Audit-Log. Mit `[p]dksdashboard` verwalten. |
+| `web_serverstats` | Sammelt Server-Statistiken (Nachrichten/Voice/Status/Einladungen/Aktivität) für die `/stats`-Seite. |
+| `dashboardtemplate` | **Kopier-Vorlage** mit allen Feature-Beispielen (Widget, Panels, Liste mit Anlegen/Bearbeiten/Löschen, globales Panel). |
+| `dashboardexample` | Minimal-Beispiel der Integration. |
+
+Eigenen Cog anbinden: siehe `webdashboard/INTEGRATION.md` + den Drop-in `dks_dashboard.py`
+(1:1 kopierbar, funktioniert auch ohne installiertes Dashboard und parallel zu AAA3A).
+Jeder Cog erscheint als **ein Modul mit Tabs** auf der Server-Detailseite.
+
 ## About Cogs
 
 | Cog | Status / Version | Description | Commands | Author |

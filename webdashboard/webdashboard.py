@@ -55,6 +55,7 @@ class WebDashboard(commands.Cog):
             locked=False,
             session_epoch=0,
             custom_pages=[],  # [{slug, title, html, nav}]
+            audit_log=[],     # [{action, user, guild, detail, time}] – letzte 1000
         )
         self.registry = Registry()
         self.gateway: Optional[Gateway] = None
@@ -85,7 +86,10 @@ class WebDashboard(commands.Cog):
             await self.config.token.set(token)
         host = await self.config.host()
         port = await self.config.port()
-        self.gateway = Gateway(self.bot, self.registry, token=token, host=host, port=port)
+        self.gateway = Gateway(
+            self.bot, self.registry, token=token, host=host, port=port,
+            audit_sink=self._persist_audit,
+        )
         try:
             await self.gateway.start()
         except Exception:
@@ -101,6 +105,15 @@ class WebDashboard(commands.Cog):
     # ------------------------------------------------------------------ #
     # Öffentliche Integrations-API (von DashboardIntegration genutzt)
     # ------------------------------------------------------------------ #
+    async def _persist_audit(self, entry: dict) -> None:
+        """Audit-Sink: hängt jeden protokollierten Vorgang an das Audit-Log an (gekappt)."""
+        try:
+            async with self.config.audit_log() as logs:
+                logs.append(entry)
+                del logs[:-1000]  # nur die letzten 1000 Einträge behalten
+        except Exception:
+            log.debug("Audit-Persistierung fehlgeschlagen", exc_info=True)
+
     def register_third_party(self, cog: Any) -> int:
         """Registriert die Dashboard-Beiträge eines Dritt-Cogs."""
         return self.registry.register_cog(cog)

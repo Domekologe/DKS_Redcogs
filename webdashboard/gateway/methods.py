@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from ..integration.context import DashboardContext
-from ..permissions import _level_value, has_permission, resolve_level
+from ..permissions import Level, _level_value, has_permission, resolve_level
 from .rpc import (
     FORBIDDEN,
     INTERNAL_ERROR,
@@ -98,7 +98,13 @@ async def _require(gateway: Any, ctx: DashboardContext, permission: str) -> None
             raise
         except Exception:
             pass
-    if not await has_permission(gateway.bot, ctx.user, permission, ctx.guild):
+    # SICHERHEIT: Jeder Guild-Kontext erfordert mindestens Mitgliedschaft – auch wenn
+    # der Beitrag nur "authenticated" verlangt. Sonst könnten eingeloggte Nicht-Mitglieder
+    # durch Manipulation der guild_id Inhalte fremder Server lesen.
+    required = permission
+    if ctx.guild is not None and _level_value(permission) < int(Level.GUILD_MEMBER):
+        required = "guild_member"
+    if not await has_permission(gateway.bot, ctx.user, required, ctx.guild):
         raise RpcError(FORBIDDEN, f"Berechtigung '{permission}' erforderlich")
 
 
@@ -192,6 +198,34 @@ async def core_guild_detail(gateway: Any, params: Dict[str, Any]) -> Dict[str, A
 # --------------------------------------------------------------------------- #
 # Öffentliche Befehlsübersicht (KEIN Login nötig – nur aktive Commands)
 # --------------------------------------------------------------------------- #
+async def _repo_map(bot: Any) -> Dict[str, str]:
+    """Paketname (lowercase) → Repo-Name, aus Reds Downloader. Leeres Dict, wenn n/v."""
+    out: Dict[str, str] = {}
+    dl = bot.get_cog("Downloader")
+    if dl is None:
+        return out
+    try:
+        for m in await dl.installed_cogs():
+            name = getattr(m, "name", None)
+            repo = getattr(m, "repo_name", None)
+            if name and repo:
+                out[str(name).lower()] = str(repo)
+    except Exception:
+        pass
+    return out
+
+
+def _repo_for_cog(cog_obj: Any, repo_map: Dict[str, str]) -> Optional[str]:
+    """Repo-Name für eine Cog-Instanz (über deren Python-Paket)."""
+    if cog_obj is None:
+        return None
+    try:
+        pkg = str(type(cog_obj).__module__).split(".")[0].lower()
+        return repo_map.get(pkg)
+    except Exception:
+        return None
+
+
 @dispatcher.method("core.commands")
 async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Liste der aktiven Text- und Slash-Commands. Öffentlich (ohne User-Kontext).
@@ -199,6 +233,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     Es werden nur sichtbare, aktivierte Commands ausgegeben (keine versteckten).
     """
     bot = gateway.bot
+    repo_map = await _repo_map(bot)
 
     prefix: list = []
     try:
@@ -209,6 +244,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 "name": c.qualified_name,
                 "description": (getattr(c, "short_doc", "") or "").strip(),
                 "cog": c.cog_name or "—",
+                "repo": _repo_for_cog(getattr(c, "cog", None), repo_map),
             })
     except Exception:
         log.exception("Fehler beim Sammeln der Text-Commands")
@@ -227,6 +263,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                     "name": c.qualified_name,
                     "description": (getattr(c, "description", "") or "").strip(),
                     "cog": type(binding).__name__ if binding is not None else "—",
+                    "repo": _repo_for_cog(binding, repo_map),
                 })
     except Exception:
         log.exception("Fehler beim Sammeln der Slash-Commands")
@@ -299,6 +336,10 @@ async def manifest_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     # Permission-Stufe nur EINMAL auflösen und dann vergleichen (statt teurer
     # Auflösung pro Beitrag – spart bei vielen Cogs zahlreiche Config-Reads).
     level = await resolve_level(gateway.bot, ctx.user, ctx.guild)
+    # SICHERHEIT: In einem Guild-Kontext dürfen nur Mitglieder überhaupt Beiträge
+    # dieser Guild sehen (sonst Info-Leak fremder Server für eingeloggte Nicht-Mitglieder).
+    if ctx.guild is not None and level < int(Level.GUILD_MEMBER):
+        return {"contributions": []}
     visible = [
         contrib.manifest()
         for contrib in gateway.registry.all()
@@ -973,7 +1014,7 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
     #    aus dem Tree; anschließend wird synchronisiert.
     try:
         if cog_name.lower() in bot.extensions:
-            bot.unload_extension(cog_name.lower())
+            await bot.unload_extension(cog_name.lower())  # discord.py 2.x: Coroutine!
         async with bot._config.packages() as pkgs:
             if cog_name.lower() in pkgs:
                 pkgs.remove(cog_name.lower())
@@ -1195,6 +1236,103 @@ async def dashboard_session_epoch(gateway: Any, params: Dict[str, Any]) -> Dict[
     return {"epoch": float(await cog.config.session_epoch()) if cog else 0.0}
 
 
+@dispatcher.method("system.info")
+async def system_info(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Bot-Health/Ops (nur Bot-Owner): Uptime, Latenz, Versionen, Speicher, Cogs."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    bot = gateway.bot
+    import platform
+
+    uptime_s = None
+    try:
+        up = getattr(bot, "uptime", None)
+        if up is not None:
+            now = datetime.now(up.tzinfo) if getattr(up, "tzinfo", None) else datetime.utcnow()
+            uptime_s = max(0.0, (now - up).total_seconds())
+    except Exception:
+        uptime_s = None
+
+    memory_mb = None
+    try:
+        import resource  # Linux/Unix
+        # ru_maxrss: Linux = KB, macOS = Bytes. Wir nehmen KB an (Linux-Server).
+        memory_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0, 1)
+    except Exception:
+        memory_mb = None
+
+    loaded = len(getattr(bot, "extensions", {}))
+    available = loaded
+    try:
+        available = len(await bot._cog_mgr.available_modules())
+    except Exception:
+        pass
+
+    discord_ver = None
+    red_ver = None
+    try:
+        import discord as _d
+        discord_ver = getattr(_d, "__version__", None)
+    except Exception:
+        pass
+    try:
+        from redbot import __version__ as _rv
+        red_ver = str(_rv)
+    except Exception:
+        pass
+
+    return {
+        "uptime_s": uptime_s,
+        "latency_ms": round(bot.latency * 1000) if bot.latency else None,
+        "guild_count": len(bot.guilds),
+        "user_count": len(bot.users),
+        "cogs_loaded": loaded,
+        "cogs_available": available,
+        "contributions": len(gateway.registry.all()),
+        "shard_count": getattr(bot, "shard_count", None) or 1,
+        "python": platform.python_version(),
+        "discord": discord_ver,
+        "red": red_ver,
+        "memory_mb": memory_mb,
+        "gateway_host": gateway.host,
+        "gateway_port": gateway.port,
+    }
+
+
+@dispatcher.method("audit.list")
+async def audit_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Audit-Log (nur Bot-Owner): wer hat wann was geändert (neueste zuerst)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    logs = list(await cog.config.audit_log()) if cog else []
+    bot = gateway.bot
+    args = params.get("args") or {}
+    limit = max(1, min(int(args.get("limit", 200) or 200), 1000))
+    out = []
+    for e in reversed(logs[-limit:]):  # neueste zuerst
+        uid = e.get("user")
+        gid = e.get("guild")
+        uname = None
+        if uid and str(uid).isdigit():
+            u = bot.get_user(int(uid))
+            uname = u.name if u else str(uid)
+        gname = None
+        if gid and str(gid).isdigit():
+            g = bot.get_guild(int(gid))
+            gname = g.name if g else str(gid)
+        out.append({
+            "action": e.get("action"),
+            "user_id": uid,
+            "user": uname,
+            "guild_id": gid,
+            "guild": gname,
+            "detail": e.get("detail") or {},
+            "time": e.get("time"),
+        })
+    return {"entries": out, "count": len(logs)}
+
+
 # ----- Custom Pages -------------------------------------------------------- #
 @dispatcher.method("pages.list")
 async def pages_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1328,6 +1466,82 @@ async def serverstats_invites(gateway: Any, params: Dict[str, Any]) -> Dict[str,
 @dispatcher.method("serverstats.activity")
 async def serverstats_activity(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     return await _stats_call(gateway, params, "stats_activity")
+
+
+@dispatcher.method("serverstats.commands")
+async def serverstats_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_commands")
+
+
+# ----- Ankündigungen / Embed-Builder (guild_admin) ------------------------- #
+@dispatcher.method("announce.channels")
+async def announce_channels(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_admin")
+    chans = []
+    for c in ctx.guild.text_channels:
+        perms = c.permissions_for(ctx.guild.me) if ctx.guild.me else None
+        chans.append({
+            "id": str(c.id),
+            "name": c.name,
+            "can_send": bool(perms.send_messages) if perms else True,
+        })
+    return {"channels": chans}
+
+
+@dispatcher.method("announce.send")
+async def announce_send(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_admin")
+    import discord
+
+    args = params.get("args") or {}
+    ch_id = args.get("channel_id")
+    channel = ctx.guild.get_channel(int(ch_id)) if ch_id and str(ch_id).isdigit() else None
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        raise RpcError(INVALID_PARAMS, "Kanal nicht gefunden")
+
+    content = (str(args.get("content", "")).strip() or None)
+    emb = args.get("embed") or {}
+    embed = None
+    if isinstance(emb, dict) and any(str(emb.get(k, "")).strip() for k in
+                                     ("title", "description", "image_url", "footer", "author")):
+        col = None
+        raw = str(emb.get("color", "")).strip().lstrip("#")
+        if raw:
+            try:
+                col = int(raw, 16)
+            except Exception:
+                col = None
+        embed = discord.Embed(
+            title=(str(emb.get("title")).strip() or None),
+            description=(str(emb.get("description")).strip() or None),
+            color=col if col is not None else None,
+        )
+        if str(emb.get("footer", "")).strip():
+            embed.set_footer(text=str(emb["footer"]).strip()[:2048])
+        if str(emb.get("author", "")).strip():
+            embed.set_author(name=str(emb["author"]).strip()[:256])
+        if str(emb.get("image_url", "")).strip():
+            try:
+                embed.set_image(url=str(emb["image_url"]).strip())
+            except Exception:
+                pass
+
+    if not content and embed is None:
+        raise RpcError(INVALID_PARAMS, "Nichts zu senden (Text oder Embed nötig)")
+    try:
+        msg = await channel.send(content=content, embed=embed)
+    except discord.Forbidden:
+        raise RpcError(FORBIDDEN, "Dem Bot fehlt die Berechtigung in diesem Kanal")
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Senden fehlgeschlagen: {e}")
+    gateway.audit("announce.send", ctx, {"channel": str(ch_id)})
+    return {"ok": True, "message_id": str(msg.id)}
 
 
 @dispatcher.method("serverstats.member_drilldown")

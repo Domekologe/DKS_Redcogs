@@ -32,6 +32,7 @@ from redbot.core.bot import Red
 from .dks_dashboard import (
     dashboard_widget,
     dashboard_panel,
+    dashboard_list,
     WidgetData,
     PanelSchema,
     Field,
@@ -57,6 +58,7 @@ class DashboardTemplate(commands.Cog):
             mode="soft",
             log_channel=None,   # speichert eine Channel-ID (oder None)
             staff_role=None,    # speichert eine Rollen-ID (oder None)
+            items={},           # Beispiel-Sammlung: {id: {"name", "note"}} – für die Liste
         )
         # Globale Einstellungen (werden im globalen Panel bearbeitet, Owner-only).
         self.config.register_global(
@@ -96,7 +98,8 @@ class DashboardTemplate(commands.Cog):
     # ---- 4) Guild-Panel: alle nützlichen Feldtypen --------------------------
     # mount="guild_settings" -> erscheint auf der Server-Detailseite unter
     # „Einstellungen" (aufklappbar). permission="guild_admin" empfohlen.
-    @dashboard_panel("settings", "Vorlage-Einstellungen", mount="guild_settings", permission="guild_admin")
+    # order=10 -> Reihenfolge der Tabs im Modul (kleiner = weiter links).
+    @dashboard_panel("settings", "Vorlage-Einstellungen", mount="guild_settings", permission="guild_admin", order=10)
     async def settings_panel(self, ctx):
         cfg = await self.config.guild(ctx.guild).all()
 
@@ -115,11 +118,14 @@ class DashboardTemplate(commands.Cog):
             description="Beispiel-Panel mit allen praktisch nutzbaren Feldtypen.",
             submit_label="Speichern",
             fields=[
-                # Sprache dieses Moduls (pro Guild) – DE/EN-Umschaltung
+                # Sprache dieses Moduls (pro Guild) – DE/EN-Umschaltung.
+                # reload_on_change=True: beim Ändern wird sofort gespeichert UND das Panel
+                # neu geladen (praktisch, wenn andere Felder von der Auswahl abhängen).
                 Field.select(
                     "language", "Sprache (dieses Modul)",
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=cfg["language"],
+                    reload_on_change=True,
                 ),
                 # Schalter (bool)
                 Field.switch("enabled", "Modul aktiviert", value=bool(cfg["enabled"])),
@@ -200,6 +206,71 @@ class DashboardTemplate(commands.Cog):
         if "region" in data:
             await self.config.region.set("us" if data["region"] == "us" else "eu")
         return SubmitResult.ok("Global gespeichert.")
+
+    # ---- 6) Liste: anlegen / ansehen / bearbeiten / löschen -----------------
+    # @dashboard_list rendert eine Tabelle mit Aktionen. Die Methode liefert Zeilen
+    # [{"id": ..., "cells": {spalten_key: wert}}]. Optional: @<list>.on_delete /
+    # @<list>.edit_form (liefert ein PanelSchema) / @<list>.on_edit (speichert).
+    @dashboard_list(
+        "items", "Vorlage-Liste", mount="guild_settings", permission="guild_admin", order=30,
+        columns=[{"key": "name", "label": "Name"}, {"key": "note", "label": "Notiz"}],
+        description="Beispiel-Liste: anlegen (Tab links), bearbeiten und löschen.",
+    )
+    async def items_list(self, ctx):
+        items = await self.config.guild(ctx.guild).items()
+        return [
+            {"id": str(k), "cells": {"name": str(v.get("name", k)), "note": str(v.get("note", ""))}}
+            for k, v in (items or {}).items() if isinstance(v, dict)
+        ]
+
+    @items_list.edit_form
+    async def items_edit_form(self, ctx, item_id):
+        items = await self.config.guild(ctx.guild).items()
+        entry = (items or {}).get(str(item_id)) or {}
+        return PanelSchema(fields=[
+            Field.text("name", "Name", value=str(entry.get("name", ""))),
+            Field.text("note", "Notiz", value=str(entry.get("note", ""))),
+        ])
+
+    @items_list.on_edit
+    async def items_edit(self, ctx, item_id, data):
+        async with self.config.guild(ctx.guild).items() as items:
+            entry = items.get(str(item_id)) if isinstance(items.get(str(item_id)), dict) else {}
+            entry["name"] = str(data.get("name", "")).strip() or entry.get("name", "")
+            entry["note"] = str(data.get("note", ""))
+            items[str(item_id)] = entry
+        return SubmitResult.ok("Eintrag aktualisiert.")
+
+    @items_list.on_delete
+    async def items_delete(self, ctx, item_id):
+        async with self.config.guild(ctx.guild).items() as items:
+            if str(item_id) in items:
+                del items[str(item_id)]
+            else:
+                return SubmitResult.fail("Eintrag nicht gefunden.")
+        return SubmitResult.ok("Eintrag gelöscht.")
+
+    # Anlegen-Panel (order=25 -> Tab links neben der Liste bei order=30).
+    @dashboard_panel("item_add", "Eintrag anlegen", mount="guild_settings", permission="guild_admin", order=25)
+    async def item_add_panel(self, ctx):
+        return PanelSchema(
+            description="Neuen Listen-Eintrag anlegen.",
+            submit_label="Anlegen",
+            fields=[
+                Field.text("name", "Name", value="", placeholder="z. B. Regel 1"),
+                Field.text("note", "Notiz", value=""),
+            ],
+        )
+
+    @item_add_panel.on_submit
+    async def item_add(self, ctx, data):
+        import uuid
+        name = str(data.get("name", "")).strip()
+        if not name:
+            return SubmitResult.fail("Bitte einen Namen angeben.")
+        async with self.config.guild(ctx.guild).items() as items:
+            items[uuid.uuid4().hex[:8]] = {"name": name, "note": str(data.get("note", ""))}
+        return SubmitResult.ok("Eintrag angelegt.")
 
     # ---- Owner-Command zum schnellen Prüfen ---------------------------------
     @commands.is_owner()

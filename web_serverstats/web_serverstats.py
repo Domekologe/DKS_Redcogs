@@ -11,6 +11,7 @@ Hinweise:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -55,13 +56,29 @@ class WebServerStats(commands.Cog):
             invite_daily={},     # {daykey: {code: joins}}
             invite_logs=[],      # [{"date","user_id","username","code"}]
             invite_members={},   # {member_id: count}  (Beigetretene je Einlader-Mitglied)
+            commands={},         # {daykey: {command_name: count}} – Befehlsnutzung
+            command_errors={},   # {daykey: {command_name: count}} – Fehler je Befehl
         )
         # Laufende Voice-Sessions: {(guild_id, member_id): (channel_id, start_dt)}
         self._voice: Dict[Tuple[int, int], Tuple[int, datetime]] = {}
+        # PERFORMANCE: Nachrichten werden in-memory gezählt und nur periodisch
+        # geschrieben (statt 3 Config-Writes pro Nachricht).
+        # {(guild_id, daykey): {"messages": int, "channels": {cid: int}, "members": {mid: int}}}
+        self._msg_buf: Dict[Tuple[int, str], Dict[str, Any]] = {}
+        # Befehlsnutzung: {(guild_id, daykey): {"cmds": {name: n}, "errs": {name: n}}}
+        self._cmd_buf: Dict[Tuple[int, str], Dict[str, Any]] = {}
+        self._enabled_cache: Dict[int, bool] = {}
         self._snapshot_loop.start()
+        self._flush_loop.start()
 
     def cog_unload(self) -> None:
         self._snapshot_loop.cancel()
+        self._flush_loop.cancel()
+        # Gepufferte Zähler + offene Voice-Sessions noch wegschreiben (best effort).
+        try:
+            asyncio.create_task(self._final_flush())
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     # Schreib-Helfer
@@ -91,16 +108,130 @@ class WebServerStats(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
             return
-        if not await self.config.guild(message.guild).enabled():
+        gid = message.guild.id
+        # Enabled-Status aus dem Cache (kein Config-Read auf dem Hot-Path).
+        if not self._enabled_cache.get(gid, True):
             return
         try:
-            await self._bump_day(message.guild, "messages")
+            entry = self._msg_buf.setdefault(
+                (gid, _daykey()), {"messages": 0, "channels": {}, "members": {}}
+            )
+            entry["messages"] += 1
             ch_id = getattr(message.channel, "id", None)
             if ch_id:
-                await self._bump_nested(message.guild, "msg_channels", str(ch_id))
-            await self._bump_nested(message.guild, "msg_members", str(message.author.id))
+                cid = str(ch_id)
+                entry["channels"][cid] = entry["channels"].get(cid, 0) + 1
+            aid = str(message.author.id)
+            entry["members"][aid] = entry["members"].get(aid, 0) + 1
         except Exception:
-            log.debug("on_message stats failed", exc_info=True)
+            log.debug("on_message buffer failed", exc_info=True)
+
+    # ------------------------------------------------------------------ #
+    # Listener: Befehlsnutzung (in-memory, mit dem Nachrichten-Flush gebündelt)
+    # ------------------------------------------------------------------ #
+    def _cmd_bump(self, guild, name: str, field: str) -> None:
+        if guild is None or not name:
+            return
+        if not self._enabled_cache.get(guild.id, True):
+            return
+        entry = self._cmd_buf.setdefault((guild.id, _daykey()), {"cmds": {}, "errs": {}})
+        bucket = entry["cmds"] if field == "cmds" else entry["errs"]
+        bucket[name] = bucket.get(name, 0) + 1
+
+    @commands.Cog.listener()
+    async def on_command_completion(self, ctx) -> None:
+        try:
+            if ctx.guild is not None and ctx.command is not None:
+                self._cmd_bump(ctx.guild, ctx.command.qualified_name, "cmds")
+        except Exception:
+            pass
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error) -> None:
+        try:
+            if ctx.guild is not None and ctx.command is not None:
+                self._cmd_bump(ctx.guild, ctx.command.qualified_name, "errs")
+        except Exception:
+            pass
+
+    async def _flush(self) -> None:
+        """Schreibt gepufferte Nachrichten- und Befehls-Zähler gebündelt in die Config."""
+        if not self._msg_buf and not self._cmd_buf:
+            return
+        buf = self._msg_buf
+        self._msg_buf = {}
+        by_guild: Dict[int, list] = {}
+        for (gid, dk), e in buf.items():
+            by_guild.setdefault(gid, []).append((dk, e))
+        for gid, entries in by_guild.items():
+            guild = self.bot.get_guild(gid)
+            if guild is None:
+                continue
+            try:
+                self._enabled_cache[gid] = bool(await self.config.guild(guild).enabled())
+            except Exception:
+                pass
+            try:
+                async with self.config.guild(guild).days() as days:
+                    for dk, e in entries:
+                        d = days.get(dk) if isinstance(days.get(dk), dict) else {}
+                        d["messages"] = d.get("messages", 0) + e["messages"]
+                        days[dk] = d
+                async with self.config.guild(guild).msg_channels() as mc:
+                    for dk, e in entries:
+                        day = mc.get(dk) if isinstance(mc.get(dk), dict) else {}
+                        for cid, n in e["channels"].items():
+                            day[cid] = day.get(cid, 0) + n
+                        mc[dk] = day
+                async with self.config.guild(guild).msg_members() as mm:
+                    for dk, e in entries:
+                        day = mm.get(dk) if isinstance(mm.get(dk), dict) else {}
+                        for mid, n in e["members"].items():
+                            day[mid] = day.get(mid, 0) + n
+                        mm[dk] = day
+            except Exception:
+                log.debug("flush failed for guild %s", gid, exc_info=True)
+
+        # Befehls-Zähler bündeln (eigener Puffer; Guild kann Befehle ohne Nachrichten haben).
+        if self._cmd_buf:
+            cbuf = self._cmd_buf
+            self._cmd_buf = {}
+            by_g: Dict[int, list] = {}
+            for (gid, dk), e in cbuf.items():
+                by_g.setdefault(gid, []).append((dk, e))
+            for gid, entries in by_g.items():
+                guild = self.bot.get_guild(gid)
+                if guild is None:
+                    continue
+                try:
+                    async with self.config.guild(guild).commands() as cmds:
+                        for dk, e in entries:
+                            day = cmds.get(dk) if isinstance(cmds.get(dk), dict) else {}
+                            for nm, n in e["cmds"].items():
+                                day[nm] = day.get(nm, 0) + n
+                            cmds[dk] = day
+                    async with self.config.guild(guild).command_errors() as errs:
+                        for dk, e in entries:
+                            day = errs.get(dk) if isinstance(errs.get(dk), dict) else {}
+                            for nm, n in e["errs"].items():
+                                day[nm] = day.get(nm, 0) + n
+                            errs[dk] = day
+                except Exception:
+                    log.debug("cmd flush failed for guild %s", gid, exc_info=True)
+
+    async def _final_flush(self) -> None:
+        try:
+            await self._flush()
+        except Exception:
+            pass
+        for key in list(self._voice.keys()):
+            gid, mid = key
+            guild = self.bot.get_guild(gid)
+            if guild is not None:
+                try:
+                    await self._end_voice_session(guild, mid, key)
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------ #
     # Listener: Mitglieder
@@ -228,18 +359,30 @@ class WebServerStats(commands.Cog):
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        # Invite-Cache initial befüllen.
         for guild in self.bot.guilds:
             try:
-                if not await self.config.guild(guild).enabled():
+                enabled = bool(await self.config.guild(guild).enabled())
+                self._enabled_cache[guild.id] = enabled
+                if not enabled:
                     continue
-                current = await guild.invites()
-                async with self.config.guild(guild).invites() as inv_store:
-                    for inv in current:
-                        inv_store[inv.code] = {
-                            "uses": inv.uses or 0,
-                            "inviter_id": inv.inviter.id if inv.inviter else 0,
-                        }
+                # Invite-Cache initial befüllen.
+                try:
+                    current = await guild.invites()
+                    async with self.config.guild(guild).invites() as inv_store:
+                        for inv in current:
+                            inv_store[inv.code] = {
+                                "uses": inv.uses or 0,
+                                "inviter_id": inv.inviter.id if inv.inviter else 0,
+                            }
+                except Exception:
+                    pass
+                # Laufende Voice-Sessions nach (Re-)Start neu erfassen, damit nach einem
+                # Reload weiterhin gezählt wird und Leave-Events nicht ins Leere laufen.
+                now = _utcnow()
+                for vc in guild.voice_channels:
+                    for m in vc.members:
+                        if not m.bot:
+                            self._voice.setdefault((guild.id, m.id), (vc.id, now))
             except Exception:
                 continue
 
@@ -250,7 +393,9 @@ class WebServerStats(commands.Cog):
     async def _do_snapshot(self) -> None:
         for guild in list(self.bot.guilds):
             try:
-                if not await self.config.guild(guild).enabled():
+                enabled = bool(await self.config.guild(guild).enabled())
+                self._enabled_cache[guild.id] = enabled
+                if not enabled:
                     continue
                 # Mitgliederzahl (letzter Wert des Tages).
                 await self._set_day(guild, "members", guild.member_count or 0)
@@ -300,7 +445,8 @@ class WebServerStats(commands.Cog):
 
     async def _prune(self, guild: discord.Guild) -> None:
         cutoff = _daykey(_utcnow() - timedelta(days=RETENTION_DAYS))
-        for group in ("days", "msg_channels", "msg_members", "voice_channels", "voice_members", "activity", "invite_daily"):
+        for group in ("days", "msg_channels", "msg_members", "voice_channels", "voice_members",
+                      "activity", "invite_daily", "commands", "command_errors"):
             async with getattr(self.config.guild(guild), group)() as data:
                 for k in [k for k in data.keys() if k < cutoff]:
                     data.pop(k, None)
@@ -311,6 +457,17 @@ class WebServerStats(commands.Cog):
 
     @_snapshot_loop.before_loop
     async def _before_snapshot(self) -> None:
+        await self.bot.wait_until_red_ready()
+
+    @tasks.loop(seconds=60)
+    async def _flush_loop(self) -> None:
+        try:
+            await self._flush()
+        except Exception:
+            log.debug("flush loop failed", exc_info=True)
+
+    @_flush_loop.before_loop
+    async def _before_flush(self) -> None:
         await self.bot.wait_until_red_ready()
 
     # ================================================================== #
@@ -348,7 +505,7 @@ class WebServerStats(commands.Cog):
             d = daysd.get(k, {})
             return d if isinstance(d, dict) else {}
 
-        members = [day(k).get("members") or None for k in keys]
+        members = [day(k).get("members") for k in keys]
         joins = [int(day(k).get("joins", 0)) for k in keys]
         leaves = [int(day(k).get("leaves", 0)) for k in keys]
         last7 = keys[-7:]
@@ -454,6 +611,32 @@ class WebServerStats(commands.Cog):
             for _id, c in (day or {}).items():
                 tot[_id] += c
         return [{"id": e["id"], "name": e["name"]} for e in self._top(guild, tot, kind, limit=200)]
+
+    async def stats_commands(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
+        keys = self._range_keys(days)
+        cmds = await self.config.guild(guild).commands()
+        errs = await self.config.guild(guild).command_errors()
+        cmds = cmds if isinstance(cmds, dict) else {}
+        errs = errs if isinstance(errs, dict) else {}
+        series = [sum(int(v) for v in (cmds.get(k, {}) or {}).values()) for k in keys]
+        tot: Dict[str, int] = defaultdict(int)
+        etot: Dict[str, int] = defaultdict(int)
+        for k in keys:
+            for nm, n in (cmds.get(k, {}) or {}).items():
+                tot[nm] += int(n)
+            for nm, n in (errs.get(k, {}) or {}).items():
+                etot[nm] += int(n)
+        top = sorted(tot.items(), key=lambda x: x[1], reverse=True)[:20]
+        return {
+            "labels": keys,
+            "values": series,
+            "total": sum(series),
+            "total_errors": sum(etot.values()),
+            "unique_commands": len(tot),
+            "top_commands": [
+                {"name": nm, "count": c, "errors": int(etot.get(nm, 0))} for nm, c in top
+            ],
+        }
 
     async def stats_member_drilldown(self, guild: discord.Guild, member_id: int, days: int = 30) -> Dict[str, Any]:
         keys = self._range_keys(days)
