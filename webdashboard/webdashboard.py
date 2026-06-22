@@ -42,6 +42,19 @@ class WebDashboard(commands.Cog):
             host=DEFAULT_HOST,
             port=DEFAULT_PORT,
             autostart=True,
+            # Branding / UI
+            ui={
+                "title": "DKS Dashboard",
+                "icon": None,
+                "description": "",
+                "support_url": "",
+                "color": "indigo",
+                "theme": "dark",
+            },
+            # Overview / Sicherheit
+            locked=False,
+            session_epoch=0,
+            custom_pages=[],  # [{slug, title, html, nav}]
         )
         self.registry = Registry()
         self.gateway: Optional[Gateway] = None

@@ -42,6 +42,7 @@ class Gateway:
             web.get("/rpc", self._ws_handler),  # Streams/Push (Live-Logs, Stats)
         ])
         self._runner: Optional[web.AppRunner] = None
+        self.started_at: Optional[float] = None
         self._ws_clients: Set[web.WebSocketResponse] = set()
         # Channel-Abos: channel -> set(ws)
         self._subscriptions: Dict[str, Set[web.WebSocketResponse]] = {}
@@ -54,6 +55,7 @@ class Gateway:
         await self._runner.setup()
         site = web.TCPSite(self._runner, self.host, self.port)
         await site.start()
+        self.started_at = time.time()
         log.info("RPC-Gateway läuft auf http://%s:%s", self.host, self.port)
 
     async def stop(self) -> None:

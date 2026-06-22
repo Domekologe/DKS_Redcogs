@@ -13,11 +13,20 @@ bereits durchgeführt hat. Berechtigungen werden hier serverseitig erneut geprü
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from ..integration.context import DashboardContext
 from ..permissions import _level_value, has_permission, resolve_level
-from .rpc import FORBIDDEN, INVALID_PARAMS, UNAUTHORIZED, Dispatcher, RpcError
+from .rpc import (
+    FORBIDDEN,
+    INTERNAL_ERROR,
+    INVALID_PARAMS,
+    UNAUTHORIZED,
+    Dispatcher,
+    RpcError,
+)
 
 log = logging.getLogger("red.dks.webdashboard.methods")
 
@@ -79,6 +88,16 @@ async def _build_context(gateway: Any, params: Dict[str, Any]) -> DashboardConte
 
 
 async def _require(gateway: Any, ctx: DashboardContext, permission: str) -> None:
+    # Lock: ist das Dashboard gesperrt, dürfen nur Bot-Owner geschützte Calls ausführen.
+    cog = gateway.bot.get_cog("WebDashboard")
+    if cog is not None:
+        try:
+            if await cog.config.locked() and not await gateway.bot.is_owner(ctx.user):
+                raise RpcError(FORBIDDEN, "Dashboard ist gesperrt")
+        except RpcError:
+            raise
+        except Exception:
+            pass
     if not await has_permission(gateway.bot, ctx.user, permission, ctx.guild):
         raise RpcError(FORBIDDEN, f"Berechtigung '{permission}' erforderlich")
 
@@ -123,6 +142,51 @@ async def core_guilds(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             "level": int(level),
         })
     return {"guilds": result}
+
+
+@dispatcher.method("core.guild_detail")
+async def core_guild_detail(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Detailübersicht einer Guild (Mitglieder, Kanäle, Rollen, Status, Daten)."""
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    g = ctx.guild
+
+    online = idle = dnd = offline = 0
+    try:
+        for m in g.members:
+            s = str(getattr(m, "status", "offline"))
+            if s == "online":
+                online += 1
+            elif s == "idle":
+                idle += 1
+            elif s == "dnd":
+                dnd += 1
+            else:
+                offline += 1
+    except Exception:
+        pass
+
+    owner = g.owner
+    me = g.me
+    return {
+        "id": str(g.id),
+        "name": g.name,
+        "icon": str(g.icon.url) if g.icon else None,
+        "owner": (owner.display_name if owner else None),
+        "member_count": g.member_count,
+        "channels": {
+            "text": len(g.text_channels),
+            "voice": len(g.voice_channels),
+            "categories": len(g.categories),
+            "total": len(g.text_channels) + len(g.voice_channels),
+        },
+        "roles": len(g.roles),
+        "presence": {"online": online, "idle": idle, "dnd": dnd, "offline": offline},
+        "created_at": g.created_at.isoformat() if g.created_at else None,
+        "joined_at": me.joined_at.isoformat() if me and me.joined_at else None,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -264,21 +328,553 @@ async def page_schema(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 @dispatcher.method("cogs.list")
 async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Alle installierten Cogs mit Ladezustand (Owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
-    loaded = set(bot.extensions.keys())
-    # Cogs, die tatsächlich Beiträge registriert haben (Mixin ODER Drop-in-Pattern)
-    contributing = {c.cog_name for c in gateway.registry.all()}
-    base = _maybe_integration_base()
-    cogs = []
-    for name, cog in bot.cogs.items():
-        cogs.append({
+    loaded = set(bot.extensions.keys())  # Paketnamen (klein)
+    try:
+        available = set(await bot._cog_mgr.available_modules())
+    except Exception:
+        available = set(loaded)
+    contributing = {c.cog_name.lower() for c in gateway.registry.all()}
+    names = sorted(available | loaded)
+    cogs = [
+        {
             "name": name,
-            "loaded": True,
-            "has_dashboard": name in contributing or isinstance(cog, base),
-        })
-    return {"cogs": cogs, "loaded_extensions": sorted(loaded)}
+            "loaded": name in loaded,
+            "has_dashboard": name.lower() in contributing,
+        }
+        for name in names
+    ]
+    return {"cogs": cogs, "loaded_count": len(loaded), "total": len(names)}
+
+
+@dispatcher.method("cogs.set")
+async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Cog laden/entladen/neu laden (Owner). action: load | unload | reload."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    args = params.get("args") or {}
+    name = str(args.get("name", "")).strip().lower()
+    action = args.get("action")
+    if not name or action not in ("load", "unload", "reload"):
+        raise RpcError(INVALID_PARAMS, "name/action fehlt oder ungültig")
+    bot = gateway.bot
+
+    try:
+        if action in ("load", "reload"):
+            if action == "reload" and name in bot.extensions:
+                bot.unload_extension(name)
+            spec = await bot._cog_mgr.find_cog(name)
+            if spec is None:
+                raise RpcError(INVALID_PARAMS, f"Cog '{name}' nicht gefunden")
+            await bot.load_extension(spec)
+            async with bot._config.packages() as pkgs:
+                if name not in pkgs:
+                    pkgs.append(name)
+        elif action == "unload":
+            if name in bot.extensions:
+                bot.unload_extension(name)
+            async with bot._config.packages() as pkgs:
+                if name in pkgs:
+                    pkgs.remove(name)
+    except RpcError:
+        raise
+    except Exception as e:  # Red-/Import-Fehler sauber durchreichen
+        raise RpcError(INTERNAL_ERROR, f"{action} fehlgeschlagen: {e}")
+
+    gateway.audit(f"cogs.{action}", ctx, {"name": name})
+    return {"ok": True, "name": name, "loaded": name in bot.extensions}
+
+
+# --------------------------------------------------------------------------- #
+# Slash-/App-Command-Verwaltung (nur Bot-Owner)
+# --------------------------------------------------------------------------- #
+@dispatcher.method("slash.list")
+async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Registrierte App-Commands mit (best-effort) Aktiv-Status."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    bot = gateway.bot
+    enabled_names: set = set()
+    try:
+        enabled = bot.list_enabled_app_commands()  # Red 3.5+
+        for kind in ("slash", "message", "user"):
+            enabled_names |= set((enabled.get(kind) or {}).keys())
+    except Exception:
+        enabled_names = set()
+
+    items = []
+    try:
+        from discord import app_commands
+
+        for c in bot.tree.walk_commands():
+            if not isinstance(c, app_commands.Command):
+                continue
+            top = c.qualified_name.split(" ")[0]
+            items.append({
+                "name": c.qualified_name,
+                "description": (getattr(c, "description", "") or "").strip(),
+                "enabled": (top in enabled_names) if enabled_names else True,
+            })
+    except Exception:
+        pass
+    items.sort(key=lambda x: x["name"])
+    return {"commands": items, "count": len(items)}
+
+
+@dispatcher.method("slash.sync")
+async def slash_sync(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """App-Commands mit Discord synchronisieren (Owner)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    try:
+        synced = await gateway.bot.tree.sync()
+        gateway.audit("slash.sync", ctx, {"count": len(synced)})
+        return {"ok": True, "count": len(synced)}
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Sync fehlgeschlagen: {e}")
+
+
+# --------------------------------------------------------------------------- #
+# Downloader (Repos/Cogs) – nutzt Reds Downloader-Cog (nur Bot-Owner)
+# --------------------------------------------------------------------------- #
+def _downloader(gateway: Any):
+    return gateway.bot.get_cog("Downloader")
+
+
+async def _installed_cogs(dl):
+    try:
+        return list(await dl.installed_cogs())
+    except Exception:
+        return []
+
+
+@dispatcher.method("downloader.repos")
+async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Repos mit installierten und verfügbaren Cogs (Owner)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        return {"available": False, "repos": []}
+    try:
+        installed = await _installed_cogs(dl)
+        by_repo: Dict[str, list] = {}
+        for m in installed:
+            by_repo.setdefault(getattr(m, "repo_name", "?"), []).append({
+                "name": m.name, "commit": getattr(m, "commit", None),
+            })
+        repos = []
+        for repo in dl._repo_manager.repos.values():
+            avail = [
+                {"name": inst.name, "description": (getattr(inst, "short", "") or "").strip()}
+                for inst in getattr(repo, "available_cogs", [])
+                if not getattr(inst, "hidden", False)
+            ]
+            repos.append({
+                "name": repo.name,
+                "url": getattr(repo, "url", None),
+                "branch": getattr(repo, "branch", None),
+                "commit": getattr(repo, "commit", None),
+                "installed": sorted(by_repo.get(repo.name, []), key=lambda x: x["name"]),
+                "available_cogs": sorted(avail, key=lambda x: x["name"]),
+            })
+        repos.sort(key=lambda r: r["name"])
+        return {"available": True, "repos": repos}
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Repo-Liste fehlgeschlagen: {e}")
+
+
+@dispatcher.method("downloader.repo_add")
+async def downloader_repo_add(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    args = params.get("args") or {}
+    name = str(args.get("name", "")).strip()
+    url = str(args.get("url", "")).strip()
+    branch = (args.get("branch") or None) or None
+    if not name or not url:
+        raise RpcError(INVALID_PARAMS, "name und url erforderlich")
+    try:
+        await dl._repo_manager.add_repo(url=url, name=name, branch=branch)
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Repo hinzufügen fehlgeschlagen: {e}")
+    gateway.audit("downloader.repo_add", ctx, {"name": name, "url": url})
+    return {"ok": True, "name": name}
+
+
+@dispatcher.method("downloader.repo_remove")
+async def downloader_repo_remove(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    name = str((params.get("args") or {}).get("name", "")).strip()
+    if not name:
+        raise RpcError(INVALID_PARAMS, "name erforderlich")
+    # Schutz: nur entfernen, wenn keine Cogs aus diesem Repo mehr installiert sind.
+    installed = await _installed_cogs(dl)
+    if any(getattr(m, "repo_name", None) == name for m in installed):
+        raise RpcError(INVALID_PARAMS, "Repo hat noch installierte Cogs – diese zuerst deinstallieren.")
+    try:
+        await dl._repo_manager.delete_repo(name)
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Repo entfernen fehlgeschlagen: {e}")
+    gateway.audit("downloader.repo_remove", ctx, {"name": name})
+    return {"ok": True}
+
+
+@dispatcher.method("downloader.update_check")
+async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Aktualisiert die Repos (git fetch/pull) und meldet, was sich geändert hat."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    try:
+        before = {r.name: getattr(r, "commit", None) for r in dl._repo_manager.repos.values()}
+        updated = await dl._repo_manager.update_all_repos()
+        changed = [r.name for r in updated] if updated else [
+            r.name for r in dl._repo_manager.repos.values() if before.get(r.name) != getattr(r, "commit", None)
+        ]
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Update-Check fehlgeschlagen: {e}")
+    gateway.audit("downloader.update_check", ctx, {"changed": changed})
+    return {"ok": True, "updated_repos": changed}
+
+
+@dispatcher.method("downloader.cog_install")
+async def downloader_cog_install(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    args = params.get("args") or {}
+    repo_name = str(args.get("repo", "")).strip()
+    cog_name = str(args.get("cog", "")).strip()
+    if not repo_name or not cog_name:
+        raise RpcError(INVALID_PARAMS, "repo und cog erforderlich")
+    try:
+        repo = dl._repo_manager.get_repo(repo_name)
+        if repo is None:
+            raise RpcError(INVALID_PARAMS, f"Repo '{repo_name}' nicht gefunden")
+        cogs, message = await dl._filter_incorrect_cogs_by_names(repo, [cog_name])
+        if not cogs:
+            raise RpcError(INVALID_PARAMS, message or f"Cog '{cog_name}' nicht im Repo")
+        installed_cogs, failed = await dl._install_cogs(cogs)
+        if hasattr(dl, "_save_to_installed"):
+            await dl._save_to_installed(installed_cogs)
+        if failed:
+            raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {cog_name}")
+    except RpcError:
+        raise
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {e}")
+    gateway.audit("downloader.cog_install", ctx, {"repo": repo_name, "cog": cog_name})
+    return {"ok": True, "cog": cog_name, "hint": "Mit cogs.set/load aktivieren."}
+
+
+@dispatcher.method("downloader.cog_uninstall")
+async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    dl = _downloader(gateway)
+    if dl is None:
+        raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
+    cog_name = str((params.get("args") or {}).get("cog", "")).strip()
+    if not cog_name:
+        raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    bot = gateway.bot
+    # 1) Slash-Commands abschalten: durch Entladen verschwinden die App-Commands
+    #    aus dem Tree; anschließend wird synchronisiert.
+    try:
+        if cog_name.lower() in bot.extensions:
+            bot.unload_extension(cog_name.lower())
+        async with bot._config.packages() as pkgs:
+            if cog_name.lower() in pkgs:
+                pkgs.remove(cog_name.lower())
+    except Exception:
+        pass
+    # 2) Dateien/Installation entfernen
+    try:
+        installed = await _installed_cogs(dl)
+        target = [m for m in installed if m.name == cog_name]
+        if not target:
+            raise RpcError(INVALID_PARAMS, f"'{cog_name}' ist nicht installiert")
+        if hasattr(dl, "_remove_from_installed"):
+            await dl._remove_from_installed(target)
+        if hasattr(dl, "_delete_cog"):
+            for m in target:
+                await dl._delete_cog(m.name)
+    except RpcError:
+        raise
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Deinstallation fehlgeschlagen: {e}")
+    # 3) Tree synchronisieren (Slash sauber abmelden)
+    try:
+        await bot.tree.sync()
+    except Exception:
+        pass
+    gateway.audit("downloader.cog_uninstall", ctx, {"cog": cog_name})
+    return {"ok": True, "cog": cog_name}
+
+
+# --------------------------------------------------------------------------- #
+# Bot-Settings (Reds Prefixe/Rollen/Nick/Embeds) – global & pro Guild
+# --------------------------------------------------------------------------- #
+@dispatcher.method("settings.get")
+async def settings_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    bot = gateway.bot
+    scope = (params.get("args") or {}).get("scope", "guild")
+
+    if scope == "global":
+        await _require(gateway, ctx, "bot_owner")
+        return {
+            "scope": "global",
+            "prefixes": list(await bot._config.prefix()),
+            "embeds": await bot._config.embeds(),
+            "fuzzy": await bot._config.fuzzy(),
+        }
+
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Guild-Kontext erforderlich")
+    await _require(gateway, ctx, "guild_admin")
+    g = ctx.guild
+    me = g.me
+    return {
+        "scope": "guild",
+        "guild_id": str(g.id),
+        "global_prefixes": list(await bot._config.prefix()),
+        "guild_prefixes": list(await bot._config.guild(g).prefix()),
+        "nickname": (me.nick if me else None),
+        "admin_roles": [str(r) for r in await bot._config.guild(g).admin_role()],
+        "mod_roles": [str(r) for r in await bot._config.guild(g).mod_role()],
+        "embeds": await bot._config.guild(g).embeds(),
+        "roles": [
+            {"id": str(r.id), "name": r.name}
+            for r in sorted(g.roles, key=lambda r: r.position, reverse=True)
+            if not r.is_default()
+        ],
+    }
+
+
+@dispatcher.method("settings.set")
+async def settings_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    bot = gateway.bot
+    args = params.get("args") or {}
+    scope = args.get("scope", "guild")
+    field = args.get("field")
+    value = args.get("value")
+
+    try:
+        if scope == "global":
+            await _require(gateway, ctx, "bot_owner")
+            if field == "prefixes":
+                prefixes = [str(p) for p in (value or []) if str(p).strip()]
+                if not prefixes:
+                    raise RpcError(INVALID_PARAMS, "Mindestens ein globaler Prefix nötig")
+                await bot.set_prefixes(prefixes, guild=None)
+            elif field == "embeds":
+                await bot._config.embeds.set(bool(value))
+            elif field == "fuzzy":
+                await bot._config.fuzzy.set(bool(value))
+            else:
+                raise RpcError(INVALID_PARAMS, f"Unbekanntes Feld '{field}'")
+            gateway.audit("settings.set", ctx, {"scope": scope, "field": field})
+            return {"ok": True}
+
+        if ctx.guild is None:
+            raise RpcError(INVALID_PARAMS, "Guild-Kontext erforderlich")
+        await _require(gateway, ctx, "guild_admin")
+        g = ctx.guild
+        if field == "prefixes":
+            await bot.set_prefixes([str(p) for p in (value or []) if str(p).strip()], guild=g)
+        elif field == "nickname":
+            await g.me.edit(nick=(str(value) or None) if value else None)
+        elif field == "admin_roles":
+            await bot._config.guild(g).admin_role.set([int(x) for x in (value or [])])
+        elif field == "mod_roles":
+            await bot._config.guild(g).mod_role.set([int(x) for x in (value or [])])
+        elif field == "embeds":
+            await bot._config.guild(g).embeds.set(None if value is None else bool(value))
+        else:
+            raise RpcError(INVALID_PARAMS, f"Unbekanntes Feld '{field}'")
+    except RpcError:
+        raise
+    except Exception as e:
+        raise RpcError(INTERNAL_ERROR, f"Speichern fehlgeschlagen: {e}")
+
+    gateway.audit("settings.set", ctx, {"scope": scope, "field": field})
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard-Branding, Overview, Lock, Sessions, Custom Pages
+# --------------------------------------------------------------------------- #
+def _dashboard_cog(gateway: Any):
+    return gateway.bot.get_cog("WebDashboard")
+
+
+@dispatcher.method("dashboard.branding")
+async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Öffentliches Branding (Titel/Icon/Theme) – ohne Login nutzbar."""
+    cog = _dashboard_cog(gateway)
+    ui = (await cog.config.ui()) if cog else {}
+    locked = bool(await cog.config.locked()) if cog else False
+    return {"ui": ui, "locked": locked}
+
+
+@dispatcher.method("dashboard.overview")
+async def dashboard_overview(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)  # authentifiziert genügt
+    bot = gateway.bot
+    cog = _dashboard_cog(gateway)
+
+    bot_uptime = None
+    up = getattr(bot, "uptime", None)
+    if up is not None:
+        try:
+            now = datetime.now(up.tzinfo) if getattr(up, "tzinfo", None) else datetime.utcnow()
+            bot_uptime = int((now - up).total_seconds())
+        except Exception:
+            bot_uptime = None
+
+    gw_uptime = None
+    if getattr(gateway, "started_at", None):
+        gw_uptime = int(time.time() - gateway.started_at)
+
+    return {
+        "bot_name": bot.user.name if bot.user else None,
+        "bot_avatar": str(bot.user.display_avatar.url) if bot.user else None,
+        "guild_count": len(bot.guilds),
+        "user_count": len(bot.users),
+        "loaded_cogs": len(bot.cogs),
+        "contributions": len(gateway.registry.all()),
+        "bot_uptime_s": bot_uptime,
+        "gateway_uptime_s": gw_uptime,
+        "locked": bool(await cog.config.locked()) if cog else False,
+        "is_owner": await bot.is_owner(ctx.user),
+    }
+
+
+@dispatcher.method("dashboard.settings_get")
+async def dashboard_settings_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    return {"ui": await cog.config.ui(), "locked": await cog.config.locked()}
+
+
+@dispatcher.method("dashboard.settings_set")
+async def dashboard_settings_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    ui = dict(await cog.config.ui())
+    incoming = (params.get("args") or {}).get("ui") or {}
+    for k in ("title", "icon", "description", "support_url", "color", "theme"):
+        if k in incoming:
+            ui[k] = incoming[k]
+    await cog.config.ui.set(ui)
+    gateway.audit("dashboard.settings_set", ctx, {})
+    return {"ok": True, "ui": ui}
+
+
+@dispatcher.method("dashboard.lock")
+async def dashboard_lock(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    value = bool((params.get("args") or {}).get("locked"))
+    await cog.config.locked.set(value)
+    gateway.audit("dashboard.lock", ctx, {"locked": value})
+    return {"ok": True, "locked": value}
+
+
+@dispatcher.method("dashboard.refresh_sessions")
+async def dashboard_refresh_sessions(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    epoch = time.time()
+    await cog.config.session_epoch.set(epoch)
+    gateway.audit("dashboard.refresh_sessions", ctx, {})
+    return {"ok": True, "epoch": epoch}
+
+
+@dispatcher.method("dashboard.session_epoch")
+async def dashboard_session_epoch(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Aktueller Session-Epoch (vom BFF zur Invalidierung genutzt)."""
+    cog = _dashboard_cog(gateway)
+    return {"epoch": float(await cog.config.session_epoch()) if cog else 0.0}
+
+
+# ----- Custom Pages -------------------------------------------------------- #
+@dispatcher.method("pages.list")
+async def pages_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Öffentliche Liste der Custom Pages (ohne HTML, für Navigation)."""
+    cog = _dashboard_cog(gateway)
+    pages = list(await cog.config.custom_pages()) if cog else []
+    return {"pages": [{"slug": p["slug"], "title": p["title"], "nav": p.get("nav", True)} for p in pages]}
+
+
+@dispatcher.method("pages.get")
+async def pages_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    cog = _dashboard_cog(gateway)
+    slug = str((params.get("args") or {}).get("slug", ""))
+    pages = list(await cog.config.custom_pages()) if cog else []
+    for p in pages:
+        if p["slug"] == slug:
+            return {"page": p}
+    raise RpcError(INVALID_PARAMS, "Seite nicht gefunden")
+
+
+@dispatcher.method("pages.save")
+async def pages_save(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    args = params.get("args") or {}
+    slug = str(args.get("slug", "")).strip().lower().replace(" ", "-")
+    if not slug:
+        raise RpcError(INVALID_PARAMS, "slug erforderlich")
+    entry = {
+        "slug": slug,
+        "title": str(args.get("title", slug)),
+        "html": str(args.get("html", "")),
+        "nav": bool(args.get("nav", True)),
+    }
+    async with cog.config.custom_pages() as pages:
+        for i, p in enumerate(pages):
+            if p["slug"] == slug:
+                pages[i] = entry
+                break
+        else:
+            pages.append(entry)
+    gateway.audit("pages.save", ctx, {"slug": slug})
+    return {"ok": True, "slug": slug}
+
+
+@dispatcher.method("pages.delete")
+async def pages_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    cog = _dashboard_cog(gateway)
+    slug = str((params.get("args") or {}).get("slug", ""))
+    async with cog.config.custom_pages() as pages:
+        pages[:] = [p for p in pages if p["slug"] != slug]
+    gateway.audit("pages.delete", ctx, {"slug": slug})
+    return {"ok": True}
 
 
 def _maybe_integration_base():
