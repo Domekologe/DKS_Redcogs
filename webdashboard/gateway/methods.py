@@ -479,12 +479,14 @@ async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         available = set(loaded)
     contributing = {c.cog_name.lower() for c in gateway.registry.all()}
+    repo_map = await _repo_map(bot)  # Paketname (lowercase) -> Repo-Name
     names = sorted(available | loaded)
     cogs = [
         {
             "name": name,
             "loaded": name in loaded,
             "has_dashboard": name.lower() in contributing,
+            "repo": repo_map.get(name.lower()),
         }
         for name in names
     ]
