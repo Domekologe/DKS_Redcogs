@@ -539,20 +539,9 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
 
-    enabled = {"slash": set(), "message": set(), "user": set()}
-    has_info = False
-    try:
-        e = bot.list_enabled_app_commands()  # Red 3.5+
-        for k in ("slash", "message", "user"):
-            enabled[k] = set((e.get(k) or {}).keys())
-        has_info = True
-    except Exception:
-        has_info = False
-
     items = []
     seen = set()
 
-    # App-Command-Typen robust bestimmen (defensiv gegen API-Unterschiede).
     try:
         from discord import app_commands  # type: ignore
         ContextMenu = app_commands.ContextMenu
@@ -560,25 +549,57 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         app_commands = None  # type: ignore
         ContextMenu = ()  # isinstance(..., ()) ist immer False
 
-    def _add(c, cog_name):
+    def _ctype(c) -> int:
         try:
             if ContextMenu and isinstance(c, ContextMenu):
-                ctype = int(getattr(c, "type").value)  # 2=user, 3=message
-            else:
-                ctype = 1  # chat_input / Slash
+                return int(getattr(c, "type").value)  # 2=user, 3=message
+        except Exception:
+            pass
+        return 1  # chat_input / Slash
+
+    # AKTIV-Status zuverlässig über Tree-Mitgliedschaft: Red entfernt deaktivierte
+    # App-Commands aus dem Tree (deshalb tauchten sie vorher gar nicht auf). Damit
+    # brauchen wir list_enabled_app_commands() nicht (das schlägt je nach Red-Version fehl).
+    enabled_keys = set()
+    tree_cmds = []
+    try:
+        tree_cmds = list(bot.tree.get_commands())
+        for c in tree_cmds:
+            enabled_keys.add((getattr(c, "name", None), _ctype(c)))
+    except Exception:
+        pass
+
+    # Cog für einen Tree-Befehl bestimmen – Binding zuerst, sonst über das Modul.
+    def _cog_for(c) -> str:
+        b = getattr(c, "binding", None)
+        if b is not None:
+            return type(b).__name__
+        mod = getattr(c, "module", None) or getattr(getattr(c, "callback", None), "__module__", None)
+        if mod:
+            top = str(mod).split(".")[0]
+            for cn, cg in bot.cogs.items():
+                try:
+                    if str(getattr(type(cg), "__module__", "")).split(".")[0] == top:
+                        return cn
+                except Exception:
+                    continue
+        return "—"
+
+    def _add(c, cog_name):
+        try:
             name = getattr(c, "name", None)
             if not name:
                 return
+            ctype = _ctype(c)
             key = (name, ctype)
             if key in seen:
                 return
             seen.add(key)
-            kind = {1: "slash", 2: "user", 3: "message"}.get(ctype, "slash")
             items.append({
                 "name": name,
                 "type": ctype,
                 "cog": cog_name,
-                "enabled": (name in enabled[kind]) if has_info else True,
+                "enabled": key in enabled_keys,
             })
         except Exception:
             return
@@ -600,17 +621,15 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 2) Tree-Befehle ergänzen (alles, was wirklich registriert/aktiv ist).
+    # 2) Tree-Befehle ergänzen (mit Modul-Fallback für die Kategorisierung).
     try:
-        for c in bot.tree.get_commands():
-            binding = getattr(c, "binding", None)
-            cog_name = type(binding).__name__ if binding is not None else "—"
-            _add(c, cog_name)
+        for c in tree_cmds:
+            _add(c, _cog_for(c))
     except Exception:
         pass
 
     items.sort(key=lambda x: (x["cog"].lower(), x["name"]))
-    return {"commands": items, "count": len(items), "managed": has_info}
+    return {"commands": items, "count": len(items), "managed": True}
 
 
 @dispatcher.method("slash.sync")
