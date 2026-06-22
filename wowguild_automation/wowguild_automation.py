@@ -504,7 +504,7 @@ class WowGuildAutomation(commands.Cog):
             {"key": "guild", "label": "Gilde"},
             {"key": "active", "label": "Aktiv"},
         ],
-        description="Alle WoW-Profile dieses Servers. Bearbeiten oder löschen pro Zeile; Anlegen im Tab „Profil".",
+        description="Alle WoW-Profile dieses Servers. Bearbeiten oder löschen pro Zeile; Anlegen im Tab Profil.",
     )
     async def wga_profiles_list(self, ctx):
         profiles = await self.config.guild(ctx.guild).wow_profiles()
