@@ -40,19 +40,43 @@ class ReactionRole(commands.Cog):
         )
         self._dashboard_attached = False
 
+    def _get_dashboard_cog(self) -> Optional[commands.Cog]:
+        return self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
+
+    def _attach_to_dashboard(self, dashboard_cog: commands.Cog) -> bool:
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            try:
+                dashboard_cog.rpc.third_parties_handler.add_third_party(self)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                return False
+
     async def cog_load(self) -> None:
         register_dashboard(self)
-        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
-        if dashboard is None:
-            return
-        try:
-            dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
-            self._dashboard_attached = True
-        except Exception:
-            self._dashboard_attached = False
+        dashboard_cog = self._get_dashboard_cog()
+        if dashboard_cog is not None:
+            self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         unregister_dashboard(self)
+        dashboard_cog = self._get_dashboard_cog()
+        if dashboard_cog is not None:
+            try:
+                dashboard_cog.rpc.third_parties_handler.remove_third_party(self)
+            except Exception:
+                pass
+        self._dashboard_attached = False
+
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        self._dashboard_attached = self._attach_to_dashboard(cog)
 
     @dashboard_widget("reactionrole_count", "ReactionRoles", size="sm", permission="guild_member")
     async def reactionrole_count_widget(self, ctx):

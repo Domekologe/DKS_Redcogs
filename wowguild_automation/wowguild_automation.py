@@ -288,6 +288,14 @@ class WowGuildAutomation(commands.Cog):
                 pass
         self._dashboard_attached = False
 
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        self._dashboard_attached = self._attach_to_dashboard(cog)
+
     @dashboard_widget("wga_onboarding", "Onboarding", size="sm", permission="guild_member")
     async def wga_onboarding_widget(self, ctx):
         try:

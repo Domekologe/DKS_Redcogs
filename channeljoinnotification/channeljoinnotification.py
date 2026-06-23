@@ -208,6 +208,7 @@ class ChannelJoinNotification(commands.Cog):
         self.config = Config.get_conf(self, identifier=771194222451, force_registration=True)
         self.config.register_guild(**DEFAULT_GUILD)
         self._dashboard_attached = False
+        self._selected_channel = {}  # (guild_id, user_id) -> channel_id
 
     # --------------------
     # Slash UI
@@ -284,6 +285,24 @@ class ChannelJoinNotification(commands.Cog):
             self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
         register_dashboard(self)
 
+    async def cog_unload(self) -> None:
+        unregister_dashboard(self)
+        dashboard_cog = self._get_dashboard_cog()
+        if dashboard_cog is not None:
+            try:
+                dashboard_cog.rpc.third_parties_handler.remove_third_party(self)
+            except Exception:
+                pass
+        self._dashboard_attached = False
+
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        self._dashboard_attached = self._attach_to_dashboard(cog)
+
     @dashboard_widget("cjn_configured_channels", "Join-Notify Channels", size="sm", permission="guild_member")
     async def cjn_configured_channels_widget(self, ctx):
         try:
@@ -303,39 +322,83 @@ class ChannelJoinNotification(commands.Cog):
         "notifications", "Join-Benachrichtigungen", mount="guild_settings", permission="guild_admin"
     )
     async def cjn_panel(self, ctx):
-        data = await self.config.guild(ctx.guild).notifications()
-        if not isinstance(data, dict):
-            data = {}
-        variables = [
-            {"token": "<Username>", "desc": "Nutzer"},
-            {"token": "<Channelname>", "desc": "Kanal"},
-        ]
+        guild_id = ctx.guild.id
+        user_id = ctx.user.id
+
+        # Get voice channels
         voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
-        fields = []
+        voice = sorted(voice, key=lambda c: (c.position or 0, c.name.lower()))
+
+        voice_choices = [("0", "-- Sprachkanal wählen --")]
         for c in voice:
-            entry = data.get(str(c.id), {}) if isinstance(data.get(str(c.id)), dict) else {}
-            fields.append(Field.switch(f"{c.id}__enabled", f"🔊 {c.name} – aktiv", value=bool(entry.get("enabled"))))
-            fields.append(Field.textarea(f"{c.id}__text", f"🔊 {c.name} – DM-Text",
-                                         value=str(entry.get("text", "")), max_length=1500, variables=variables))
-        if not fields:
-            return PanelSchema(description="Keine Sprachkanäle auf diesem Server.")
+            voice_choices.append((str(c.id), f"🔊 {c.name} ({c.id})"))
+
+        selection = self._selected_channel.get((guild_id, user_id), "0")
+
+        # Ensure selection is still valid (exists in choices)
+        choice_vals = {v[0] for v in voice_choices}
+        if selection not in choice_vals:
+            selection = "0"
+            self._selected_channel[(guild_id, user_id)] = "0"
+
+        fields = [
+            Field.select("channel_id", "Sprachkanal", voice_choices, value=selection, reload_on_change=True)
+        ]
+
+        if selection != "0":
+            data = await self.config.guild(ctx.guild).notifications()
+            if not isinstance(data, dict):
+                data = {}
+            entry = data.get(selection, {}) if isinstance(data.get(selection), dict) else {}
+
+            variables = [
+                {"token": "<Username>", "desc": "Nutzer"},
+                {"token": "<Channelname>", "desc": "Kanal"},
+            ]
+
+            fields.extend([
+                Field.switch("enabled", "Aktiviert", value=bool(entry.get("enabled", False))),
+                Field.textarea("text", "DM-Text", value=str(entry.get("text", "")), max_length=1500, variables=variables),
+                Field.switch("delete_entry", "Eintrag komplett löschen/zurücksetzen", value=False)
+            ])
+
         return PanelSchema(description="Pro Sprachkanal: DM beim Beitritt aktivieren und Text festlegen.", fields=fields)
 
     @cjn_panel.on_submit
     async def _save_cjn(self, ctx, data):
+        guild_id = ctx.guild.id
+        user_id = ctx.user.id
+
+        channel_id = str(data.get("channel_id", "0")).strip()
+        prev_sel = self._selected_channel.get((guild_id, user_id), "0")
+
+        if channel_id != prev_sel:
+            # User switched dropdown selection
+            self._selected_channel[(guild_id, user_id)] = channel_id
+            return SubmitResult.ok()
+
+        if channel_id == "0":
+            return SubmitResult.fail("Bitte wähle einen Sprachkanal aus.")
+
         notifications = await self.config.guild(ctx.guild).notifications()
         if not isinstance(notifications, dict):
             notifications = {}
-        voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
-        for c in voice:
-            entry = notifications.get(str(c.id), {}) if isinstance(notifications.get(str(c.id)), dict) else {}
-            if f"{c.id}__enabled" in data:
-                entry["enabled"] = bool(data[f"{c.id}__enabled"])
-            if f"{c.id}__text" in data:
-                entry["text"] = str(data[f"{c.id}__text"])[:1500]
-            notifications[str(c.id)] = entry
+
+        if bool(data.get("delete_entry", False)):
+            # Delete selection
+            if channel_id in notifications:
+                del notifications[channel_id]
+                await self.config.guild(ctx.guild).notifications.set(notifications)
+            self._selected_channel[(guild_id, user_id)] = "0"
+            return SubmitResult.ok("Eintrag gelöscht.")
+
+        # Normal save
+        notifications[channel_id] = {
+            "enabled": bool(data.get("enabled", False)),
+            "text": str(data.get("text", "")).strip()[:1500]
+        }
         await self.config.guild(ctx.guild).notifications.set(notifications)
-        return SubmitResult.ok("Gespeichert.")
+        return SubmitResult.ok("Eintrag gespeichert.")
 
     # --- Guild list: configured join notifications ---------------------- #
     @dashboard_list(

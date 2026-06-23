@@ -59,20 +59,45 @@ class EventMessages(commands.Cog):
 
         self.config.register_guild(**default_guild)
         self._dashboard_attached = False
+        self._selected_event = {}  # (guild_id, user_id) -> event_id
+
+    def _get_dashboard_cog(self) -> Optional[commands.Cog]:
+        return self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
+
+    def _attach_to_dashboard(self, dashboard_cog: commands.Cog) -> bool:
+        try:
+            dashboard_cog.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
+            return True
+        except Exception:
+            try:
+                dashboard_cog.rpc.third_parties_handler.add_third_party(self)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                return False
 
     async def cog_load(self) -> None:
         register_dashboard(self)
-        dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
-        if dashboard is None:
-            return
-        try:
-            dashboard.rpc.third_parties_handler.add_third_party(self, overwrite=True)  # type: ignore[attr-defined]
-            self._dashboard_attached = True
-        except Exception:
-            self._dashboard_attached = False
+        dashboard_cog = self._get_dashboard_cog()
+        if dashboard_cog is not None:
+            self._dashboard_attached = self._attach_to_dashboard(dashboard_cog)
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         unregister_dashboard(self)
+        dashboard_cog = self._get_dashboard_cog()
+        if dashboard_cog is not None:
+            try:
+                dashboard_cog.rpc.third_parties_handler.remove_third_party(self)
+            except Exception:
+                pass
+        self._dashboard_attached = False
+
+    @commands.Cog.listener()
+    async def on_cog_add(self, cog: commands.Cog) -> None:
+        if self._dashboard_attached:
+            return
+        if cog.qualified_name not in {"Dashboard", "DKS-Dashboard"}:
+            return
+        self._dashboard_attached = self._attach_to_dashboard(cog)
 
     @dashboard_widget("eventmessages_enabled", "Aktive Events", size="sm", permission="guild_member")
     async def eventmessages_enabled_widget(self, ctx):
@@ -89,58 +114,100 @@ class EventMessages(commands.Cog):
         "events", "Event-Nachrichten", mount="guild_settings", permission="guild_admin"
     )
     async def eventmessages_panel(self, ctx):
-        events = await self.config.guild(ctx.guild).events()
-        templates = await self.config.guild(ctx.guild).templates()
-        if not isinstance(events, dict):
-            events = {}
-        if not isinstance(templates, dict):
-            templates = {}
+        guild_id = ctx.guild.id
+        user_id = ctx.user.id
+
         labels = {
             "join": "Beitritt", "leave": "Verlassen", "kick": "Kick", "ban": "Ban",
             "unban": "Entbann", "timeout": "Timeout", "timeout_end": "Timeout-Ende",
         }
-        variables = [
-            {"token": "{display_name}", "desc": "Anzeigename"},
-            {"token": "{username}", "desc": "Username"},
-            {"token": "{moderator}", "desc": "Moderator"},
-            {"token": "{reason}", "desc": "Grund"},
-            {"token": "{duration}", "desc": "Dauer"},
-        ]
-        channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
-            {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
-        ]
-        fields = []
+        event_choices = [("0", "-- Ereignis wählen --")]
         for ev in EVENTS:
-            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
-            name = labels.get(ev, ev)
-            fields.append(Field.switch(f"{ev}__enabled", f"{name} – aktiv", value=bool(cfg.get("enabled"))))
-            fields.append(Field.select(f"{ev}__channel", f"{name} – Kanal", channel_options,
-                                       value=str(cfg.get("channel") or "")))
-            fields.append(Field.textarea(f"{ev}__tmpl", f"{name} – Nachricht",
-                                         value=templates.get(ev, ""), max_length=1000, variables=variables))
+            event_choices.append((ev, labels.get(ev, ev)))
+
+        selection = self._selected_event.get((guild_id, user_id), "0")
+
+        # Ensure selection is still valid
+        choice_vals = {v[0] for v in event_choices}
+        if selection not in choice_vals:
+            selection = "0"
+            self._selected_event[(guild_id, user_id)] = "0"
+
+        fields = [
+            Field.select("event_id", "Ereignis", event_choices, value=selection, reload_on_change=True)
+        ]
+
+        if selection != "0":
+            events = await self.config.guild(ctx.guild).events()
+            templates = await self.config.guild(ctx.guild).templates()
+            if not isinstance(events, dict):
+                events = {}
+            if not isinstance(templates, dict):
+                templates = {}
+
+            cfg = events.get(selection, {}) if isinstance(events.get(selection), dict) else {}
+            name = labels.get(selection, selection)
+
+            variables = [
+                {"token": "{display_name}", "desc": "Anzeigename"},
+                {"token": "{username}", "desc": "Username"},
+                {"token": "{moderator}", "desc": "Moderator"},
+                {"token": "{reason}", "desc": "Grund"},
+                {"token": "{duration}", "desc": "Dauer"},
+            ]
+            channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+                {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
+            ]
+
+            fields.extend([
+                Field.switch("enabled", "Aktiviert", value=bool(cfg.get("enabled", False))),
+                Field.select("channel", "Log-Kanal", channel_options, value=str(cfg.get("channel") or "")),
+                Field.textarea("tmpl", "Nachrichtenvorlage", value=templates.get(selection, ""), max_length=1000, variables=variables)
+            ])
+
         return PanelSchema(description="Pro Event: aktivieren, Kanal wählen und Nachricht festlegen.", fields=fields)
 
     @eventmessages_panel.on_submit
     async def _save_eventmessages(self, ctx, data):
+        guild_id = ctx.guild.id
+        user_id = ctx.user.id
+
+        event_id = str(data.get("event_id", "0")).strip()
+        prev_sel = self._selected_event.get((guild_id, user_id), "0")
+
+        if event_id != prev_sel:
+            # User switched dropdown selection
+            self._selected_event[(guild_id, user_id)] = event_id
+            return SubmitResult.ok()
+
+        if event_id == "0":
+            return SubmitResult.fail("Bitte wähle ein Ereignis aus.")
+
+        labels = {
+            "join": "Beitritt", "leave": "Verlassen", "kick": "Kick", "ban": "Ban",
+            "unban": "Entbann", "timeout": "Timeout", "timeout_end": "Timeout-Ende",
+        }
+
         events = await self.config.guild(ctx.guild).events()
         templates = await self.config.guild(ctx.guild).templates()
         if not isinstance(events, dict):
             events = {}
         if not isinstance(templates, dict):
             templates = {}
-        for ev in EVENTS:
-            cfg = events.get(ev, {}) if isinstance(events.get(ev), dict) else {}
-            if f"{ev}__enabled" in data:
-                cfg["enabled"] = bool(data[f"{ev}__enabled"])
-            if f"{ev}__channel" in data:
-                ch = data[f"{ev}__channel"]
-                cfg["channel"] = int(ch) if ch else None
-            events[ev] = cfg
-            if f"{ev}__tmpl" in data:
-                templates[ev] = str(data[f"{ev}__tmpl"])[:1000]
+
+        cfg = events.get(event_id, {}) if isinstance(events.get(event_id), dict) else {}
+
+        cfg["enabled"] = bool(data.get("enabled", False))
+        ch = data.get("channel")
+        cfg["channel"] = int(ch) if ch else None
+        events[event_id] = cfg
+
+        if "tmpl" in data:
+            templates[event_id] = str(data["tmpl"])[:1000]
+
         await self.config.guild(ctx.guild).events.set(events)
         await self.config.guild(ctx.guild).templates.set(templates)
-        return SubmitResult.ok("Event-Nachrichten gespeichert.")
+        return SubmitResult.ok(f"Einstellungen für '{labels.get(event_id, event_id)}' gespeichert.")
 
     # ------------------------------------------------------------
     # Autocomplete
