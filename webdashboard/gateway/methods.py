@@ -505,17 +505,53 @@ async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     return {"cogs": cogs, "loaded_count": len(loaded), "total": len(names)}
 
 
+def _loaded_pkg_name(bot: Any, name: str) -> Optional[str]:
+    """Actual key in bot.extensions matching `name` case-insensitively (or None).
+
+    Cog package names are NOT always lowercase (e.g. ``WarcraftlogsClassic``,
+    ``AdminUtils``). Lowercasing breaks reload/unload for those, so we match the
+    real, case-correct extension key instead.
+    """
+    if name in bot.extensions:
+        return name
+    low = name.lower()
+    for ext in bot.extensions:
+        if ext.lower() == low:
+            return ext
+    return None
+
+
+async def _resolve_cog_name(bot: Any, name: str) -> str:
+    """Canonical (case-correct) cog name. Tries loaded extensions first, then the
+    cog manager's available modules. Falls back to the given name."""
+    loaded = _loaded_pkg_name(bot, name)
+    if loaded:
+        return loaded
+    low = name.lower()
+    try:
+        avail = await bot._cog_mgr.available_modules()
+        for mod in avail:
+            if str(mod).lower() == low:
+                return str(mod)
+    except Exception:
+        pass
+    return name
+
+
 @dispatcher.method("cogs.set")
 async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Load/unload/reload a cog (owner). action: load | unload | reload."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     args = params.get("args") or {}
-    name = str(args.get("name", "")).strip().lower()
+    name = str(args.get("name", "")).strip()
     action = args.get("action")
     if not name or action not in ("load", "unload", "reload"):
         raise RpcError(INVALID_PARAMS, "name/action fehlt oder ungültig")
     bot = gateway.bot
+    # Resolve the real, case-correct cog name (do NOT lowercase – breaks
+    # mixed-case cogs like WarcraftlogsClassic / AdminUtils).
+    name = await _resolve_cog_name(bot, name)
 
     # Determine our own package (which runs the gateway) – a self-reload
     # would terminate the gateway in the middle of the response.
@@ -541,7 +577,7 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
     # Self-reload of the dashboard cog: run deferred so this response still
     # goes out before the gateway restarts.
-    if action == "reload" and own_pkg and name == own_pkg:
+    if action == "reload" and own_pkg and name.lower() == own_pkg:
         import asyncio
 
         async def _deferred() -> None:
@@ -994,7 +1030,9 @@ async def _do_cog_update(
         raise RpcError(INTERNAL_ERROR, f"Update fehlgeschlagen: {e}")
 
     # Automatically after the update: 1) reload the cog (if loaded), 2) sync slash.
-    pkg = cog_name.lower()
+    # Use the real, case-correct extension key (NOT cog_name.lower() – that breaks
+    # mixed-case cogs like WarcraftlogsClassic).
+    pkg = _loaded_pkg_name(bot, cog_name) or await _resolve_cog_name(bot, cog_name)
     own_pkg = None
     try:
         dcog = bot.get_cog("WebDashboard")
@@ -1005,7 +1043,7 @@ async def _do_cog_update(
 
     reloaded = False
     reload_error = None
-    if pkg in bot.extensions and pkg != own_pkg:
+    if pkg in bot.extensions and pkg.lower() != own_pkg:
         try:
             await bot.unload_extension(pkg)
             spec = await bot._cog_mgr.find_cog(pkg)
@@ -1084,13 +1122,15 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
 async def _do_cog_uninstall(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> Dict[str, Any]:
     bot = gateway.bot
     # 1) Disable slash commands: unloading removes the app commands from the tree;
-    #    a sync follows afterwards.
+    #    a sync follows afterwards. Use the real, case-correct extension key.
+    pkg = _loaded_pkg_name(bot, cog_name) or cog_name
     try:
-        if cog_name.lower() in bot.extensions:
-            await bot.unload_extension(cog_name.lower())  # discord.py 2.x: coroutine!
+        if pkg in bot.extensions:
+            await bot.unload_extension(pkg)  # discord.py 2.x: coroutine!
         async with bot._config.packages() as pkgs:
-            if cog_name.lower() in pkgs:
-                pkgs.remove(cog_name.lower())
+            for p in [pkg, cog_name, cog_name.lower()]:
+                if p in pkgs:
+                    pkgs.remove(p)
     except Exception:
         pass
     # 2) Remove files/installation
