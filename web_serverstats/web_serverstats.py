@@ -312,6 +312,19 @@ class WebServerStats(commands.Cog):
         except Exception:
             log.debug("invite_create stats failed", exc_info=True)
 
+    @commands.Cog.listener()
+    async def on_invite_delete(self, invite: discord.Invite) -> None:
+        # Remove deleted invites from the store so it does not grow unbounded with
+        # stale codes (the live comparison in _track_invite_use uses guild.invites()
+        # anyway, so dropping a gone code does not lose any attribution).
+        if invite.guild is None:
+            return
+        try:
+            async with self.config.guild(invite.guild).invites() as inv:
+                inv.pop(invite.code, None)
+        except Exception:
+            log.debug("invite_delete cleanup failed", exc_info=True)
+
     async def _track_invite_use(self, member: discord.Member) -> None:
         """Compares stored invite uses with the current ones to find the code that was used."""
         guild = member.guild
@@ -465,6 +478,38 @@ class WebServerStats(commands.Cog):
             await self._flush()
         except Exception:
             log.debug("flush loop failed", exc_info=True)
+        try:
+            await self._flush_voice()
+        except Exception:
+            log.debug("voice tick failed", exc_info=True)
+
+    async def _flush_voice(self) -> None:
+        """Credit the elapsed time of OPEN voice sessions incrementally and advance
+        their start. Without this, a user's voice time only appears AFTER they leave
+        (the session is credited on disconnect) – so people currently in voice would
+        be invisible in the stats. Ticking every 60 s makes ongoing sessions show up
+        live and also keeps day boundaries accurate (minutes land on the day they
+        actually happened)."""
+        now = _utcnow()
+        for key in list(self._voice.keys()):
+            ch_id, start = self._voice.get(key, (None, None))
+            if ch_id is None or start is None:
+                continue
+            minutes = (now - start).total_seconds() / 60.0
+            if minutes <= 0:
+                continue
+            gid, mid = key
+            guild = self.bot.get_guild(gid)
+            if guild is None:
+                continue
+            # Advance the session start first so we never double-count this slice.
+            self._voice[key] = (ch_id, now)
+            try:
+                await self._bump_day(guild, "voice_minutes", minutes)
+                await self._bump_nested(guild, "voice_channels", str(ch_id), minutes)
+                await self._bump_nested(guild, "voice_members", str(mid), minutes)
+            except Exception:
+                log.debug("voice tick failed for %s", key, exc_info=True)
 
     @_flush_loop.before_loop
     async def _before_flush(self) -> None:
