@@ -447,7 +447,8 @@ class WowGuildAutomation(commands.Cog):
         selected = str(data.get("active_profile_key", "")).strip()
         if selected and selected in profiles:
             await self.config.guild(ctx.guild).active_profile_key.set(selected)
-            return SubmitResult.ok(f"Profil „{selected}“ aktiviert.")
+            # reload=True: die Tabs "Profil" und "Profile" sollen den Wechsel sofort zeigen.
+            return SubmitResult.ok(f"Profil „{selected}“ aktiviert.", reload=True)
         return SubmitResult.fail("Unbekanntes Profil.")
 
     # --- Guild panel: profile (edit/create active profile) --------------- #
@@ -523,7 +524,8 @@ class WowGuildAutomation(commands.Cog):
                 )
                 profiles[active_key] = entry
         await self.config.guild(ctx.guild).active_profile_key.set(active_key)
-        return SubmitResult.ok(msg)
+        # Anlegen/Wechsel wirkt sich auf die Liste & den Wechsel-Tab aus → neu laden.
+        return SubmitResult.ok(msg, reload=True)
 
     # --- Guild list: WoW profiles (view/edit/delete all) ----------------- #
     @dashboard_list(

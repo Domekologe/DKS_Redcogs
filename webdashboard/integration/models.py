@@ -177,13 +177,21 @@ class SubmitResult:
     success: bool
     message: Optional[str] = None
     errors: Optional[Dict[str, str]] = None  # field-specific errors
+    # If True, the frontend reloads the OTHER tabs of this module too (e.g. after
+    # switching the active profile, so the edit panel and list reflect the change).
+    reload: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"success": self.success, "message": self.message, "errors": self.errors}
+        return {
+            "success": self.success,
+            "message": self.message,
+            "errors": self.errors,
+            "reload": self.reload,
+        }
 
     @classmethod
-    def ok(cls, message: Optional[str] = None) -> "SubmitResult":
-        return cls(True, message)
+    def ok(cls, message: Optional[str] = None, *, reload: bool = False) -> "SubmitResult":
+        return cls(True, message, reload=reload)
 
     @classmethod
     def fail(cls, message: str, errors: Optional[Dict[str, str]] = None) -> "SubmitResult":
