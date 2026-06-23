@@ -75,6 +75,25 @@ class WebServerStats(commands.Cog):
         self._snapshot_loop.start()
         self._flush_loop.start()
 
+    async def cog_load(self) -> None:
+        # Reseed currently-open voice sessions + the enabled cache on (re)load.
+        # IMPORTANT: on_ready does NOT fire on a cog reload (the bot is already
+        # ready), so without this a [p]reload would lose all running voice sessions
+        # and people already sitting in voice would not be counted (no live update).
+        now = _utcnow()
+        for guild in self.bot.guilds:
+            try:
+                enabled = bool(await self.config.guild(guild).enabled())
+                self._enabled_cache[guild.id] = enabled
+                if not enabled:
+                    continue
+                for vc in guild.voice_channels:
+                    for m in vc.members:
+                        if not m.bot:
+                            self._voice.setdefault((guild.id, m.id), (vc.id, now))
+            except Exception:
+                continue
+
     def cog_unload(self) -> None:
         self._snapshot_loop.cancel()
         self._flush_loop.cancel()
