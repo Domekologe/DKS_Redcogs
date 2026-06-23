@@ -12,6 +12,7 @@ Discord OAuth2 login. Permissions are re-checked here on the server side.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -31,6 +32,12 @@ from .rpc import (
 log = logging.getLogger("red.dks.webdashboard.methods")
 
 dispatcher = Dispatcher()
+
+# Serialises all Downloader-mutating operations (install/update/uninstall). The
+# Downloader is not safe for concurrent installs (Config writes + git state), and a
+# slash sync runs per update. With this lock, rapid/parallel clicks queue instead of
+# racing. asyncio.Lock is fair (FIFO) so requests run in click order.
+_downloader_lock = asyncio.Lock()
 
 
 class _LightUser:
@@ -935,6 +942,13 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
     cog_name = str((params.get("args") or {}).get("cog", "")).strip()
     if not cog_name:
         raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    # Serialise mutating Downloader work so rapid/parallel clicks queue (FIFO)
+    # instead of racing the Downloader or running concurrent slash syncs.
+    async with _downloader_lock:
+        return await _do_cog_update(gateway, dl, cog_name, ctx)
+
+
+async def _do_cog_update(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> Dict[str, Any]:
     bot = gateway.bot
     try:
         installed = await _installed_cogs(dl)
@@ -1024,22 +1038,23 @@ async def downloader_cog_install(gateway: Any, params: Dict[str, Any]) -> Dict[s
     cog_name = str(args.get("cog", "")).strip()
     if not repo_name or not cog_name:
         raise RpcError(INVALID_PARAMS, "repo und cog erforderlich")
-    try:
-        repo = dl._repo_manager.get_repo(repo_name)
-        if repo is None:
-            raise RpcError(INVALID_PARAMS, f"Repo '{repo_name}' nicht gefunden")
-        cogs, message = await dl._filter_incorrect_cogs_by_names(repo, [cog_name])
-        if not cogs:
-            raise RpcError(INVALID_PARAMS, message or f"Cog '{cog_name}' nicht im Repo")
-        installed_cogs, failed = await dl._install_cogs(cogs)
-        if hasattr(dl, "_save_to_installed"):
-            await dl._save_to_installed(installed_cogs)
-        if failed:
-            raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {cog_name}")
-    except RpcError:
-        raise
-    except Exception as e:
-        raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {e}")
+    async with _downloader_lock:  # serialise with other Downloader operations
+        try:
+            repo = dl._repo_manager.get_repo(repo_name)
+            if repo is None:
+                raise RpcError(INVALID_PARAMS, f"Repo '{repo_name}' nicht gefunden")
+            cogs, message = await dl._filter_incorrect_cogs_by_names(repo, [cog_name])
+            if not cogs:
+                raise RpcError(INVALID_PARAMS, message or f"Cog '{cog_name}' nicht im Repo")
+            installed_cogs, failed = await dl._install_cogs(cogs)
+            if hasattr(dl, "_save_to_installed"):
+                await dl._save_to_installed(installed_cogs)
+            if failed:
+                raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {cog_name}")
+        except RpcError:
+            raise
+        except Exception as e:
+            raise RpcError(INTERNAL_ERROR, f"Installation fehlgeschlagen: {e}")
     gateway.audit("downloader.cog_install", ctx, {"repo": repo_name, "cog": cog_name})
     return {"ok": True, "cog": cog_name, "hint": "Mit cogs.set/load aktivieren."}
 
@@ -1054,6 +1069,11 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
     cog_name = str((params.get("args") or {}).get("cog", "")).strip()
     if not cog_name:
         raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    async with _downloader_lock:  # serialise with other Downloader operations
+        return await _do_cog_uninstall(gateway, dl, cog_name, ctx)
+
+
+async def _do_cog_uninstall(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> Dict[str, Any]:
     bot = gateway.bot
     # 1) Disable slash commands: unloading removes the app commands from the tree;
     #    a sync follows afterwards.
