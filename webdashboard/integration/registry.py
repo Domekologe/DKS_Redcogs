@@ -27,8 +27,8 @@ class Contribution:
     def key(self) -> str:
         return f"{self.cog_name}:{self.identifier}"
 
-    def manifest(self) -> Dict[str, Any]:
-        m = self.meta.manifest()
+    def manifest(self, locale: Optional[str] = None) -> Dict[str, Any]:
+        m = self.meta.manifest(locale)
         m["cog"] = self.cog_name
         m["key"] = self.key
         if self.kind == "list":

@@ -12,6 +12,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr,
 )
 
 
@@ -75,7 +76,7 @@ class AdminUtils(commands.Cog):
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
-    @dashboard_widget("adminutils_templates", "AdminUtils Templates", size="sm", permission="guild_member")
+    @dashboard_widget("adminutils_templates", L("AdminUtils Templates", "AdminUtils Templates"), size="sm", permission="guild_member")
     async def adminutils_templates_widget(self, ctx):
         try:
             templates = await self.config.guild(ctx.guild).templates()
@@ -85,27 +86,27 @@ class AdminUtils(commands.Cog):
 
     # --- Guild panel: customize moderation messages ------------------- #
     @dashboard_panel(
-        "templates", "Moderations-Nachrichten", mount="guild_settings", permission="guild_admin"
+        "templates", L("Moderations-Nachrichten", "Moderation Messages"), mount="guild_settings", permission="guild_admin"
     )
     async def adminutils_templates_panel(self, ctx):
         t = await self.config.guild(ctx.guild).templates()
-        member = {"token": "{member}", "desc": "Mitglied"}
-        reason = {"token": "{reason}", "desc": "Grund"}
+        member = {"token": "{member}", "desc": "Member"}
+        reason = {"token": "{reason}", "desc": "Reason"}
         return PanelSchema(
-            description="Erfolgsmeldungen für Kick/Ban/Timeout/Purge.",
+            description=tr(ctx, "Erfolgsmeldungen für Kick/Ban/Timeout/Purge.", "Success messages for Kick/Ban/Timeout/Purge."),
             fields=[
                 Field.textarea("kick_success", "Kick", value=t.get("kick_success", ""),
                                max_length=500, variables=[member, reason]),
                 Field.textarea("ban_success", "Ban", value=t.get("ban_success", ""),
                                max_length=500,
-                               variables=[member, reason, {"token": "{delete_days}", "desc": "Lösch-Tage"}]),
+                               variables=[member, reason, {"token": "{delete_days}", "desc": "Days to delete"}]),
                 Field.textarea("timeout_success", "Timeout", value=t.get("timeout_success", ""),
                                max_length=500,
-                               variables=[member, reason, {"token": "{minutes}", "desc": "Minuten"}]),
+                               variables=[member, reason, {"token": "{minutes}", "desc": "Minutes"}]),
                 Field.textarea("purge_success", "Purge", value=t.get("purge_success", ""),
                                max_length=500,
-                               variables=[{"token": "{deleted}", "desc": "Gelöscht"},
-                                          {"token": "{exceptions}", "desc": "Ausnahmen"}]),
+                               variables=[{"token": "{deleted}", "desc": "Deleted"},
+                                          {"token": "{exceptions}", "desc": "Exceptions"}]),
             ],
         )
 
@@ -150,10 +151,10 @@ class AdminUtils(commands.Cog):
             await ctx.reply(content, **{k: v for k, v in kwargs.items() if k != "ephemeral"})
 
     # ---- KICK ----
-    @commands.hybrid_command(name="kick", description="Kicke ein Mitglied.")
+    @commands.hybrid_command(name="kick", description="Kick a member.")
     @commands.bot_has_guild_permissions(kick_members=True)
     @has_perms(kick_members=True)
-    @app_commands.describe(member="Mitglied zum Kicken", reason="Grund")
+    @app_commands.describe(member="Member to kick", reason="Reason")
     async def kick(
         self,
         ctx: commands.Context,
@@ -169,13 +170,13 @@ class AdminUtils(commands.Cog):
         )
 
     # ---- BAN ----
-    @commands.hybrid_command(name="ban", description="Bannt ein Mitglied.")
+    @commands.hybrid_command(name="ban", description="Ban a member.")
     @commands.bot_has_guild_permissions(ban_members=True)
     @has_perms(ban_members=True)
     @app_commands.describe(
-        member="Mitglied zum Bannen",
-        reason="Grund",
-        delete_message_days="Lösche Nachrichten der letzten X Tage (0-7)"
+        member="Member to ban",
+        reason="Reason",
+        delete_message_days="Delete messages from the last X days (0-7)"
     )
     async def ban(
         self,
@@ -201,13 +202,13 @@ class AdminUtils(commands.Cog):
         )
 
     # ---- TIMEOUT ----
-    @commands.hybrid_command(name="timeout", description="Timeout für ein Mitglied (in Minuten).")
+    @commands.hybrid_command(name="timeout", description="Time out a member (in minutes).")
     @commands.bot_has_guild_permissions(moderate_members=True)
     @has_perms(moderate_members=True)
     @app_commands.describe(
-        member="Mitglied",
-        minutes="Dauer in Minuten",
-        reason="Grund"
+        member="Member",
+        minutes="Duration in minutes",
+        reason="Reason"
     )
     async def timeout(
         self,
@@ -231,12 +232,12 @@ class AdminUtils(commands.Cog):
 
 
     # ---- PURGE (with exceptions) ----
-    @commands.hybrid_command(name="purge", description="Lösche X Nachrichten, optional mit Ausnahmen.")
+    @commands.hybrid_command(name="purge", description="Delete X messages, optionally with exceptions.")
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
     @app_commands.describe(
-        amount="Anzahl Nachrichten (1-500)",
-        except_users="User, deren Nachrichten nicht gelöscht werden sollen (Mentions oder IDs, getrennt durch Leerzeichen)."
+        amount="Number of messages (1-500)",
+        except_users="Users whose messages should not be deleted (mentions or IDs, separated by spaces)."
     )
     async def purge(
         self,
@@ -390,13 +391,13 @@ class AdminUtils(commands.Cog):
     # ---- Fast Purge (instant Purge but only for the last 14 days) ----
     @commands.hybrid_command(
         name="purgefast",
-        description="Löscht schnell Nachrichten der letzten 14 Tage (Bulk)."
+        description="Quickly deletes messages from the last 14 days (bulk)."
     )
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
     @app_commands.describe(
-        amount="Anzahl Nachrichten (1-500)",
-        except_users="User, deren Nachrichten NICHT gelöscht werden sollen (Mentions oder IDs, getrennt durch Leerzeichen)."
+        amount="Number of messages (1-500)",
+        except_users="Users whose messages should NOT be deleted (mentions or IDs, separated by spaces)."
     )
     async def purgefast(
         self,
@@ -478,14 +479,14 @@ class AdminUtils(commands.Cog):
     # ---- MESSAGE MOVE (copy + optionally delete) ----
     @commands.hybrid_command(
         name="messagemove",
-        description="Kopiert eine Nachricht in einen Ziel-Channel oder Thread und löscht das Original (optional)."
+        description="Copies a message to a target channel or thread and optionally deletes the original."
     )
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
     @app_commands.describe(
-        message="Message-ID oder Message-Link",
-        destination="Ziel-Channel oder Thread",
-        delete_original="Originalnachricht nach dem Kopieren löschen?"
+        message="Message ID or message link",
+        destination="Target channel or thread",
+        delete_original="Delete the original message after copying?"
     )
     async def messagemove(
         self,
@@ -545,13 +546,13 @@ class AdminUtils(commands.Cog):
     # ---- MOVE MEMBER ALL ----
     @commands.hybrid_command(
         name="move-memberall",
-        description="Verschiebe alle Mitglieder aus einem VoiceChannel in einen anderen."
+        description="Move all members from one voice channel to another."
     )
     @commands.bot_has_guild_permissions(move_members=True)
     @has_perms(move_members=True)
     @app_commands.describe(
-        source_channel="VoiceChannel aus dem verschoben werden soll",
-        dest_channel="VoiceChannel in den verschoben werden soll"
+        source_channel="Voice channel to move members from",
+        dest_channel="Voice channel to move members to"
     )
     async def move_memberall(
         self,
@@ -583,13 +584,13 @@ class AdminUtils(commands.Cog):
     # ---- MOVE MEMBER (select menu + confirmation) ----
     @commands.hybrid_command(
         name="move-member",
-        description="Verschiebe ausgewählte Mitglieder aus einem VoiceChannel in einen anderen."
+        description="Move selected members from one voice channel to another."
     )
     @commands.bot_has_guild_permissions(move_members=True)
     @has_perms(move_members=True)
     @app_commands.describe(
-        source_channel="VoiceChannel aus dem verschoben werden soll",
-        dest_channel="VoiceChannel in den verschoben werden soll"
+        source_channel="Voice channel to move members from",
+        dest_channel="Voice channel to move members to"
     )
     async def move_member(
         self,
@@ -727,14 +728,14 @@ class AdminUtils(commands.Cog):
     # ---- COPY CHANNEL ROLE PERMISSIONS ----
     @app_commands.command(
         name="copy-channelrole",
-        description="Kopiere die Channel-Rechte einer Rolle auf eine andere Rolle."
+        description="Copy a role's channel permissions to another role."
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
     @has_perms(manage_roles=True)
     @app_commands.describe(
-        channel="Der Channel, dessen Permissions kopiert werden sollen",
-        source_role="Rolle, von der kopiert wird",
-        dest_role="Rolle, auf die kopiert wird"
+        channel="The channel whose permissions should be copied",
+        source_role="Role to copy from",
+        dest_role="Role to copy to"
     )
     async def copy_channelrole(
         self,
@@ -773,13 +774,13 @@ class AdminUtils(commands.Cog):
     # ---- COPY GUILD ROLE ----
     @app_commands.command(
         name="copy-role",
-        description="Erstelle eine neue Rolle mit allen Server- und Channel-Rechten einer bestehenden Rolle."
+        description="Create a new role with all the server and channel permissions of an existing role."
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
     @has_perms(manage_roles=True)
     @app_commands.describe(
-        source_role="Rolle, von der die Rechte kopiert werden",
-        target_role_name="Name der neuen Rolle"
+        source_role="Role to copy the permissions from",
+        target_role_name="Name of the new role"
     )
     async def copy_role(
         self,

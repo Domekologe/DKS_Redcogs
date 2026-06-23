@@ -23,6 +23,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel,
     WidgetData, PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr, tr_lang,
 )
 from .enchantid import ENCHANT_ID
 from .encounterid import DIFFICULTIES, ZONES_BY_ID, ZONES_BY_SHORT_NAME
@@ -53,6 +54,7 @@ class WarcraftLogsClassic(commands.Cog):
         }
         default_guild = {
             "notification_channel": None,
+            "language": "de-DE",
         }
 
         self.config.register_user(**default_user)
@@ -86,7 +88,7 @@ class WarcraftLogsClassic(commands.Cog):
     async def cog_load(self) -> None:
         register_dashboard(self)
 
-    @dashboard_widget("notify_channel_set", "Benachrichtigungskanal", size="sm", permission="guild_member")
+    @dashboard_widget("notify_channel_set", L("Benachrichtigungskanal", "Notification Channel"), size="sm", permission="guild_member")
     async def notify_channel_set_widget(self, ctx):
         try:
             channel_id = await self.config.guild(ctx.guild).notification_channel()
@@ -98,13 +100,23 @@ class WarcraftLogsClassic(commands.Cog):
     @dashboard_panel("wcl_guild", "WarcraftLogs", mount="guild_settings", permission="guild_admin")
     async def wcl_guild_panel(self, ctx):
         current = await self.config.guild(ctx.guild).notification_channel()
-        ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
+        language = await self.config.guild(ctx.guild).language()
+        ch_opts = [{"value": "", "label": "— no channel —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
         return PanelSchema(
             fields=[
                 Field.select(
-                    "notification_channel", "Benachrichtigungskanal", ch_opts,
+                    "language", L("Sprache", "Language"),
+                    [
+                        {"value": "de-DE", "label": "Deutsch"},
+                        {"value": "en-US", "label": "English"},
+                    ],
+                    value=str(language or "de-DE"),
+                    reload_on_change=True,
+                ),
+                Field.select(
+                    "notification_channel", "Notification channel", ch_opts,
                     value=str(current or ""),
                 ),
             ]
@@ -112,13 +124,15 @@ class WarcraftLogsClassic(commands.Cog):
 
     @wcl_guild_panel.on_submit
     async def _save_wcl_guild(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set(str(data["language"]) or "de-DE")
         if "notification_channel" in data:
             v = data["notification_channel"]
             await self.config.guild(ctx.guild).notification_channel.set(int(v) if v else None)
         return SubmitResult.ok("Gespeichert.")
 
     # --- Guild panel (per user): WCL character --------------------------- #
-    @dashboard_panel("wcl_char", "Mein WCL-Charakter", mount="guild_settings", permission="guild_member")
+    @dashboard_panel("wcl_char", L("Mein WCL-Charakter", "My WCL Character"), mount="guild_settings", permission="guild_member")
     async def wcl_char_panel(self, ctx):
         u = self.config.user_from_id(int(ctx.user.id))
         region_opts = [
@@ -127,7 +141,7 @@ class WarcraftLogsClassic(commands.Cog):
         ]
         return PanelSchema(
             fields=[
-                Field.text("charname", "Charaktername", value=str(await u.charname() or "")),
+                Field.text("charname", "Character name", value=str(await u.charname() or "")),
                 Field.text("realm", "Realm", value=str(await u.realm() or "")),
                 Field.select("region", "Region", region_opts, value=str(await u.region() or "")),
             ]
@@ -152,7 +166,7 @@ class WarcraftLogsClassic(commands.Cog):
     async def wcl_api_panel(self, ctx):
         tokens = await self.bot.get_shared_api_tokens("warcraftlogs")
         return PanelSchema(
-            description="Geteilte API-Tokens (WarcraftLogs V2 Client).",
+            description=tr(ctx, "Geteilte API-Tokens (WarcraftLogs V2 Client).", "Shared API tokens (WarcraftLogs V2 Client)."),
             fields=[
                 Field.text("client_id", "Client ID", value=tokens.get("client_id", "")),
                 Field.text("client_secret", "Client Secret", value=tokens.get("client_secret", "")),
@@ -210,6 +224,8 @@ class WarcraftLogsClassic(commands.Cog):
             # There is no contextual locale for interactions, so we need to set it manually
             # (This is probably a bug in Red, remove this when it's fixed)
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
+
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
 
         userdata = await self.config.user(ctx.author).all()
 
@@ -301,7 +317,7 @@ class WarcraftLogsClassic(commands.Cog):
 
             if not item or item.get("id", 0) == 0:
                 # empty/missing item (e.g. no shoulders worn)
-                item_list.append(f"{slot_name}: <kein Item>")
+                item_list.append(f"{slot_name}: {tr_lang(lang, '<kein Item>', '<no item>')}")
                 continue
 
             rarity = self._get_rarity(item)

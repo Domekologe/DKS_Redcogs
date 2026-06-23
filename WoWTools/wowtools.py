@@ -40,6 +40,9 @@ from .dks_dashboard import (
     SubmitResult,
     register_dashboard,
     unregister_dashboard,
+    L,
+    tr,
+    tr_lang,
 )
 
 log = logging.getLogger("red.karlo-cogs.wowtools")
@@ -93,6 +96,7 @@ class WoWTools(
             "status_guild": [],
         }
         default_guild = {
+            "language": "de-DE",
             "region": None,
             "realm": None,
             "real_guild_name": None,
@@ -469,6 +473,7 @@ class WoWTools(
         region: str,
         emoji: Optional[discord.Emoji] = None,
     ):
+        """Set the guild whose raid progression is shown as the bot's status."""
         status_guild = [
             guild_name.replace("-", " ").lower(),
             realm,
@@ -526,10 +531,10 @@ class WoWTools(
             return WidgetData.kpi(value="–", label="WoW Auto-Reply")
 
     # --- Guild panel: auto-reply & channels ------------------------------ #
-    @dashboard_panel("settings", "WoWTools (Server)", mount="guild_settings", permission="guild_admin")
+    @dashboard_panel("settings", L("WoWTools (Server)", "WoWTools (Server)"), mount="guild_settings", permission="guild_admin")
     async def wowtools_guild_panel(self, ctx):
         g = self.config.guild(ctx.guild)
-        ch_opts = [{"value": "", "label": "— kein Kanal —"}] + [
+        ch_opts = [{"value": "", "label": "— no channel —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
         region_opts = [
@@ -541,27 +546,35 @@ class WoWTools(
         if not isinstance(dt, dict):
             dt = {}
         text_vars = [
-            {"token": "{guild_name}", "desc": "Gildenname"},
+            {"token": "{guild_name}", "desc": "Guild name"},
             {"token": "{region}", "desc": "Region"},
             {"token": "{realm}", "desc": "Realm"},
         ]
+        lang_opts = [
+            {"value": "de-DE", "label": "Deutsch"},
+            {"value": "en-US", "label": "English"},
+        ]
         return PanelSchema(
             fields=[
-                Field.switch("on_message", "Auto-Reply auf WoW-Begriffe", value=bool(await g.on_message())),
+                Field.select("language", L("Sprache", "Language"), lang_opts, value=str(await g.language() or "de-DE"), reload_on_change=True),
+                Field.switch("on_message", "Auto-reply to WoW terms", value=bool(await g.on_message())),
                 Field.select("region", "Region", region_opts, value=str(await g.region() or "")),
                 Field.text("realm", "Realm", value=str(await g.realm() or "")),
-                Field.text("real_guild_name", "Gildenname (echt)", value=str(await g.real_guild_name() or "")),
-                Field.select("guild_log_channel", "Log-Kanal", ch_opts, value=str(await g.guild_log_channel() or "")),
-                Field.select("scoreboard_channel", "Scoreboard-Kanal", ch_opts, value=str(await g.scoreboard_channel() or "")),
-                Field.select("countdown_channel", "Countdown-Kanal", ch_opts, value=str(await g.countdown_channel() or "")),
-                Field.textarea("welcome_note", "Willkommens-Text", value=str(dt.get("welcome_note", "")), variables=text_vars),
-                Field.textarea("status_note", "Status-Text", value=str(dt.get("status_note", "")), variables=text_vars),
+                Field.text("real_guild_name", "Guild name (actual)", value=str(await g.real_guild_name() or "")),
+                Field.select("guild_log_channel", "Log channel", ch_opts, value=str(await g.guild_log_channel() or "")),
+                Field.select("scoreboard_channel", "Scoreboard channel", ch_opts, value=str(await g.scoreboard_channel() or "")),
+                Field.select("countdown_channel", "Countdown channel", ch_opts, value=str(await g.countdown_channel() or "")),
+                Field.textarea("welcome_note", "Welcome text", value=str(dt.get("welcome_note", "")), variables=text_vars),
+                Field.textarea("status_note", "Status text", value=str(dt.get("status_note", "")), variables=text_vars),
             ]
         )
 
     @wowtools_guild_panel.on_submit
     async def _save_wowtools_guild(self, ctx, data):
         g = self.config.guild(ctx.guild)
+        if "language" in data:
+            v = str(data["language"]).strip()
+            await g.language.set(v if v.lower().startswith("en") else "de-DE")
         if "on_message" in data:
             await g.on_message.set(bool(data["on_message"]))
         if "region" in data:
@@ -594,12 +607,12 @@ class WoWTools(
         return SubmitResult.ok("Gespeichert.")
 
     # --- Global panel (bot owner): API tokens ---------------------------- #
-    @dashboard_panel("api_tokens", "WoW API-Tokens", scope="global", mount="bot_settings", permission="bot_owner")
+    @dashboard_panel("api_tokens", L("WoW API-Tokens", "WoW API Tokens"), scope="global", mount="bot_settings", permission="bot_owner")
     async def wowtools_api_panel(self, ctx):
         bliz = await self.bot.get_shared_api_tokens("blizzard")
         rio = await self.bot.get_shared_api_tokens("raiderio")
         return PanelSchema(
-            description="Geteilte API-Tokens (Blizzard Battle.net, Raider.IO).",
+            description=tr(ctx, "Geteilte API-Tokens (Blizzard Battle.net, Raider.IO).", "Shared API tokens (Blizzard Battle.net, Raider.IO)."),
             fields=[
                 Field.text("blizzard_client_id", "Blizzard Client ID", value=bliz.get("client_id", "")),
                 Field.text("blizzard_client_secret", "Blizzard Client Secret", value=bliz.get("client_secret", "")),
@@ -626,10 +639,10 @@ class WoWTools(
 
     # --- Guild list: scoreboard blacklist (character names) -------------- #
     @dashboard_list(
-        "scoreboard_blacklist", "Scoreboard-Blacklist", mount="guild_settings",
+        "scoreboard_blacklist", L("Scoreboard-Blacklist", "Scoreboard Blacklist"), mount="guild_settings",
         permission="guild_admin",
-        columns=[{"key": "name", "label": "Charakter"}],
-        description="Vom Scoreboard ausgeschlossene Charaktere. Hinzufügen per Befehl.",
+        columns=[{"key": "name", "label": "Character"}],
+        description=L("Vom Scoreboard ausgeschlossene Charaktere. Hinzufügen per Befehl.", "Characters excluded from the scoreboard. Add via command."),
     )
     async def wowtools_blacklist_list(self, ctx):
         names = await self.config.guild(ctx.guild).scoreboard_blacklist()

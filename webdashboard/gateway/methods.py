@@ -352,8 +352,9 @@ async def manifest_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     # guild at all (otherwise an info leak of other servers for logged-in non-members).
     if ctx.guild is not None and level < int(Level.GUILD_MEMBER):
         return {"contributions": []}
+    locale = getattr(ctx, "locale", None)
     visible = [
-        contrib.manifest()
+        contrib.manifest(locale)
         for contrib in gateway.registry.all()
         if level >= _level_value(contrib.meta.permission)
     ]

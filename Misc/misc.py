@@ -15,6 +15,6 @@ class Misc(commands.Cog):
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
-    @app_commands.command(name="ping")
+    @app_commands.command(name="ping", description="Check if the bot is responsive.")
     async def ping(self, interaction: discord.Interaction):
         await interaction.response.send_message("Pong!", ephemeral=True)

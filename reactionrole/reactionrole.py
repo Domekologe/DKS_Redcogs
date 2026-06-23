@@ -9,6 +9,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, dashboard_list, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr, tr_lang,
 )
 
 try:
@@ -78,7 +79,7 @@ class ReactionRole(commands.Cog):
             return
         self._dashboard_attached = self._attach_to_dashboard(cog)
 
-    @dashboard_widget("reactionrole_count", "ReactionRoles", size="sm", permission="guild_member")
+    @dashboard_widget("reactionrole_count", L("ReactionRoles", "ReactionRoles"), size="sm", permission="guild_member")
     async def reactionrole_count_widget(self, ctx):
         try:
             guild = getattr(ctx, "guild", None)
@@ -89,27 +90,27 @@ class ReactionRole(commands.Cog):
 
     # --- Guild panel: customize success messages ------------------------- #
     @dashboard_panel(
-        "templates", "ReactionRole-Nachrichten", mount="guild_settings", permission="guild_admin"
+        "templates", L("ReactionRole-Nachrichten", "ReactionRole Messages"), mount="guild_settings", permission="guild_admin"
     )
     async def reactionrole_templates_panel(self, ctx):
         t = await self.config.guild(ctx.guild).templates()
         variables = [
             {"token": "{id}", "desc": "ID"},
             {"token": "{emoji}", "desc": "Emoji"},
-            {"token": "{role}", "desc": "Rolle"},
+            {"token": "{role}", "desc": "Role"},
         ]
         lang = await self.config.guild(ctx.guild).language()
         return PanelSchema(
-            description="Sprache und Antworten beim Erstellen/Entfernen von ReactionRoles.",
+            description=tr(ctx, "Sprache und Antworten beim Erstellen/Entfernen von ReactionRoles.", "Language and responses when creating/removing ReactionRoles."),
             fields=[
                 Field.select(
-                    "language", "Sprache (dieses Modul)",
+                    "language", L("Sprache", "Language"),
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
-                    value=lang,
+                    value=str(lang), reload_on_change=True,
                 ),
-                Field.textarea("set_success", "Erstellt", value=t.get("set_success", ""),
+                Field.textarea("set_success", "Created", value=t.get("set_success", ""),
                                max_length=500, variables=variables),
-                Field.textarea("remove_success", "Entfernt", value=t.get("remove_success", ""),
+                Field.textarea("remove_success", "Removed", value=t.get("remove_success", ""),
                                max_length=500, variables=[{"token": "{id}", "desc": "ID"}]),
             ],
         )
@@ -129,26 +130,28 @@ class ReactionRole(commands.Cog):
 
     # --- Guild panel: create ReactionRole directly ----------------------- #
     @dashboard_panel(
-        "create_rr", "ReactionRole anlegen", mount="guild_settings", permission="guild_admin"
+        "create_rr", L("ReactionRole anlegen", "Create ReactionRole"), mount="guild_settings", permission="guild_admin"
     )
     async def reactionrole_create_panel(self, ctx):
-        ch_opts = [{"value": "", "label": "— Kanal wählen —"}] + [
+        ch_opts = [{"value": "", "label": "— Select channel —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
-        role_opts = [{"value": "", "label": "— Rolle wählen —"}] + [
+        role_opts = [{"value": "", "label": "— Select role —"}] + [
             {"value": str(r.id), "label": r.name}
             for r in ctx.guild.roles
             if not r.is_default() and not r.managed
         ]
         return PanelSchema(
-            description="Kanal, Nachrichten-ID, Emoji und Rolle angeben. Speichern legt die "
+            description=tr(ctx, "Kanal, Nachrichten-ID, Emoji und Rolle angeben. Speichern legt die "
                         "ReactionRole an und setzt die Reaktion an der Nachricht.",
+                        "Provide channel, message ID, emoji and role. Saving creates the "
+                        "ReactionRole and adds the reaction to the message."),
             submit_label="ReactionRole anlegen",
             fields=[
-                Field.select("channel", "Kanal", ch_opts, value=""),
-                Field.text("message_id", "Nachrichten-ID", value="", placeholder="123456789012345678"),
+                Field.select("channel", "Channel", ch_opts, value=""),
+                Field.text("message_id", "Message ID", value="", placeholder="123456789012345678"),
                 Field.text("emoji", "Emoji", value="", placeholder="👍 oder <:name:id>"),
-                Field.select("role", "Zuweisende Rolle", role_opts, value=""),
+                Field.select("role", "Role to assign", role_opts, value=""),
             ],
         )
 
@@ -194,12 +197,12 @@ class ReactionRole(commands.Cog):
 
     # --- Guild list: view/delete existing ReactionRoles ------------------ #
     @dashboard_list(
-        "rr_list", "Bestehende ReactionRoles", mount="guild_settings", permission="guild_admin",
+        "rr_list", L("Bestehende ReactionRoles", "Existing ReactionRoles"), mount="guild_settings", permission="guild_admin",
         columns=[
-            {"key": "channel", "label": "Kanal"},
-            {"key": "message", "label": "Nachricht-ID"},
+            {"key": "channel", "label": "Channel"},
+            {"key": "message", "label": "Message ID"},
             {"key": "emoji", "label": "Emoji"},
-            {"key": "role", "label": "Rolle"},
+            {"key": "role", "label": "Role"},
         ],
     )
     async def reactionrole_list(self, ctx):
@@ -252,9 +255,9 @@ class ReactionRole(commands.Cog):
             for r in ctx.guild.roles if r.name != "@everyone"
         ]
         return PanelSchema(
-            description="Zugewiesene Rolle ändern. Kanal/Nachricht/Emoji bleiben unverändert.",
+            description=tr(ctx, "Zugewiesene Rolle ändern. Kanal/Nachricht/Emoji bleiben unverändert.", "Change the assigned role. Channel/message/emoji stay unchanged."),
             fields=[
-                Field.select("role_id", "Zugewiesene Rolle", role_options,
+                Field.select("role_id", "Assigned role", role_options,
                              value=str(entry.get("role_id") or "")),
             ],
         )
@@ -291,7 +294,7 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # SET
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-set")
+    @commands.hybrid_command(name="reactionrole-set", description="Add a reaction role: map an emoji on a message to a role.")
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_set(
@@ -301,10 +304,11 @@ class ReactionRole(commands.Cog):
         emoji: str,
         role: discord.Role
     ):
+        lang = await self.config.guild(ctx.guild).language()
         try:
             message_id = int(message_id)
         except ValueError:
-            return await ctx.send("❌ Message-ID muss eine Zahl sein.")
+            return await ctx.send(tr_lang(lang, "❌ Message-ID muss eine Zahl sein.", "❌ Message ID must be a number."))
 
         guild = ctx.guild
         channel = ctx.channel
@@ -312,14 +316,14 @@ class ReactionRole(commands.Cog):
         try:
             message = await channel.fetch_message(message_id)
         except discord.NotFound:
-            return await ctx.send("❌ Message nicht gefunden.")
+            return await ctx.send(tr_lang(lang, "❌ Message nicht gefunden.", "❌ Message not found."))
         except discord.Forbidden:
-            return await ctx.send("❌ Keine Rechte, um die Nachricht zu lesen.")
+            return await ctx.send(tr_lang(lang, "❌ Keine Rechte, um die Nachricht zu lesen.", "❌ No permission to read that message."))
 
         try:
             await message.add_reaction(emoji)
         except discord.HTTPException:
-            return await ctx.send("❌ Ungültiges Emoji oder keine Rechte.")
+            return await ctx.send(tr_lang(lang, "❌ Ungültiges Emoji oder keine Rechte.", "❌ Invalid emoji or missing permissions."))
 
         rr_id = str(uuid.uuid4())[:8]
 
@@ -344,13 +348,14 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # REMOVE
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-remove")
+    @commands.hybrid_command(name="reactionrole-remove", description="Remove a reaction role by its ID.")
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_remove(self, ctx: commands.Context, rr_id: str):
+        lang = await self.config.guild(ctx.guild).language()
         async with self.config.guild(ctx.guild).reactionroles() as data:
             if rr_id not in data:
-                return await ctx.send("❌ Diese ReactionRole-ID existiert nicht.")
+                return await ctx.send(tr_lang(lang, "❌ Diese ReactionRole-ID existiert nicht.", "❌ That ReactionRole ID does not exist."))
 
             del data[rr_id]
 
@@ -360,21 +365,24 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # GET
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-get")
+    @commands.hybrid_command(name="reactionrole-get", description="List all configured reaction roles in this server.")
     @commands.guild_only()
     async def reactionrole_get(self, ctx: commands.Context):
+        lang = await self.config.guild(ctx.guild).language()
         data = await self.config.guild(ctx.guild).reactionroles()
 
         if not data:
-            return await ctx.send("ℹ️ Keine ReactionRoles vorhanden.")
+            return await ctx.send(tr_lang(lang, "ℹ️ Keine ReactionRoles vorhanden.", "ℹ️ No ReactionRoles configured."))
 
+        role_label = tr_lang(lang, "Rolle", "Role")
+        deleted_label = tr_lang(lang, "❌ gelöscht", "❌ deleted")
         lines = []
         for rr_id, entry in data.items():
             role = ctx.guild.get_role(entry["role_id"])
             lines.append(
                 f"**ID:** `{rr_id}` | "
                 f"Emoji: {entry['emoji']} | "
-                f"Rolle: {role.name if role else '❌ gelöscht'} | "
+                f"{role_label}: {role.name if role else deleted_label} | "
                 f"MessageID: `{entry['message_id']}`"
             )
 
@@ -429,15 +437,16 @@ class ReactionRole(commands.Cog):
                     await member.remove_roles(role, reason="ReactionRole")
                 break
 
-    @commands.hybrid_command(name="reactionrole-sync")
+    @commands.hybrid_command(name="reactionrole-sync", description="Re-apply reaction roles to users who already reacted.")
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_sync(self, ctx: commands.Context):
         guild = ctx.guild
+        lang = await self.config.guild(guild).language()
         data = await self.config.guild(guild).reactionroles()
 
         if not data:
-            return await ctx.send("ℹ️ Keine ReactionRoles zum Synchronisieren.")
+            return await ctx.send(tr_lang(lang, "ℹ️ Keine ReactionRoles zum Synchronisieren.", "ℹ️ No ReactionRoles to synchronize."))
 
         added = 0
 
@@ -479,8 +488,11 @@ class ReactionRole(commands.Cog):
                     added += 1
 
         await ctx.send(
-            f"🔄 Synchronisation abgeschlossen\n"
-            f"➕ Rollen neu gesetzt: **{added}**"
+            tr_lang(
+                lang,
+                f"🔄 Synchronisation abgeschlossen\n➕ Rollen neu gesetzt: **{added}**",
+                f"🔄 Synchronization complete\n➕ Roles re-applied: **{added}**",
+            )
         )
 
     async def _create_panel(

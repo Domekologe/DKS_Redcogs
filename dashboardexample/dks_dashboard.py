@@ -16,15 +16,23 @@ try:
     from webdashboard.integration.models import (  # noqa: F401
         Component,
         Field,
+        L,
         PageSchema,
         PanelSchema,
         SubmitResult,
         WidgetData,
+        tr,
     )
 
     DASHBOARD_AVAILABLE = True
 except Exception:  # webdashboard not installed
     DASHBOARD_AVAILABLE = False
+
+    def L(de, en=None):
+        return de
+
+    def tr(ctx, de, en):
+        return de
 
     def _noop_decorator(*_args, **_kwargs):
         def deco(func):

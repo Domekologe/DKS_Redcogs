@@ -12,6 +12,51 @@ from typing import Any, Dict, List, Optional, Union
 
 
 # --------------------------------------------------------------------------- #
+# Localization helpers (web UI language)
+# --------------------------------------------------------------------------- #
+# A dashboard text can be a plain str (same for everyone) or a per-locale dict
+# {"de-DE": "...", "en-US": "..."}. The gateway resolves it against the language
+# the user picked in the web UI (passed as ctx.locale).
+LocalizedStr = Union[str, Dict[str, str]]
+
+
+def resolve_locale(value: "LocalizedStr", locale: Optional[str] = None) -> str:
+    """Resolve a localized string against `locale` (e.g. 'de-DE' / 'en-US')."""
+    if not isinstance(value, dict):
+        return value
+    loc = str(locale or "en-US")
+    if loc in value:
+        return value[loc]
+    lang = loc.split("-")[0].lower()
+    for k, v in value.items():
+        if str(k).split("-")[0].lower() == lang:
+            return v
+    return next(iter(value.values()), "")
+
+
+def L(de: str, en: Optional[str] = None) -> "LocalizedStr":
+    """Build a localized dashboard text. ``L("Profil", "Profile")``; passing a
+    single argument keeps the same text for every language."""
+    if en is None:
+        return de
+    return {"de-DE": de, "en-US": en}
+
+
+def tr(ctx: Any, de: str, en: str) -> str:
+    """Inside a handler: pick text by the web UI language (``ctx.locale``)."""
+    loc = str(getattr(ctx, "locale", "") or "")
+    return en if loc.lower().startswith("en") else de
+
+
+def tr_lang(lang: Optional[str], de: str, en: str) -> str:
+    """Pick OUTPUT text by a per-guild language setting ('de-DE' / 'en-US').
+
+    For a cog's Discord output (responses, embeds, DMs). The cog stores a per-guild
+    ``language`` and passes it here: ``tr_lang(lang, "Deutsch", "English")``."""
+    return en if str(lang or "").lower().startswith("en") else de
+
+
+# --------------------------------------------------------------------------- #
 # Widgets (tiles on the central board)
 # --------------------------------------------------------------------------- #
 class WidgetKind(str, Enum):

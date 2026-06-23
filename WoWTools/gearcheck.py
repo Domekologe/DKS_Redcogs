@@ -10,6 +10,7 @@ from redbot.core import commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
 from .autocomplete import REALMS as AC_REALMS, REGIONS as AC_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -108,7 +109,7 @@ async def _fetch_equipment_blizzard(self, *, region: str, realm: str, character:
 
 @cog_i18n(_)
 class GearCheck(commands.Cog):
-    """Gearcheck über die Blizzard Profile API (Classic/Retail) inkl. iLvl-Detailabruf und 'Socket' Label."""
+    """Gear check via the Blizzard Profile API (Classic/Retail), incl. detailed iLvl fetch and 'Socket' label."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -226,10 +227,10 @@ class GearCheck(commands.Cog):
     @commands.hybrid_command(name="gearcheck")
     @app_commands.describe(
         region="Region (eu/us/kr)",
-        realm="Realm (mit Bindestrich statt Leerzeichen)",
-        character="Charaktername",
-        game="Classic (MoP Classic) oder Retail",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        realm="Realm (use a hyphen instead of spaces)",
+        character="Character name",
+        game="Classic (MoP Classic) or Retail",
+        locale="Locale (e.g. de or de_DE, en or en_US)",
     )
     @app_commands.choices(
         game=[
@@ -239,10 +240,11 @@ class GearCheck(commands.Cog):
     )
     async def gearcheck(self, ctx, region: Literal["eu", "us", "kr"], realm: str, character: str,
                     game: Literal["classic", "retail"] = "classic", locale: str = "en", private: bool = True):
-        """Zeigt das aktuell ausgerüstete Gear eines Charakters (inkl. iLvl-Fetch & Socket/Enchant-Label)."""
+        """Show a character's currently equipped gear (incl. iLvl fetch & socket/enchant labels)."""
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = region.lower()
 
         locale = _resolve_locale(locale)
@@ -259,7 +261,10 @@ class GearCheck(commands.Cog):
                 game=game.lower(), locale=locale
             )
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Ausrüstung: {e}", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abrufen der Ausrüstung: {e}", f"Failed to fetch gear: {e}"),
+                ephemeral=bool(ctx.interaction),
+            )
 
         equipped = data.get("equipped_items") or []
         if not equipped:
@@ -313,7 +318,7 @@ class GearCheck(commands.Cog):
                 break
 
         if hidden_count > 0:
-            lines.append(f"... und {hidden_count} weitere Einträge.")
+            lines.append(tr_lang(lang, f"... und {hidden_count} weitere Einträge.", f"... and {hidden_count} more entries."))
 
         embed = discord.Embed(
             title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}]",

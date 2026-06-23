@@ -22,11 +22,16 @@ from .models import (
     Component,
     Field,
     FieldType,
+    L,
+    LocalizedStr,
     PageSchema,
     PanelSchema,
     SubmitResult,
     WidgetData,
     WidgetKind,
+    resolve_locale,
+    tr,
+    tr_lang,
 )
 from .registry import Contribution, Registry
 from .dropin import (
@@ -51,6 +56,11 @@ __all__ = [
     "FieldType",
     "Component",
     "SubmitResult",
+    "L",
+    "LocalizedStr",
+    "tr",
+    "tr_lang",
+    "resolve_locale",
     "Registry",
     "Contribution",
     "register_dashboard",

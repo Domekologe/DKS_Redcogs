@@ -37,9 +37,25 @@ from .dks_dashboard import (
     PanelSchema,
     Field,
     SubmitResult,
+    L,
+    tr,
+    tr_lang,
     register_dashboard,
     unregister_dashboard,
 )
+
+# ---- Localization helpers (three of them, for three different audiences) -----
+#  • L("de", "en")          -> a NAME/description on a @dashboard_* decorator.
+#                              The gateway resolves it to the WEB UI language
+#                              (the DE/EN toggle), so tab titles follow the site.
+#  • tr(ctx, "de", "en")    -> text returned from a handler (PanelSchema
+#                              description, SubmitResult message, widget text).
+#                              Also follows the WEB UI language via ctx.locale.
+#  • tr_lang(lang, "de", "en") -> a cog's DISCORD output (command replies,
+#                              embeds, DMs). Uses a PER-GUILD `language` setting
+#                              (see the "language" field below), NOT the web UI.
+# Field LABELS stay English (one source of truth); only NAMES/descriptions and
+# Discord OUTPUT are localized.
 
 
 class DashboardTemplate(commands.Cog):
@@ -82,7 +98,7 @@ class DashboardTemplate(commands.Cog):
     # size: sm | md | lg ; refresh: auto-refresh in seconds (optional).
     # permission: authenticated | guild_member | guild_mod | guild_admin |
     #             guild_owner | bot_owner
-    @dashboard_widget("status", "Vorlage-Status", size="sm", refresh=60, permission="guild_member")
+    @dashboard_widget("status", L("Vorlage-Status", "Template status"), size="sm", refresh=60, permission="guild_member")
     async def status_widget(self, ctx):
         try:
             enabled = await self.config.guild(ctx.guild).enabled()
@@ -99,58 +115,60 @@ class DashboardTemplate(commands.Cog):
     # mount="guild_settings" -> appears on the server detail page under
     # „Einstellungen" (collapsible). permission="guild_admin" recommended.
     # order=10 -> tab order within the module (smaller = further left).
-    @dashboard_panel("settings", "Vorlage-Einstellungen", mount="guild_settings", permission="guild_admin", order=10)
+    @dashboard_panel("settings", L("Vorlage-Einstellungen", "Template settings"), mount="guild_settings", permission="guild_admin", order=10)
     async def settings_panel(self, ctx):
         cfg = await self.config.guild(ctx.guild).all()
 
         # Channel/role selection: the frontend has no dedicated channel/role
         # picker (yet) -> provide it as a SELECT with options.
-        channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+        channel_options = [{"value": "", "label": "— no channel —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
-        role_options = [{"value": "", "label": "— keine Rolle —"}] + [
+        role_options = [{"value": "", "label": "— no role —"}] + [
             {"value": str(r.id), "label": r.name}
             for r in ctx.guild.roles
             if not r.is_default()
         ]
 
         return PanelSchema(
-            description="Beispiel-Panel mit allen praktisch nutzbaren Feldtypen.",
-            submit_label="Speichern",
+            description=tr(ctx, "Beispiel-Panel mit allen praktisch nutzbaren Feldtypen.",
+                           "Example panel with all practically usable field types."),
+            # submit_label omitted on purpose: the button then uses the dashboard's
+            # own localized "Save" label and follows the website language.
             fields=[
                 # Language of this module (per guild) – DE/EN toggle.
                 # reload_on_change=True: on change it is saved immediately AND the panel
                 # is reloaded (handy when other fields depend on the selection).
                 Field.select(
-                    "language", "Sprache (dieses Modul)",
+                    "language", "Language (this module)",
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=cfg["language"],
                     reload_on_change=True,
                 ),
                 # Switch (bool)
-                Field.switch("enabled", "Modul aktiviert", value=bool(cfg["enabled"])),
+                Field.switch("enabled", "Module enabled", value=bool(cfg["enabled"])),
                 # Multi-line text with variable buttons (insert tokens at the cursor)
                 Field.textarea(
-                    "greeting", "Begrüßung", value=cfg["greeting"], max_length=500,
+                    "greeting", "Greeting", value=cfg["greeting"], max_length=500,
                     variables=[
-                        {"token": "{member}", "desc": "Mitglied"},
+                        {"token": "{member}", "desc": "Member"},
                         {"token": "{server}", "desc": "Server"},
                     ],
                 ),
                 # Number with bounds
-                Field.number("max_warns", "Max. Verwarnungen", value=cfg["max_warns"], min=0, max=10),
+                Field.number("max_warns", "Max. warnings", value=cfg["max_warns"], min=0, max=10),
                 # Selection (fixed options)
                 Field.select(
-                    "mode", "Modus",
-                    [{"value": "soft", "label": "Soft"}, {"value": "hard", "label": "Hart"}],
+                    "mode", "Mode",
+                    [{"value": "soft", "label": "Soft"}, {"value": "hard", "label": "Hard"}],
                     value=cfg["mode"],
                 ),
                 # Channel selection (as a select with channel options)
-                Field.select("log_channel", "Log-Kanal", channel_options, value=str(cfg["log_channel"] or "")),
+                Field.select("log_channel", "Log channel", channel_options, value=str(cfg["log_channel"] or "")),
                 # Role selection (as a select with role options)
-                Field.select("staff_role", "Staff-Rolle", role_options, value=str(cfg["staff_role"] or "")),
+                Field.select("staff_role", "Staff role", role_options, value=str(cfg["staff_role"] or "")),
                 # Simple text field
-                # Field.text("note", "Notiz", value=""),
+                # Field.text("note", "Note", value=""),
             ],
         )
 
@@ -168,8 +186,11 @@ class DashboardTemplate(commands.Cog):
             try:
                 await g.max_warns.set(max(0, min(10, int(data["max_warns"]))))
             except (TypeError, ValueError):
-                return SubmitResult.fail("Max. Verwarnungen muss eine Zahl sein.",
-                                         errors={"max_warns": "Ungültige Zahl"})
+                return SubmitResult.fail(
+                    tr(ctx, "Max. Verwarnungen muss eine Zahl sein.",
+                       "Max. warnings must be a number."),
+                    errors={"max_warns": tr(ctx, "Ungültige Zahl", "Invalid number")},
+                )
         if "mode" in data:
             await g.mode.set("hard" if data["mode"] == "hard" else "soft")
         # Channel/role IDs: empty field -> None, otherwise int.
@@ -179,18 +200,20 @@ class DashboardTemplate(commands.Cog):
         if "staff_role" in data:
             v = data["staff_role"]
             await g.staff_role.set(int(v) if v else None)
-        return SubmitResult.ok("Einstellungen gespeichert.")
+        # SubmitResult messages show in the WEB UI -> tr(ctx, ...).
+        return SubmitResult.ok(tr(ctx, "Einstellungen gespeichert.", "Settings saved."))
 
     # ---- 5) Global panel: bot owner only (e.g. API keys) --------------------
     # scope="global" + mount="bot_settings" -> appears on /settings under
     # „Modul-Einstellungen (global)". permission="bot_owner".
-    @dashboard_panel("api", "Vorlage API & Global", scope="global", mount="bot_settings", permission="bot_owner")
+    @dashboard_panel("api", L("Vorlage API & Global", "Template API & Global"), scope="global", mount="bot_settings", permission="bot_owner")
     async def global_panel(self, ctx):
         # ctx.guild is None here (global context) -> do NOT access ctx.guild.
         return PanelSchema(
-            description="Globale Einstellungen dieses Moduls (Owner-only).",
+            description=tr(ctx, "Globale Einstellungen dieses Moduls (Owner-only).",
+                           "Global settings of this module (owner-only)."),
             fields=[
-                Field.text("api_key", "API-Schlüssel", value=await self.config.api_key()),
+                Field.text("api_key", "API key", value=await self.config.api_key()),
                 Field.select(
                     "region", "Region",
                     [{"value": "eu", "label": "EU"}, {"value": "us", "label": "US"}],
@@ -205,16 +228,17 @@ class DashboardTemplate(commands.Cog):
             await self.config.api_key.set(str(data["api_key"]).strip())
         if "region" in data:
             await self.config.region.set("us" if data["region"] == "us" else "eu")
-        return SubmitResult.ok("Global gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Global gespeichert.", "Saved globally."))
 
     # ---- 6) List: create / view / edit / delete -----------------------------
     # @dashboard_list renders a table with actions. The method returns rows
     # [{"id": ..., "cells": {column_key: value}}]. Optional: @<list>.on_delete /
     # @<list>.edit_form (returns a PanelSchema) / @<list>.on_edit (saves).
     @dashboard_list(
-        "items", "Vorlage-Liste", mount="guild_settings", permission="guild_admin", order=30,
-        columns=[{"key": "name", "label": "Name"}, {"key": "note", "label": "Notiz"}],
-        description="Beispiel-Liste: anlegen (Tab links), bearbeiten und löschen.",
+        "items", L("Vorlage-Liste", "Template list"), mount="guild_settings", permission="guild_admin", order=30,
+        columns=[{"key": "name", "label": "Name"}, {"key": "note", "label": "Note"}],
+        description=L("Beispiel-Liste: anlegen (Tab links), bearbeiten und löschen.",
+                      "Example list: create (tab on the left), edit and delete."),
     )
     async def items_list(self, ctx):
         items = await self.config.guild(ctx.guild).items()
@@ -229,7 +253,7 @@ class DashboardTemplate(commands.Cog):
         entry = (items or {}).get(str(item_id)) or {}
         return PanelSchema(fields=[
             Field.text("name", "Name", value=str(entry.get("name", ""))),
-            Field.text("note", "Notiz", value=str(entry.get("note", ""))),
+            Field.text("note", "Note", value=str(entry.get("note", ""))),
         ])
 
     @items_list.on_edit
@@ -239,7 +263,7 @@ class DashboardTemplate(commands.Cog):
             entry["name"] = str(data.get("name", "")).strip() or entry.get("name", "")
             entry["note"] = str(data.get("note", ""))
             items[str(item_id)] = entry
-        return SubmitResult.ok("Eintrag aktualisiert.")
+        return SubmitResult.ok(tr(ctx, "Eintrag aktualisiert.", "Entry updated."))
 
     @items_list.on_delete
     async def items_delete(self, ctx, item_id):
@@ -247,18 +271,19 @@ class DashboardTemplate(commands.Cog):
             if str(item_id) in items:
                 del items[str(item_id)]
             else:
-                return SubmitResult.fail("Eintrag nicht gefunden.")
-        return SubmitResult.ok("Eintrag gelöscht.")
+                return SubmitResult.fail(tr(ctx, "Eintrag nicht gefunden.", "Entry not found."))
+        return SubmitResult.ok(tr(ctx, "Eintrag gelöscht.", "Entry deleted."))
 
     # Create panel (order=25 -> tab to the left of the list at order=30).
-    @dashboard_panel("item_add", "Eintrag anlegen", mount="guild_settings", permission="guild_admin", order=25)
+    @dashboard_panel("item_add", L("Eintrag anlegen", "Add entry"), mount="guild_settings", permission="guild_admin", order=25)
     async def item_add_panel(self, ctx):
         return PanelSchema(
-            description="Neuen Listen-Eintrag anlegen.",
-            submit_label="Anlegen",
+            description=tr(ctx, "Neuen Listen-Eintrag anlegen.", "Create a new list entry."),
+            # A custom button label is fine too — localize it with tr(ctx, ...).
+            submit_label=tr(ctx, "Anlegen", "Create"),
             fields=[
-                Field.text("name", "Name", value="", placeholder="z. B. Regel 1"),
-                Field.text("note", "Notiz", value=""),
+                Field.text("name", "Name", value="", placeholder="e.g. Rule 1"),
+                Field.text("note", "Note", value=""),
             ],
         )
 
@@ -267,14 +292,23 @@ class DashboardTemplate(commands.Cog):
         import uuid
         name = str(data.get("name", "")).strip()
         if not name:
-            return SubmitResult.fail("Bitte einen Namen angeben.")
+            return SubmitResult.fail(tr(ctx, "Bitte einen Namen angeben.", "Please provide a name."))
         async with self.config.guild(ctx.guild).items() as items:
             items[uuid.uuid4().hex[:8]] = {"name": name, "note": str(data.get("note", ""))}
-        return SubmitResult.ok("Eintrag angelegt.")
+        return SubmitResult.ok(tr(ctx, "Eintrag angelegt.", "Entry created."))
 
     # ---- Owner command for a quick check ------------------------------------
+    # Demonstrates tr_lang: this is DISCORD output, so it follows the cog's
+    # PER-GUILD `language` setting (chosen in the "Template settings" panel) —
+    # not the website language. Fetch the guild language, then wrap each string.
     @commands.is_owner()
     @commands.command(name="dashboardtemplate")
     async def _status(self, ctx: commands.Context) -> None:
+        """Show whether the WebDashboard cog is loaded (template self-check)."""
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         loaded = self.bot.get_cog("WebDashboard") is not None
-        await ctx.send(f"WebDashboard geladen: {loaded}. Panels: settings (guild), api (global).")
+        await ctx.send(tr_lang(
+            lang,
+            f"WebDashboard geladen: {loaded}. Panels: settings (Gilde), api (global).",
+            f"WebDashboard loaded: {loaded}. Panels: settings (guild), api (global).",
+        ))

@@ -11,6 +11,7 @@ from ..character_helpers import (
 )
 from ..functions.automations import RankSyncService
 from ..officer_notifications import send_rank_lock_officer_notice, send_protected_rank_officer_notice
+from ..dks_dashboard import tr_lang
 
 TEXTS: Dict[str, Dict[str, str]] = {
     "de-DE": {
@@ -193,23 +194,38 @@ class ManualVerificationDecisionView(discord.ui.View):
         char_name: str,
         selected_game: str,
         timeout: int = 172800,
+        lang: str = "de-DE",
     ) -> None:
         super().__init__(timeout=timeout)
         self.member = member
         self.member_role = member_role
         self.char_name = char_name
         self.selected_game = selected_game
+        self.lang = lang
         self.resolved = False
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.label == "Bestaetigen":
+                    child.label = tr_lang(lang, "Bestaetigen", "Approve")
+                elif child.label == "Ablehnen":
+                    child.label = tr_lang(lang, "Ablehnen", "Reject")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         actor = interaction.user
         if not isinstance(actor, discord.Member):
-            await interaction.response.send_message("Nur auf dem Server verfuegbar.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(self.lang, "Nur auf dem Server verfuegbar.", "Only available on the server."),
+                ephemeral=True,
+            )
             return False
         if actor.guild_permissions.manage_guild or actor.guild_permissions.administrator:
             return True
         await interaction.response.send_message(
-            "Keine Berechtigung. Du brauchst 'Server verwalten' oder Administrator.",
+            tr_lang(
+                self.lang,
+                "Keine Berechtigung. Du brauchst 'Server verwalten' oder Administrator.",
+                "No permission. You need 'Manage Server' or Administrator.",
+            ),
             ephemeral=True,
         )
         return False
@@ -231,22 +247,36 @@ class ManualVerificationDecisionView(discord.ui.View):
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _ = button
         if self.resolved:
-            await interaction.response.send_message("Bereits bearbeitet.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(self.lang, "Bereits bearbeitet.", "Already handled."), ephemeral=True
+            )
             return
         if self.member_role is None:
             await interaction.response.send_message(
-                "Keine Member-Rolle konfiguriert oder Rolle nicht gefunden.",
+                tr_lang(
+                    self.lang,
+                    "Keine Member-Rolle konfiguriert oder Rolle nicht gefunden.",
+                    "No member role configured or role not found.",
+                ),
                 ephemeral=True,
             )
             return
         if self.member_role in self.member.roles:
             await interaction.response.send_message(
-                f"{self.member.mention} hat die Member-Rolle bereits.",
+                tr_lang(
+                    self.lang,
+                    f"{self.member.mention} hat die Member-Rolle bereits.",
+                    f"{self.member.mention} already has the member role.",
+                ),
                 ephemeral=True,
             )
             await self._mark_resolved(
                 interaction,
-                f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle war bereits vorhanden).",
+                tr_lang(
+                    self.lang,
+                    f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle war bereits vorhanden).",
+                    f"\n✅ Manually approved by {interaction.user.mention} (role was already present).",
+                ),
             )
             return
         try:
@@ -256,32 +286,54 @@ class ManualVerificationDecisionView(discord.ui.View):
             )
         except Exception as exc:
             await interaction.response.send_message(
-                f"Rolle konnte nicht gesetzt werden: {exc}",
+                tr_lang(
+                    self.lang,
+                    f"Rolle konnte nicht gesetzt werden: {exc}",
+                    f"Role could not be assigned: {exc}",
+                ),
                 ephemeral=True,
             )
             return
         await interaction.response.send_message(
-            f"Manuell bestaetigt: {self.member.mention} hat jetzt {self.member_role.mention}.",
+            tr_lang(
+                self.lang,
+                f"Manuell bestaetigt: {self.member.mention} hat jetzt {self.member_role.mention}.",
+                f"Manually approved: {self.member.mention} now has {self.member_role.mention}.",
+            ),
             ephemeral=True,
         )
         await self._mark_resolved(
             interaction,
-            f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle {self.member_role.mention} gesetzt).",
+            tr_lang(
+                self.lang,
+                f"\n✅ Manuell bestaetigt von {interaction.user.mention} (Rolle {self.member_role.mention} gesetzt).",
+                f"\n✅ Manually approved by {interaction.user.mention} (role {self.member_role.mention} assigned).",
+            ),
         )
 
     @discord.ui.button(label="Ablehnen", style=discord.ButtonStyle.danger, emoji="❌")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _ = button
         if self.resolved:
-            await interaction.response.send_message("Bereits bearbeitet.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(self.lang, "Bereits bearbeitet.", "Already handled."), ephemeral=True
+            )
             return
         await interaction.response.send_message(
-            f"Manuelle Verifizierung fuer {self.member.mention} wurde abgelehnt.",
+            tr_lang(
+                self.lang,
+                f"Manuelle Verifizierung fuer {self.member.mention} wurde abgelehnt.",
+                f"Manual verification for {self.member.mention} was rejected.",
+            ),
             ephemeral=True,
         )
         await self._mark_resolved(
             interaction,
-            f"\n❌ Manuelle Verifizierung abgelehnt von {interaction.user.mention}.",
+            tr_lang(
+                self.lang,
+                f"\n❌ Manuelle Verifizierung abgelehnt von {interaction.user.mention}.",
+                f"\n❌ Manual verification rejected by {interaction.user.mention}.",
+            ),
         )
 
 
@@ -295,6 +347,7 @@ async def handle_new_member_onboarding(
     *,
     member_config: Optional[Any] = None,
 ) -> dict:
+    glang = str(guild_config.get("language") or "de-DE")
     destination: discord.abc.Messageable
     if onboarding_channel is not None:
         try:
@@ -305,7 +358,13 @@ async def handle_new_member_onboarding(
                 reason="Private onboarding thread",
             )
             await thread.add_user(member)
-            await thread.send(f"{member.mention} onboarding started. Use the buttons below.")
+            await thread.send(
+                tr_lang(
+                    glang,
+                    f"{member.mention} Onboarding gestartet. Nutze die Buttons unten.",
+                    f"{member.mention} onboarding started. Use the buttons below.",
+                )
+            )
             destination = thread
         except Exception:
             destination = await member.create_dm()
@@ -532,22 +591,37 @@ async def handle_new_member_onboarding(
         await destination.send(t["verified"].format(main=main_char, rank=rank))
         if manual_channel:
             await manual_channel.send(
-                f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
-                f"Spieltyp: {selected_game}. Automatisch verifiziert (Rang: {rank})."
+                tr_lang(
+                    glang,
+                    f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
+                    f"Spieltyp: {selected_game}. Automatisch verifiziert (Rang: {rank}).",
+                    f"User {member.display_name} ({member.name}) signed up as {main_char}. "
+                    f"Game type: {selected_game}. Automatically verified (rank: {rank}).",
+                )
             )
     elif sync_reason == "rank_locked":
         await destination.send(t["rank_locked_onboarding"])
         if manual_channel:
             await manual_channel.send(
-                f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
-                f"Ingame-Rang `{rank_title}` rank-locked (kein Bot-Rang)."
+                tr_lang(
+                    glang,
+                    f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                    f"Ingame-Rang `{rank_title}` rank-locked (kein Bot-Rang).",
+                    f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                    f"in-game rank `{rank_title}` is rank-locked (no bot role).",
+                )
             )
     elif sync_reason == "protected" and rank_title:
         await destination.send(t["protected_rank"])
         if manual_channel:
             await manual_channel.send(
-                f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
-                f"Ingame-Rang `{rank_title}` ist geschützt; Offiziere wurden im Rang-Schutz-Kanal benachrichtigt."
+                tr_lang(
+                    glang,
+                    f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                    f"Ingame-Rang `{rank_title}` ist geschützt; Offiziere wurden im Rang-Schutz-Kanal benachrichtigt.",
+                    f"User {member.display_name} ({member.name}): {main_char} ({selected_game}) — "
+                    f"in-game rank `{rank_title}` is protected; officers were notified in the rank-protection channel.",
+                )
             )
     else:
         template = guild_config.get("templates", {}).get(
@@ -557,19 +631,28 @@ async def handle_new_member_onboarding(
         if manual_channel:
             await manual_channel.send(template.format(username=member.display_name, charname=main_char))
             await manual_channel.send(
-                f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
-                f"Spieltyp: {selected_game}. Char nicht gefunden - manuelle Verifizierung noetig."
+                tr_lang(
+                    glang,
+                    f"User {member.display_name} ({member.name}) hat sich angemeldet als {main_char}. "
+                    f"Spieltyp: {selected_game}. Char nicht gefunden - manuelle Verifizierung noetig.",
+                    f"User {member.display_name} ({member.name}) signed up as {main_char}. "
+                    f"Game type: {selected_game}. Character not found - manual verification required.",
+                )
             )
             await manual_channel.send(
-                (
+                tr_lang(
+                    glang,
                     f"Bitte Entscheidung treffen fuer {member.mention} "
-                    f"(Char: `{main_char}`, Spieltyp: `{selected_game}`)."
+                    f"(Char: `{main_char}`, Spieltyp: `{selected_game}`).",
+                    f"Please make a decision for {member.mention} "
+                    f"(character: `{main_char}`, game type: `{selected_game}`).",
                 ),
                 view=ManualVerificationDecisionView(
                     member=member,
                     member_role=member_role,
                     char_name=main_char,
                     selected_game=selected_game,
+                    lang=glang,
                 ),
             )
         await destination.send(t["manual"])

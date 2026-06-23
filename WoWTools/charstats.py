@@ -17,6 +17,7 @@ from .autocomplete import (
     _API_HOST,
     _AUTH_HOST,
 )
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -104,7 +105,7 @@ def _collect_all_stats(js: dict) -> List[dict]:
 
 @cog_i18n(_)
 class CharStats(commands.Cog):
-    """Zeigt Highlights aus den Achievement-Statistiken (Kills, Tode, Quests, Instanzen, Rekorde)."""
+    """Show highlights from the achievement statistics (kills, deaths, quests, instances, records)."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -112,10 +113,10 @@ class CharStats(commands.Cog):
     @commands.hybrid_command(name="charstats")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
-        realm="Realm (mit Bindestrich statt Leerzeichen)",
-        character="Charaktername",
-        game="Classic (MoP Classic) oder Retail",
-        #locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        realm="Realm (use a hyphen instead of spaces)",
+        character="Character name",
+        game="Classic (MoP Classic) or Retail",
+        #locale="Locale (e.g. de or de_DE, en or en_US)",
     )
     @app_commands.choices(
         game=[
@@ -135,6 +136,7 @@ class CharStats(commands.Cog):
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = region.lower()
         #locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")
@@ -148,7 +150,10 @@ class CharStats(commands.Cog):
         try:
             js = await _fetch_achv_statistics(self, region=region, realm=realm_slug, character=char_slug, game=game)#, locale=locale)
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Achievements-Statistiken: {e}", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abrufen der Achievements-Statistiken: {e}", f"Failed to fetch achievement statistics: {e}"),
+                ephemeral=bool(ctx.interaction),
+            )
 
         all_stats = _collect_all_stats(js)
 
@@ -210,7 +215,7 @@ class CharStats(commands.Cog):
 
 
         if not lines:
-            lines = ["Keine passenden Statistiken gefunden."]
+            lines = [tr_lang(lang, "Keine passenden Statistiken gefunden.", "No matching statistics found.")]
 
         embed = discord.Embed(
             title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}]",

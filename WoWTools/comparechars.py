@@ -17,6 +17,7 @@ from .autocomplete import (
     _API_HOST,
     _AUTH_HOST,
 )
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -342,7 +343,7 @@ def _build_charstats_compare_lines_en(js1_en: dict, js2_en: dict) -> list[str]:
 # ----------------- Cog -----------------
 @cog_i18n(_)
 class CompareChars(commands.Cog):
-    """Vergleicht zwei Charaktere: Gear (Itemlevel je Slot) ODER Charakterwerte."""
+    """Compare two characters: gear (item level per slot) OR character stats."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -350,13 +351,13 @@ class CompareChars(commands.Cog):
     @commands.hybrid_command(name="comparechars")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
-        server_char1="Realm/Server von Charakter 1",
-        server_char2="Realm/Server von Charakter 2",
-        name_char1="Name von Charakter 1",
-        name_char2="Name von Charakter 2",
-        type="Vergleichstyp: 'gear' oder 'info'",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
-        private="Antwort nur für dich sichtbar (ephemeral)",
+        server_char1="Realm/server of character 1",
+        server_char2="Realm/server of character 2",
+        name_char1="Name of character 1",
+        name_char2="Name of character 2",
+        type="Comparison type: 'gear' or 'info'",
+        locale="Locale (e.g. de or de_DE, en or en_US)",
+        private="Show the response only to you (ephemeral)",
     )
     @app_commands.choices(
         game=[
@@ -385,6 +386,7 @@ class CompareChars(commands.Cog):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = (region or "").lower()
         locale = _resolve_locale(locale)
 
@@ -439,7 +441,10 @@ class CompareChars(commands.Cog):
                 title_mid = "CharStats (en_US)"
 
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abruf: {e}", ephemeral=(private if ctx.interaction else False))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abruf: {e}", f"Failed to fetch data: {e}"),
+                ephemeral=(private if ctx.interaction else False),
+            )
 
         # Build embed
         title = f"{name_char1.title()} @ {server_char1.title()}  ⟷  {name_char2.title()} @ {server_char2.title()}"

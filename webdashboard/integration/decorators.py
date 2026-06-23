@@ -42,13 +42,16 @@ class _ContributionMeta:
         self.edit_handler: Optional[Callable] = None
         self.edit_form_handler: Optional[Callable] = None
 
-    def manifest(self) -> dict:
+    def manifest(self, locale: Optional[str] = None) -> dict:
+        # name/description may be localized (str or {locale: str}); resolve against
+        # the web UI language so the tab title + module description follow the toggle.
+        from .models import resolve_locale
         return {
             "kind": self.kind,
             "identifier": self.identifier,
-            "name": self.name,
+            "name": resolve_locale(self.name, locale),
             "permission": self.permission,
-            "description": self.description,
+            "description": resolve_locale(self.description, locale) if self.description is not None else None,
             "icon": self.icon,
             **self.extra,
         }

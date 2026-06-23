@@ -6,6 +6,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr,
 )
 
 try:
@@ -99,7 +100,7 @@ class EventMessages(commands.Cog):
             return
         self._dashboard_attached = self._attach_to_dashboard(cog)
 
-    @dashboard_widget("eventmessages_enabled", "Aktive Events", size="sm", permission="guild_member")
+    @dashboard_widget("eventmessages_enabled", L("Aktive Events", "Active Events"), size="sm", permission="guild_member")
     async def eventmessages_enabled_widget(self, ctx):
         try:
             guild = getattr(ctx, "guild", None)
@@ -111,17 +112,17 @@ class EventMessages(commands.Cog):
 
     # --- Guild panel: enable per event, channel & message ------------ #
     @dashboard_panel(
-        "events", "Event-Nachrichten", mount="guild_settings", permission="guild_admin"
+        "events", L("Event-Nachrichten", "Event Messages"), mount="guild_settings", permission="guild_admin"
     )
     async def eventmessages_panel(self, ctx):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
 
         labels = {
-            "join": "Beitritt", "leave": "Verlassen", "kick": "Kick", "ban": "Ban",
-            "unban": "Entbann", "timeout": "Timeout", "timeout_end": "Timeout-Ende",
+            "join": "Join", "leave": "Leave", "kick": "Kick", "ban": "Ban",
+            "unban": "Unban", "timeout": "Timeout", "timeout_end": "Timeout end",
         }
-        event_choices = [{"value": "0", "label": "-- Ereignis wählen --"}]
+        event_choices = [{"value": "0", "label": "-- Select event --"}]
         for ev in EVENTS:
             event_choices.append({"value": ev, "label": labels.get(ev, ev)})
 
@@ -134,7 +135,7 @@ class EventMessages(commands.Cog):
             self._selected_event[(guild_id, user_id)] = "0"
 
         fields = [
-            Field.select("event_id", "Ereignis", event_choices, value=selection, reload_on_change=True)
+            Field.select("event_id", "Event", event_choices, value=selection, reload_on_change=True)
         ]
 
         if selection != "0":
@@ -149,23 +150,23 @@ class EventMessages(commands.Cog):
             name = labels.get(selection, selection)
 
             variables = [
-                {"token": "{display_name}", "desc": "Anzeigename"},
+                {"token": "{display_name}", "desc": "Display name"},
                 {"token": "{username}", "desc": "Username"},
                 {"token": "{moderator}", "desc": "Moderator"},
-                {"token": "{reason}", "desc": "Grund"},
-                {"token": "{duration}", "desc": "Dauer"},
+                {"token": "{reason}", "desc": "Reason"},
+                {"token": "{duration}", "desc": "Duration"},
             ]
-            channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+            channel_options = [{"value": "", "label": "— no channel —"}] + [
                 {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
             ]
 
             fields.extend([
-                Field.switch("enabled", "Aktiviert", value=bool(cfg.get("enabled", False))),
-                Field.select("channel", "Log-Kanal", channel_options, value=str(cfg.get("channel") or "")),
-                Field.textarea("tmpl", "Nachrichtenvorlage", value=templates.get(selection, ""), max_length=1000, variables=variables)
+                Field.switch("enabled", "Enabled", value=bool(cfg.get("enabled", False))),
+                Field.select("channel", "Log channel", channel_options, value=str(cfg.get("channel") or "")),
+                Field.textarea("tmpl", "Message template", value=templates.get(selection, ""), max_length=1000, variables=variables)
             ])
 
-        return PanelSchema(description="Pro Event: aktivieren, Kanal wählen und Nachricht festlegen.", fields=fields)
+        return PanelSchema(description=tr(ctx, "Pro Event: aktivieren, Kanal wählen und Nachricht festlegen.", "Per event: enable, choose a channel and set the message."), fields=fields)
 
     @eventmessages_panel.on_submit
     async def _save_eventmessages(self, ctx, data):
@@ -229,10 +230,10 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-enabled",
-        description="Aktiviere oder deaktiviere ein Event."
+        description="Enable or disable an event."
     )
     @app_commands.describe(
-        event="Welches Event?",
+        event="Which event?",
         value="true/false"
     )
     @app_commands.autocomplete(event=event_autocomplete)
@@ -271,11 +272,11 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-channel",
-        description="Setzt den Channel für ein Event."
+        description="Sets the channel for an event."
     )
     @app_commands.describe(
-        event="Welches Event?",
-        channel="Channel für Benachrichtigungen"
+        event="Which event?",
+        channel="Channel for notifications"
     )
     @app_commands.autocomplete(event=event_autocomplete)
     async def em_channel(
@@ -309,7 +310,7 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-status",
-        description="Zeigt den Status aller Events."
+        description="Shows the status of all events."
     )
     async def em_status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

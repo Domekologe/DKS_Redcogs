@@ -15,6 +15,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, dashboard_list, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr, tr_lang,
 )
 
 try:
@@ -35,9 +36,10 @@ except Exception:
 
 
 DEFAULT_GUILD = {
+    "language": "de-DE",  # per-guild language of this cog (de-DE | en-US)
     "notifications": {
         # "<channel_id>": {"enabled": true, "text": "..."}
-    }
+    },
 }
 
 
@@ -54,7 +56,7 @@ def _is_voiceish(channel: discord.abc.GuildChannel) -> bool:
 
 
 class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text"):
-    def __init__(self, default_text: str = "") -> None:
+    def __init__(self, default_text: str = "", lang: str = "de-DE") -> None:
         super().__init__()
         self.value: Optional[str] = None
         self.text = discord.ui.TextInput(
@@ -63,7 +65,11 @@ class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text
             required=True,
             max_length=1900,
             default=default_text[:1900],
-            placeholder="Hi <Username>! Du bist in <Channelname> gejoint ...",
+            placeholder=tr_lang(
+                lang,
+                "Hi <Username>! Du bist in <Channelname> gejoint ...",
+                "Hi <Username>! You joined <Channelname> ...",
+            ),
         )
         self.add_item(self.text)
 
@@ -74,15 +80,16 @@ class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text
 
 
 class JoinNotificationSetupView(discord.ui.View):
-    def __init__(self, cog: "ChannelJoinNotification", guild: discord.Guild, user_id: int) -> None:
+    def __init__(self, cog: "ChannelJoinNotification", guild: discord.Guild, user_id: int, lang: str = "de-DE") -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.user_id = user_id
+        self.lang = lang
         self.channel_id: Optional[int] = None
 
         self.channel_select = discord.ui.ChannelSelect(
-            placeholder="Channel auswählen…",
+            placeholder=tr_lang(lang, "Channel auswählen…", "Select a channel…"),
             channel_types=[discord.ChannelType.voice],
             min_values=1,
             max_values=1,
@@ -90,19 +97,27 @@ class JoinNotificationSetupView(discord.ui.View):
         self.channel_select.callback = self._on_select  # type: ignore[method-assign]
         self.add_item(self.channel_select)
 
-        self.enable_btn = discord.ui.Button(label="Aktivieren", style=discord.ButtonStyle.success)
+        self.enable_btn = discord.ui.Button(label=tr_lang(lang, "Aktivieren", "Enable"), style=discord.ButtonStyle.success)
         self.enable_btn.callback = self._on_enable  # type: ignore[method-assign]
-        self.disable_btn = discord.ui.Button(label="Deaktivieren", style=discord.ButtonStyle.danger)
+        self.disable_btn = discord.ui.Button(label=tr_lang(lang, "Deaktivieren", "Disable"), style=discord.ButtonStyle.danger)
         self.disable_btn.callback = self._on_disable  # type: ignore[method-assign]
 
         # Step 2 UI is only added after a channel is selected.
 
+    async def _lang(self) -> str:
+        return await self.cog.config.guild(self.guild).language()
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        lang = await self._lang()
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("Dieses Menü ist nicht für dich.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Dieses Menü ist nicht für dich.", "This menu is not for you."), ephemeral=True
+            )
             return False
         if interaction.guild is None or interaction.guild.id != self.guild.id:
-            await interaction.response.send_message("Nur auf dem Server nutzbar.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Nur auf dem Server nutzbar.", "Only usable within the server."), ephemeral=True
+            )
             return False
         return True
 
@@ -125,26 +140,41 @@ class JoinNotificationSetupView(discord.ui.View):
         await self.cog.config.guild(self.guild).notifications.set(data)
 
     async def _render(self, *, channel: Optional[discord.abc.GuildChannel]) -> str:
+        lang = await self._lang()
         if channel is None or self.channel_id is None:
-            return (
+            return tr_lang(
+                lang,
                 "**Join Notification Setup**\n"
                 "Wähle zuerst einen Voice-Channel.\n\n"
                 "Platzhalter im Text:\n"
                 "- `<Username>`\n"
-                "- `<Channelname>`"
+                "- `<Channelname>`",
+                "**Join Notification Setup**\n"
+                "Pick a voice channel first.\n\n"
+                "Text placeholders:\n"
+                "- `<Username>`\n"
+                "- `<Channelname>`",
             )
         enabled, text = await self._load_channel_state(self.channel_id)
-        status = "✅ aktiv" if enabled else "⛔ deaktiviert"
-        preview = text.strip() or "(kein Text gesetzt)"
+        status = tr_lang(lang, "✅ aktiv", "✅ active") if enabled else tr_lang(lang, "⛔ deaktiviert", "⛔ disabled")
+        preview = text.strip() or tr_lang(lang, "(kein Text gesetzt)", "(no text set)")
         preview = preview[:220] + ("…" if len(preview) > 220 else "")
-        return (
+        return tr_lang(
+            lang,
             f"**Join Notification Setup**\n"
             f"- Channel: {channel.mention}\n"
             f"- Status: **{status}**\n"
             f"- Text (Vorschau): `{preview}`\n\n"
             "Aktion wählen:\n"
             "- **Aktivieren** → Text eingeben/ändern\n"
-            "- **Deaktivieren** → wird nicht mehr gesendet"
+            "- **Deaktivieren** → wird nicht mehr gesendet",
+            f"**Join Notification Setup**\n"
+            f"- Channel: {channel.mention}\n"
+            f"- Status: **{status}**\n"
+            f"- Text (preview): `{preview}`\n\n"
+            "Choose an action:\n"
+            "- **Enable** → enter/change text\n"
+            "- **Disable** → no longer sent",
         )
 
     async def _ensure_step2(self) -> None:
@@ -157,22 +187,29 @@ class JoinNotificationSetupView(discord.ui.View):
     async def _on_select(self, interaction: discord.Interaction) -> None:
         channel = self.channel_select.values[0] if self.channel_select.values else None
         if channel is None:
-            await interaction.response.send_message("Bitte einen Channel auswählen.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(await self._lang(), "Bitte einen Channel auswählen.", "Please select a channel."), ephemeral=True
+            )
             return
         self.channel_id = channel.id
         await self._ensure_step2()
         await interaction.response.edit_message(content=await self._render(channel=channel), view=self)
 
     async def _on_enable(self, interaction: discord.Interaction) -> None:
+        lang = await self._lang()
         if self.channel_id is None:
-            await interaction.response.send_message("Bitte zuerst einen Channel auswählen.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Bitte zuerst einen Channel auswählen.", "Please select a channel first."), ephemeral=True
+            )
             return
         channel = self.guild.get_channel(self.channel_id)
         if channel is None:
-            await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Channel nicht gefunden.", "Channel not found."), ephemeral=True
+            )
             return
         _, existing_text = await self._load_channel_state(self.channel_id)
-        modal = _JoinNotificationTextModal(default_text=existing_text)
+        modal = _JoinNotificationTextModal(default_text=existing_text, lang=lang)
         await interaction.response.send_modal(modal)
         await modal.wait()
         if not modal.value:
@@ -189,12 +226,17 @@ class JoinNotificationSetupView(discord.ui.View):
             pass
 
     async def _on_disable(self, interaction: discord.Interaction) -> None:
+        lang = await self._lang()
         if self.channel_id is None:
-            await interaction.response.send_message("Bitte zuerst einen Channel auswählen.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Bitte zuerst einen Channel auswählen.", "Please select a channel first."), ephemeral=True
+            )
             return
         channel = self.guild.get_channel(self.channel_id)
         if channel is None:
-            await interaction.response.send_message("Channel nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(lang, "Channel nicht gefunden.", "Channel not found."), ephemeral=True
+            )
             return
         await self._set_channel_state(self.channel_id, enabled=False)
         await interaction.response.edit_message(content=await self._render(channel=channel), view=self)
@@ -215,14 +257,18 @@ class ChannelJoinNotification(commands.Cog):
     # --------------------
     @app_commands.command(
         name="join-notification",
-        description="Setup: DM-Benachrichtigung beim Join bestimmter Voice-/Stage-Channels.",
+        description="Setup: DM notification when users join certain voice/stage channels.",
     )
     @app_commands.guild_only()
     async def join_notification(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Nur auf einem Server nutzbar.", ephemeral=True)
+            lang = await self.config.guild(interaction.guild).language() if interaction.guild else "de-DE"
+            await interaction.response.send_message(
+                tr_lang(lang, "Nur auf einem Server nutzbar.", "Only usable within a server."), ephemeral=True
+            )
             return
-        view = JoinNotificationSetupView(self, interaction.guild, interaction.user.id)
+        lang = await self.config.guild(interaction.guild).language()
+        view = JoinNotificationSetupView(self, interaction.guild, interaction.user.id, lang=lang)
         await interaction.response.send_message(await view._render(channel=None), ephemeral=True, view=view)
 
     # --------------------
@@ -303,7 +349,7 @@ class ChannelJoinNotification(commands.Cog):
             return
         self._dashboard_attached = self._attach_to_dashboard(cog)
 
-    @dashboard_widget("cjn_configured_channels", "Join-Notify Channels", size="sm", permission="guild_member")
+    @dashboard_widget("cjn_configured_channels", L("Join-Notify Channels", "Join-Notify Channels"), size="sm", permission="guild_member")
     async def cjn_configured_channels_widget(self, ctx):
         try:
             data = await self.config.guild(ctx.guild).notifications()
@@ -319,7 +365,7 @@ class ChannelJoinNotification(commands.Cog):
 
     # --- Guild panel: enable DM per voice channel + text ---------------- #
     @dashboard_panel(
-        "notifications", "Join-Benachrichtigungen", mount="guild_settings", permission="guild_admin"
+        "notifications", L("Join-Benachrichtigungen", "Join Notifications"), mount="guild_settings", permission="guild_admin"
     )
     async def cjn_panel(self, ctx):
         guild_id = ctx.guild.id
@@ -329,7 +375,7 @@ class ChannelJoinNotification(commands.Cog):
         voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
         voice = sorted(voice, key=lambda c: (c.position or 0, c.name.lower()))
 
-        voice_choices = [{"value": "0", "label": "-- Sprachkanal wählen --"}]
+        voice_choices = [{"value": "0", "label": "-- Select voice channel --"}]
         for c in voice:
             voice_choices.append({"value": str(c.id), "label": f"🔊 {c.name} ({c.id})"})
 
@@ -341,8 +387,14 @@ class ChannelJoinNotification(commands.Cog):
             selection = "0"
             self._selected_channel[(guild_id, user_id)] = "0"
 
+        lang = await self.config.guild(ctx.guild).language()
         fields = [
-            Field.select("channel_id", "Sprachkanal", voice_choices, value=selection, reload_on_change=True)
+            Field.select(
+                "language", L("Sprache", "Language"),
+                [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                value=str(lang), reload_on_change=True,
+            ),
+            Field.select("channel_id", "Voice channel", voice_choices, value=selection, reload_on_change=True)
         ]
 
         if selection != "0":
@@ -352,14 +404,14 @@ class ChannelJoinNotification(commands.Cog):
             entry = data.get(selection, {}) if isinstance(data.get(selection), dict) else {}
 
             variables = [
-                {"token": "<Username>", "desc": "Nutzer"},
-                {"token": "<Channelname>", "desc": "Kanal"},
+                {"token": "<Username>", "desc": "User"},
+                {"token": "<Channelname>", "desc": "Channel"},
             ]
 
             fields.extend([
-                Field.switch("enabled", "Aktiviert", value=bool(entry.get("enabled", False))),
-                Field.textarea("text", "DM-Text", value=str(entry.get("text", "")), max_length=1500, variables=variables),
-                Field.switch("delete_entry", "Eintrag komplett löschen/zurücksetzen", value=False)
+                Field.switch("enabled", "Enabled", value=bool(entry.get("enabled", False))),
+                Field.textarea("text", "DM text", value=str(entry.get("text", "")), max_length=1500, variables=variables),
+                Field.switch("delete_entry", "Delete/reset entry completely", value=False)
             ])
 
         return PanelSchema(description="Pro Sprachkanal: DM beim Beitritt aktivieren und Text festlegen.", fields=fields)
@@ -368,6 +420,11 @@ class ChannelJoinNotification(commands.Cog):
     async def _save_cjn(self, ctx, data):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
+
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set(
+                "en-US" if data["language"] == "en-US" else "de-DE"
+            )
 
         channel_id = str(data.get("channel_id", "0")).strip()
         prev_sel = self._selected_channel.get((guild_id, user_id), "0")
@@ -402,12 +459,12 @@ class ChannelJoinNotification(commands.Cog):
 
     # --- Guild list: configured join notifications ---------------------- #
     @dashboard_list(
-        "cjn_list", "Konfigurierte Benachrichtigungen", mount="guild_settings",
+        "cjn_list", L("Konfigurierte Benachrichtigungen", "Configured Notifications"), mount="guild_settings",
         permission="guild_admin",
         columns=[
-            {"key": "channel", "label": "Sprachkanal"},
-            {"key": "enabled", "label": "Aktiv"},
-            {"key": "text", "label": "DM-Text"},
+            {"key": "channel", "label": "Voice channel"},
+            {"key": "enabled", "label": "Active"},
+            {"key": "text", "label": "DM text"},
         ],
     )
     async def cjn_list(self, ctx):
@@ -440,10 +497,10 @@ class ChannelJoinNotification(commands.Cog):
             {"token": "<Channelname>", "desc": "Kanal"},
         ]
         return PanelSchema(
-            description="Benachrichtigung für diesen Sprachkanal bearbeiten.",
+            description=tr(ctx, "Benachrichtigung für diesen Sprachkanal bearbeiten.", "Edit the notification for this voice channel."),
             fields=[
-                Field.switch("enabled", "Aktiv", value=bool(entry.get("enabled"))),
-                Field.textarea("text", "DM-Text", value=str(entry.get("text", "")),
+                Field.switch("enabled", "Active", value=bool(entry.get("enabled"))),
+                Field.textarea("text", "DM text", value=str(entry.get("text", "")),
                                max_length=1500, variables=variables),
             ],
         )

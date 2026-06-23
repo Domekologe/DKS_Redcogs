@@ -127,15 +127,14 @@ class WebDashboard(commands.Cog):
     @commands.is_owner()
     @commands.group(name="dksdashboard", aliases=["dksdash"])
     async def dashboard_group(self, ctx: commands.Context) -> None:
-        """Verwaltung des DKS Web-Dashboards.
+        """Manage the DKS web dashboard.
 
-        Hinweis: Eigener Befehlsname, damit es parallel zu AAA3As `[p]dashboard`
-        laufen kann.
+        Note: Uses its own command name so it can run alongside AAA3A's `[p]dashboard`.
         """
 
     @dashboard_group.command(name="status")
     async def dashboard_status(self, ctx: commands.Context) -> None:
-        """Zeigt den aktuellen Status des Gateways."""
+        """Show the current status of the gateway."""
         running = self.gateway is not None
         host = await self.config.host()
         port = await self.config.port()
@@ -150,7 +149,7 @@ class WebDashboard(commands.Cog):
 
     @dashboard_group.command(name="start")
     async def dashboard_start(self, ctx: commands.Context) -> None:
-        """Startet das Gateway."""
+        """Start the gateway."""
         try:
             await self._start_gateway()
         except Exception as e:
@@ -160,16 +159,16 @@ class WebDashboard(commands.Cog):
 
     @dashboard_group.command(name="stop")
     async def dashboard_stop(self, ctx: commands.Context) -> None:
-        """Stoppt das Gateway."""
+        """Stop the gateway."""
         await self._stop_gateway()
         await ctx.send(_("Gateway gestoppt."))
 
     @dashboard_group.command(name="bind")
     async def dashboard_bind(self, ctx: commands.Context, host: str, port: int) -> None:
-        """Setzt Host und Port (Neustart nötig).
+        """Set the host and port (restart required).
 
-        Hinweis: Aus Sicherheitsgründen sollte das Gateway nur auf 127.0.0.1 lauschen
-        und extern über einen Reverse-Proxy/Tunnel erreichbar gemacht werden.
+        Note: For security reasons the gateway should listen only on 127.0.0.1
+        and be exposed externally through a reverse proxy or tunnel.
         """
         await self.config.host.set(host)
         await self.config.port.set(port)
@@ -177,7 +176,7 @@ class WebDashboard(commands.Cog):
 
     @dashboard_group.command(name="token")
     async def dashboard_token(self, ctx: commands.Context) -> None:
-        """Sendet das Gateway-Token per DM (für die Web-App-Konfiguration)."""
+        """Send the gateway token via DM (for configuring the web app)."""
         token = await self.config.token()
         if not token:
             token = secrets.token_urlsafe(48)
@@ -190,7 +189,7 @@ class WebDashboard(commands.Cog):
 
     @dashboard_group.command(name="regen")
     async def dashboard_regen(self, ctx: commands.Context) -> None:
-        """Erzeugt ein neues Gateway-Token (Web-App muss aktualisiert werden)."""
+        """Generate a new gateway token (the web app must be updated)."""
         token = secrets.token_urlsafe(48)
         await self.config.token.set(token)
         await self._stop_gateway()

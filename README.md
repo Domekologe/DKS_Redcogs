@@ -48,10 +48,18 @@ Jeder Cog erscheint als **ein Modul mit Tabs** auf der Server-Detailseite.
 | Misc | Info 0.0.1 | Contains only a ping :D Was my first Cog to test | `ping` | Domekologe |
 | neko | Release 0.0.1 | Connects to Nekos.best API | `neko`, `neko-cat` | Domekologe |
 | nekoapi | Release 0.0.1 | Connects to Nekosapi.com (incl. NSFW ratings) | `nekoapi`, `nekoapi-rating` | Domekologe |
-| reactionrole | Release 0.0.1 | Feature-rich Reaction Roles cog with Dashboard support. | See `help RR` | Domekologe |
+| reactionrole | Release 0.0.1 | Feature-rich Reaction Roles cog with Dashboard support. | `reactionrole-set`, `reactionrole-remove`, `reactionrole-get`, `reactionrole-sync` | Domekologe |
+| adminprotocol | Release 0.0.1 | Detailed admin & activity logging into configurable channels (fully web-configured). | *Listeners only (no commands)* | Domekologe |
+| channeljoinnotification | Release 0.0.1 | DMs users with a customizable text when they join configured voice channels. | `/join-notification` | Domekologe |
 | WarcraftlogsClassic | Beta 0.2.2 | Information from Warcraftlogs Classic | `warcraftlogs` | Karlo (Original) / Domekologe |
 | WoWTools | Beta 0.1.2 | Get Ingame Stats, Information, etc from WoW Characters | `charinfo`, `charstats`, `comparechars`, `cvar`, `gearcheck`, `raiderio`, `raidinfo`, `rating`, `sbset`, `serverset`, `talentcheck`, `wowscoreboard`, `wowtoken` | Karlo (Original) / Domekologe |
-| wowguild_automation | Info / On Work | WoW Guild automation for new members/guests. | *No Commands yet* | Domekologe |
+| wowguild_automation | Info / On Work | WoW Guild automation for new members/guests. | `/wow-user`, `/wow-admin`, `/wow-masteradmin` | Domekologe |
+| webdashboard | Release 1.0.0 | Companion cog: RPC gateway, auth, branding, custom pages, audit log + the cog-integration framework. | `dksdashboard` (status/start/stop/bind/token/regen) | Domekologe |
+| web_serverstats | Release 1.0.0 | Collects server statistics (messages/voice/status/invites/activity, heatmaps, peaks) for the dashboard `/stats` page. | *Listeners only (no commands)* | Domekologe |
+| dashboardtemplate | Template | Annotated reference cog for the DKS dashboard integration (incl. the `L`/`tr`/`tr_lang` i18n helpers). | `dashboardtemplate` | Domekologe |
+| dashboardexample | Example | Minimal example of dashboard integration (widget + panel). | `dashboardexample` | Domekologe |
+
+> Most cogs support **German & English**: dashboard module texts follow the website language toggle, and each cog has a per-server **language** setting (in its dashboard module) for its Discord output.
 
 ## 🌐 Web Dashboard Integration
 

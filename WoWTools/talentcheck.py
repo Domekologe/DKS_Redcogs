@@ -18,6 +18,7 @@ from .autocomplete import (
     _API_HOST,
     _AUTH_HOST,
 )
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -88,7 +89,7 @@ async def _fetch_specializations(
 
 @cog_i18n(_)
 class TalentCheck(commands.Cog):
-    """Zeigt aktive Talente und aktive Glyphen eines Charakters (Classic/Retail)."""
+    """Show a character's active talents and active glyphs (Classic/Retail)."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -96,10 +97,10 @@ class TalentCheck(commands.Cog):
     @commands.hybrid_command(name="talentcheck")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
-        realm="Realm (mit Bindestrich statt Leerzeichen, z. B. everlook)",
-        character="Charaktername",
-        game="Classic (MoP Classic) oder Retail",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        realm="Realm (use a hyphen instead of spaces, e.g. everlook)",
+        character="Character name",
+        game="Classic (MoP Classic) or Retail",
+        locale="Locale (e.g. de or de_DE, en or en_US)",
     )
     @app_commands.choices(
         game=[
@@ -119,6 +120,7 @@ class TalentCheck(commands.Cog):
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = region.lower()
         locale = _resolve_locale(locale)
         # Slugs
@@ -135,7 +137,10 @@ class TalentCheck(commands.Cog):
                 self, region=region, realm=realm_slug, character=char_slug, game=game, locale=locale
             )
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Talente: {e}", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abrufen der Talente: {e}", f"Failed to fetch talents: {e}"),
+                ephemeral=bool(ctx.interaction),
+            )
 
         active_spec = (data.get("active_specialization") or {}).get("name")
         specs = data.get("specializations") or []
@@ -143,7 +148,7 @@ class TalentCheck(commands.Cog):
 
         for spec in specs:
             spec_name = spec.get("specialization_name") or (spec.get("specialization") or {}).get("name") or "?"
-            header = f"**{spec_name}**" + ("  *(aktiv)*" if active_spec and spec_name == active_spec else "")
+            header = f"**{spec_name}**" + ((tr_lang(lang, "  *(aktiv)*", "  *(active)*")) if active_spec and spec_name == active_spec else "")
             spec_lines.append(header)
 
             # Talente
@@ -165,14 +170,17 @@ class TalentCheck(commands.Cog):
             if grp.get("is_active"):
                 glyphs = grp.get("glyphs") or []
                 if glyphs:
-                    glyph_lines.append("**Aktive Glyphen**")
+                    glyph_lines.append(tr_lang(lang, "**Aktive Glyphen**", "**Active Glyphs**"))
                     for g in glyphs:
                         name = g.get("name") or "?"
                         glyph_lines.append(f"`└──` {name}")
                 break  # nur die aktive Gruppe
 
         if not spec_lines and not glyph_lines:
-            return await ctx.send("Keine Talent-/Glyphen-Daten gefunden.", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, "Keine Talent-/Glyphen-Daten gefunden.", "No talent/glyph data found."),
+                ephemeral=bool(ctx.interaction),
+            )
 
         embed = discord.Embed(
             title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}]",

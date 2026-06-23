@@ -19,6 +19,7 @@ from .autocomplete import (
     _AUTH_HOST,
     _EXPENSIONS,
 )
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -248,7 +249,7 @@ def _group_by_expansion_and_raid(stats: List[dict], only_expansion: Optional[str
 
     return sorted_out
 
-def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]]) -> str:
+def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]], lang: str = "de-DE") -> str:
     """
     Expansion
     RAID
@@ -262,17 +263,17 @@ def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]])
         if expansion:
             lines.append(f"**{expansion}**")
         else:
-            lines.append("**(Unbekannte Expansion)**")
+            lines.append(tr_lang(lang, "**(Unbekannte Expansion)**", "**(Unknown expansion)**"))
 
         if not raids:
-            lines.append("_Keine Raids_")
+            lines.append(tr_lang(lang, "_Keine Raids_", "_No raids_"))
             lines.append("")  # blank line between expansions
             continue
 
         for raid, bosses in raids.items():
             lines.append(f"{raid}\n")
             if not bosses:
-                lines.append("_Keine Bossdaten_\n")
+                lines.append(tr_lang(lang, "_Keine Bossdaten_\n", "_No boss data_\n"))
                 continue
 
             for boss, counts in bosses.items():
@@ -299,11 +300,11 @@ class RaidInfo(commands.Cog):
     @commands.hybrid_command(name="raidinfo")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
-        realm="Realm (mit Bindestrich statt Leerzeichen)",
-        character="Charaktername",
-        game="Classic (MoP Classic) oder Retail",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
-        extension="Optionaler Filter (Raid-Name, z. B. 'Mogu'shan Vaults'). Leer = alle MoP-Raids.",
+        realm="Realm (use a hyphen instead of spaces)",
+        character="Character name",
+        game="Classic (MoP Classic) or Retail",
+        locale="Locale (e.g. de or de_DE, en or en_US)",
+        extension="Optional filter (raid name, e.g. 'Mogu'shan Vaults'). Empty = all MoP raids.",
     )
     @app_commands.choices(
         game=[
@@ -325,6 +326,7 @@ class RaidInfo(commands.Cog):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = (region or "").lower()
         locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")
@@ -340,18 +342,27 @@ class RaidInfo(commands.Cog):
                 self, region=region, realm=realm_slug, character=char_slug, game=game, locale=locale
             )
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Achievements-Statistiken: {e}", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abrufen der Achievements-Statistiken: {e}", f"Failed to fetch achievement statistics: {e}"),
+                ephemeral=bool(ctx.interaction),
+            )
 
         all_stats = _collect_all_raid_stats_with_expansion(js)
         if not all_stats:
-            return await ctx.send("Keine Dungeon/Raid-Statistiken gefunden.", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, "Keine Dungeon/Raid-Statistiken gefunden.", "No dungeon/raid statistics found."),
+                ephemeral=bool(ctx.interaction),
+            )
 
         grouped = _group_by_expansion_and_raid(all_stats, extension)
         if not grouped:
             flt = extension or "—"
-            return await ctx.send(f"Keine passenden Einträge für Expansion-Filter **{flt}**.", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Keine passenden Einträge für Expansion-Filter **{flt}**.", f"No matching entries for expansion filter **{flt}**."),
+                ephemeral=bool(ctx.interaction),
+            )
 
-        text = _format_embed_text(grouped)
+        text = _format_embed_text(grouped, lang)
         embed = discord.Embed(
             title=f"{character.title()} – {realm.title()} ({region.upper()}) [{game.capitalize()}] – Raids",
             description=text,

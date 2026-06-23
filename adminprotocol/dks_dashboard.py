@@ -16,10 +16,12 @@ try:
     from webdashboard.integration.models import (  # noqa: F401
         Component,
         Field,
+        L,
         PageSchema,
         PanelSchema,
         SubmitResult,
         WidgetData,
+        tr,
     )
 
     DASHBOARD_AVAILABLE = True
@@ -60,6 +62,12 @@ except Exception:  # webdashboard not installed
 
     WidgetData = PanelSchema = PageSchema = Field = Component = SubmitResult = _Stub  # type: ignore
     DashboardContext = object  # type: ignore
+
+    def L(de, en=None):
+        return de
+
+    def tr(ctx, de, en):
+        return de
 
 
 def register_dashboard(cog) -> bool:

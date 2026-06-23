@@ -11,6 +11,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr,
 )
 
 log = logging.getLogger("red.domekologe.adminprotocol")
@@ -127,7 +128,7 @@ class AdminProtocol(commands.Cog):
                 self._dashboard_attached = False
         register_dashboard(self)
 
-    @dashboard_widget("adminprotocol_enabled_events", "Aktive Log-Events", size="sm", permission="guild_member")
+    @dashboard_widget("adminprotocol_enabled_events", L("Aktive Log-Events", "Active Log Events"), size="sm", permission="guild_member")
     async def adminprotocol_enabled_events_widget(self, ctx):
         try:
             events = await self.config.guild(ctx.guild).events()
@@ -180,7 +181,7 @@ class AdminProtocol(commands.Cog):
                 Field.text("ignored_users", "Ignorierte User-IDs (mit Komma getrennt)", value=", ".join(str(x) for x in cfg.get("ignored_users", [])), placeholder="z. B. 123, 456")
             ])
 
-        return PanelSchema(description="Pro Ereignis aktivieren, Ziel-Kanal und Ausnahmen wählen.", fields=fields)
+        return PanelSchema(description=tr(ctx, "Pro Ereignis aktivieren, Ziel-Kanal und Ausnahmen wählen.", "Per event: enable, choose the target channel and exceptions."), fields=fields)
 
     async def _ap_events_save(self, ctx, category: str, keys: list, data: dict):
         guild_id = ctx.guild.id
@@ -222,7 +223,7 @@ class AdminProtocol(commands.Cog):
         await self.config.guild(ctx.guild).events.set(events)
         return SubmitResult.ok(f"Einstellungen für '{EVENTS.get(submitted_ev, submitted_ev)}' gespeichert.")
 
-    @dashboard_panel("events_messages", "Nachrichten & Kanäle", mount="guild_settings", permission="guild_admin", order=1)
+    @dashboard_panel("events_messages", L("Nachrichten & Kanäle", "Messages & Channels"), mount="guild_settings", permission="guild_admin", order=1)
     async def ap_panel_messages(self, ctx):
         return await self._ap_events_schema(ctx, "messages", EVENT_CATEGORIES["messages"][1])
 
@@ -230,7 +231,7 @@ class AdminProtocol(commands.Cog):
     async def _ap_save_messages(self, ctx, data):
         return await self._ap_events_save(ctx, "messages", EVENT_CATEGORIES["messages"][1], data)
 
-    @dashboard_panel("events_members", "Mitglieder & Rollen", mount="guild_settings", permission="guild_admin", order=2)
+    @dashboard_panel("events_members", L("Mitglieder & Rollen", "Members & Roles"), mount="guild_settings", permission="guild_admin", order=2)
     async def ap_panel_members(self, ctx):
         return await self._ap_events_schema(ctx, "members", EVENT_CATEGORIES["members"][1])
 
@@ -238,7 +239,7 @@ class AdminProtocol(commands.Cog):
     async def _ap_save_members(self, ctx, data):
         return await self._ap_events_save(ctx, "members", EVENT_CATEGORIES["members"][1], data)
 
-    @dashboard_panel("events_moderation", "Moderation", mount="guild_settings", permission="guild_admin", order=3)
+    @dashboard_panel("events_moderation", L("Moderation", "Moderation"), mount="guild_settings", permission="guild_admin", order=3)
     async def ap_panel_moderation(self, ctx):
         return await self._ap_events_schema(ctx, "moderation", EVENT_CATEGORIES["moderation"][1])
 
@@ -246,7 +247,7 @@ class AdminProtocol(commands.Cog):
     async def _ap_save_moderation(self, ctx, data):
         return await self._ap_events_save(ctx, "moderation", EVENT_CATEGORIES["moderation"][1], data)
 
-    @dashboard_panel("events_voice", "Sprachkanäle & Einladungen", mount="guild_settings", permission="guild_admin", order=4)
+    @dashboard_panel("events_voice", L("Sprachkanäle & Einladungen", "Voice Channels & Invites"), mount="guild_settings", permission="guild_admin", order=4)
     async def ap_panel_voice(self, ctx):
         return await self._ap_events_schema(ctx, "voice", EVENT_CATEGORIES["voice"][1])
 

@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from redbot.core import commands
 
-from .dks_dashboard import register_dashboard, unregister_dashboard
+from .dks_dashboard import register_dashboard, unregister_dashboard, tr_lang
 
 
 # ---- small helper: fetch voters via REST call (paged) ----
@@ -55,7 +55,7 @@ async def fetch_answer_voters(
 
 
 class GuildToolsPollExport(commands.Cog):
-    """Export nativer Discord-Umfragen als CSV (;-getrennt)."""
+    """Export native Discord polls as CSV (;-separated)."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -65,6 +65,18 @@ class GuildToolsPollExport(commands.Cog):
 
     def cog_unload(self) -> None:
         unregister_dashboard(self)
+
+    async def _lang(self, guild) -> str:
+        """Read the per-guild output language from the GuildTools cog (shared setting)."""
+        if guild is None:
+            return "de-DE"
+        gt = self.bot.get_cog("GuildTools")
+        if gt is None or not hasattr(gt, "config"):
+            return "de-DE"
+        try:
+            return await gt.config.guild(guild).language()
+        except Exception:
+            return "de-DE"
 
     # ---------- helpers within the class ----------
     def _ans_id(self, ans) -> int:
@@ -104,8 +116,8 @@ class GuildToolsPollExport(commands.Cog):
 
     # ---------- Slash-Command ----------
     @app_commands.describe(
-        poll="Wähle die Umfrage (Autocomplete: letzte Polls im Channel, alternativ ID/Link einfügen)",
-        mode="Export-Ansicht",
+        poll="Choose the poll (autocomplete: recent polls in the channel, or paste an ID/link)",
+        mode="Export view",
     )
     @app_commands.choices(
         mode=[
@@ -114,16 +126,17 @@ class GuildToolsPollExport(commands.Cog):
         ]
     )
     @app_commands.command(
-        name="export-poll", description="Exportiert eine native Discord-Umfrage als CSV (;-getrennt)."
+        name="export-poll", description="Export a native Discord poll as CSV (;-separated)."
     )
     async def export_poll(self, interaction: discord.Interaction, poll: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True, ephemeral=True)
+        lang = await self._lang(interaction.guild)
 
         # parse ID or link
         try:
             chan_id, message_id = self.parse_message_ref(poll, interaction.channel.id)
         except Exception:
-            return await interaction.followup.send("❌ Ungültige Umfrage-Auswahl.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Ungültige Umfrage-Auswahl.", "❌ Invalid poll selection."), ephemeral=True)
 
         # fetch channel (may be a different channel/thread)
         ch = interaction.guild.get_channel(chan_id)
@@ -131,26 +144,26 @@ class GuildToolsPollExport(commands.Cog):
             try:
                 ch = await interaction.client.fetch_channel(chan_id)
             except Exception:
-                return await interaction.followup.send("❌ Ziel-Channel nicht gefunden/zugreifbar.", ephemeral=True)
+                return await interaction.followup.send(tr_lang(lang, "❌ Ziel-Channel nicht gefunden/zugreifbar.", "❌ Target channel not found/accessible."), ephemeral=True)
 
         if not isinstance(ch, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
-            return await interaction.followup.send("❌ Dieser Befehl funktioniert nur in Textchannels/Threads.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Dieser Befehl funktioniert nur in Textchannels/Threads.", "❌ This command only works in text channels/threads."), ephemeral=True)
 
         # load message
         try:
             msg = await ch.fetch_message(message_id)
         except discord.NotFound:
-            return await interaction.followup.send("❌ Nachricht nicht gefunden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Nachricht nicht gefunden.", "❌ Message not found."), ephemeral=True)
         except discord.Forbidden:
-            return await interaction.followup.send("❌ Keine Berechtigung, die Nachricht zu lesen.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Keine Berechtigung, die Nachricht zu lesen.", "❌ No permission to read the message."), ephemeral=True)
 
         if not getattr(msg, "poll", None):
-            return await interaction.followup.send("❌ Diese Nachricht enthält keine Umfrage.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Diese Nachricht enthält keine Umfrage.", "❌ This message contains no poll."), ephemeral=True)
 
         poll_obj = msg.poll
         answers = list(poll_obj.answers or [])
         if not answers:
-            return await interaction.followup.send("❌ Keine Antworten gefunden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Keine Antworten gefunden.", "❌ No answers found."), ephemeral=True)
 
         # --- collect voters per answer ---
         answer_to_voters: Dict[int, List[int]] = {}
@@ -169,19 +182,22 @@ class GuildToolsPollExport(commands.Cog):
             answers=answers_list,
             answer_to_voters=answer_to_voters,
             mode=mode.value,
+            lang=lang,
         )
 
 
         file = discord.File(fp=io.BytesIO(csv_bytes), filename=filename)
-        title = f"📤 CSV-Export: **{question_text}**"
+        title = tr_lang(lang, f"📤 CSV-Export: **{question_text}**", f"📤 CSV export: **{question_text}**")
         await interaction.followup.send(content=title, file=file, ephemeral=True)
 
     @export_poll.autocomplete("poll")
     async def poll_autocomplete(self, interaction: discord.Interaction, current: str):
+        lang = await self._lang(interaction.guild)
+
         def safe_label(q: str, mid: int) -> str:
             q = (q or "").replace("\n", " ").replace("\r", " ").strip()
             if not q:
-                q = f"Umfrage {mid}"
+                q = tr_lang(lang, f"Umfrage {mid}", f"Poll {mid}")
             label = f"{q}  •  ID:{mid}"
             return label[:100]
 
@@ -219,9 +235,9 @@ class GuildToolsPollExport(commands.Cog):
         if not choices:
             typed = (current or "").strip()
             if typed:
-                choices = [app_commands.Choice(name=f"Direkte Eingabe verwenden: {typed[:100]}", value=typed)]
+                choices = [app_commands.Choice(name=tr_lang(lang, f"Direkte Eingabe verwenden: {typed[:100]}", f"Use direct input: {typed[:100]}"), value=typed)]
             else:
-                choices = [app_commands.Choice(name="Keine Umfragen gefunden – gib ID/Link ein", value="0")]
+                choices = [app_commands.Choice(name=tr_lang(lang, "Keine Umfragen gefunden – gib ID/Link ein", "No polls found – enter an ID/link"), value="0")]
 
         return choices[:25]
 
@@ -233,6 +249,7 @@ class GuildToolsPollExport(commands.Cog):
         answers: List[Tuple[int, str]],
         answer_to_voters: Dict[int, List[int]],
         mode: str,
+        lang: str = "de-DE",
     ) -> Tuple[bytes, str]:
         sep = ";"
 
@@ -247,14 +264,14 @@ class GuildToolsPollExport(commands.Cog):
 
         lines: List[str] = []
         if mode == "key":
-            lines.append("Wahlmöglichkeit;Wähler (Komma getrennt)")
+            lines.append(tr_lang(lang, "Wahlmöglichkeit;Wähler (Komma getrennt)", "Option;Voters (comma separated)"))
             for aid, ans_text in answers:
                 voters = answer_to_voters.get(aid, [])
                 voters_names = ", ".join(self._user_name(guild, uid) for uid in voters)
                 lines.append(f"{esc(ans_text)}{sep}{esc(voters_names)}")
             filename = "poll_export_key_oriented.csv"
         else:
-            lines.append("Wähler;HatGewählt (Komma getrennt)")
+            lines.append(tr_lang(lang, "Wähler;HatGewählt (Komma getrennt)", "Voter;Voted for (comma separated)"))
             for uid, picks in user_choices.items():
                 picks_str = ", ".join(sorted(picks))
                 voter_name = self._user_name(guild, uid)

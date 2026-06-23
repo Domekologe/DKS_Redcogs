@@ -60,6 +60,8 @@ from .character_ui import (
     SlashWowAdminSyncAllConfirmView,
     WowAdminCharPanelView,
     officer_can_manage_characters,
+    _panel_intro,
+    _admin_panel_intro,
 )
 from .readytimes_ui import (
     format_member_ready_times_block,
@@ -88,9 +90,16 @@ from .dks_dashboard import (
     PanelSchema,
     Field,
     SubmitResult,
+    L,
+    tr,
+    tr_lang,
     register_dashboard,
     unregister_dashboard,
 )
+
+# Invisible sentinel prefix marking the "no main for a configured profile" report
+# (lets internal checks stay language-independent while output is localized).
+_NO_MAIN_MARKER = "​"
 
 I18N = {
     "de-DE": {
@@ -296,7 +305,7 @@ class WowGuildAutomation(commands.Cog):
             return
         self._dashboard_attached = self._attach_to_dashboard(cog)
 
-    @dashboard_widget("wga_onboarding", "Onboarding", size="sm", permission="guild_member")
+    @dashboard_widget("wga_onboarding", L("Onboarding", "Onboarding"), size="sm", permission="guild_member")
     async def wga_onboarding_widget(self, ctx):
         try:
             features = await self.config.guild(ctx.guild).features()
@@ -307,27 +316,27 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Global panel (bot owner): Blizzard API & defaults ---------------- #
     @dashboard_panel(
-        "blizzard_api", "Blizzard API & Defaults",
+        "blizzard_api", L("Blizzard API & Defaults", "Blizzard API & defaults"),
         scope="global", mount="bot_settings", permission="bot_owner",
     )
     async def wga_global_panel(self, ctx):
         s = await self.config.bot_setup()
         return PanelSchema(
-            description="Globale WoW-Guild-Automation-Einstellungen (Blizzard API).",
+            description=tr(ctx, "Globale WoW-Guild-Automation-Einstellungen (Blizzard API).", "Global WoW Guild Automation settings (Blizzard API)."),
             fields=[
                 Field.text("client_id", "Blizzard Client ID", value=s.get("client_id", "")),
                 Field.text("client_secret", "Blizzard Client Secret", value=s.get("client_secret", "")),
                 Field.select(
-                    "default_region", "Standard-Region",
+                    "default_region", "Default region",
                     [{"value": "eu", "label": "EU"}, {"value": "us", "label": "US"}, {"value": "kr", "label": "KR"}],
                     value=s.get("default_region", "eu"),
                 ),
                 Field.select(
-                    "default_version", "Standard-Version",
+                    "default_version", "Default version",
                     [{"value": "retail", "label": "Retail"}, {"value": "classic", "label": "Classic"}],
                     value=s.get("default_version", "retail"),
                 ),
-                Field.text("default_language", "Standard-Sprache", value=s.get("default_language", "de-DE")),
+                Field.text("default_language", "Default language", value=s.get("default_language", "de-DE")),
             ],
         )
 
@@ -347,12 +356,12 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: add allied guild ----------------------------------- #
     @dashboard_panel(
-        "allied_add", "Verbündete Gilde hinzufügen", mount="guild_settings", permission="guild_admin",
+        "allied_add", L("Verbündete Gilde hinzufügen", "Add allied guild"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_allied_add_panel(self, ctx):
         return PanelSchema(
-            description="Gildennamen eingeben und speichern, um ihn zur Liste hinzuzufügen.",
-            fields=[Field.text("guild_name", "Gildenname", value="", placeholder="z. B. Meine-Gilde")],
+            description=tr(ctx, "Gildennamen eingeben und speichern, um ihn zur Liste hinzuzufügen.", "Enter a guild name and save to add it to the list."),
+            fields=[Field.text("guild_name", "Guild name", value="", placeholder="z. B. Meine-Gilde")],
             submit_label="Hinzufügen",
         )
 
@@ -369,9 +378,9 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild list: allied guilds (view/delete) ------------------------- #
     @dashboard_list(
-        "allied_guilds", "Verbündete Gilden", mount="guild_settings", permission="guild_admin",
-        columns=[{"key": "guild", "label": "Gilde"}],
-        description="Verbündete Gilden, die abgefragt werden. Hinzufügen über das Hinzufügen-Tab.",
+        "allied_guilds", L("Verbündete Gilden", "Allied guilds"), mount="guild_settings", permission="guild_admin",
+        columns=[{"key": "guild", "label": "Guild"}],
+        description=L("Verbündete Gilden, die abgefragt werden. Hinzufügen über das Hinzufügen-Tab.", "Allied guilds that are queried. Add via the Add tab."),
     )
     async def wga_allied_list(self, ctx):
         guilds = await self.config.guild(ctx.guild).allied_guilds()
@@ -391,7 +400,7 @@ class WowGuildAutomation(commands.Cog):
     def _wga_channel_options(self, ctx, *, with_none: bool = True) -> List[Dict[str, str]]:
         opts: List[Dict[str, str]] = []
         if with_none:
-            opts.append({"value": "", "label": "— keiner —"})
+            opts.append({"value": "", "label": "— none —"})
         try:
             for ch in ctx.guild.text_channels:
                 opts.append({"value": str(ch.id), "label": f"#{ch.name}"})
@@ -402,7 +411,7 @@ class WowGuildAutomation(commands.Cog):
     def _wga_role_options(self, ctx, *, with_none: bool = True) -> List[Dict[str, str]]:
         opts: List[Dict[str, str]] = []
         if with_none:
-            opts.append({"value": "", "label": "— keiner —"})
+            opts.append({"value": "", "label": "— none —"})
         try:
             for role in ctx.guild.roles:
                 if role.is_default():
@@ -421,7 +430,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: profile switcher (leftmost, switch only) ----------- #
     @dashboard_panel(
-        "wga_switch", "Profil wechseln", mount="guild_settings", permission="guild_admin", order=0,
+        "wga_switch", L("Profil wechseln", "Switch profile"), mount="guild_settings", permission="guild_admin", order=0,
     )
     async def wga_switch_panel(self, ctx):
         prof = await self._wga_active_profile(ctx)
@@ -432,10 +441,10 @@ class WowGuildAutomation(commands.Cog):
             {"value": prof, "label": prof}
         ]
         return PanelSchema(
-            description="Aktives WoW-Profil dieses Servers wählen. Bearbeitet und angelegt wird im Tab „Profil“.",
+            description=tr(ctx, "Aktives WoW-Profil dieses Servers wählen. Bearbeitet und angelegt wird im Tab „Profil“.", "Select this server's active WoW profile. Editing and creating happens in the “Profile” tab."),
             submit_label="Wechseln",
             fields=[
-                Field.select("active_profile_key", "Profil", profile_options, value=prof),
+                Field.select("active_profile_key", "Profile", profile_options, value=prof),
             ],
         )
 
@@ -453,7 +462,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: profile (edit/create active profile) --------------- #
     @dashboard_panel(
-        "wga_profile", "Profil", mount="guild_settings", permission="guild_admin", order=1,
+        "wga_profile", L("Profil", "Profile"), mount="guild_settings", permission="guild_admin", order=1,
     )
     async def wga_profile_panel(self, ctx):
         language = await self.config.guild(ctx.guild).language()
@@ -472,23 +481,26 @@ class WowGuildAutomation(commands.Cog):
             {"value": "sod", "label": "SoD"},
         ]
         return PanelSchema(
-            description=f"Sprache und Werte des aktiven Profils „{prof}“ bearbeiten. "
+            description=tr(ctx,
+                        f"Sprache und Werte des aktiven Profils „{prof}“ bearbeiten. "
                         "Profil wechseln über den Tab „Profil wechseln“.",
+                        f"Edit the language and values of the active profile “{prof}”. "
+                        "Switch profiles via the “Switch profile” tab."),
             fields=[
                 Field.select(
-                    "language", "Sprache",
+                    "language", "Language",
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=str(language or "de-DE"),
                 ),
                 Field.text(
-                    "new_profile_key", "Neues Profil (Schlüssel)", value="",
+                    "new_profile_key", "New profile (key)", value="",
                     placeholder="leer lassen wenn nicht neu",
-                    description="Leer lassen, wenn kein neues Profil angelegt werden soll.",
+                    description="Leave empty if no new profile should be created.",
                 ),
                 Field.text("region", "Region", value=str(active.get("region", "eu"))),
                 Field.select("version", "Version", version_options, value=str(active.get("version", "retail"))),
                 Field.text("realm", "Realm", value=str(active.get("realm", ""))),
-                Field.text("guild_name", "Gildenname", value=str(active.get("guild_name", ""))),
+                Field.text("guild_name", "Guild name", value=str(active.get("guild_name", ""))),
             ],
         )
 
@@ -529,15 +541,15 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild list: WoW profiles (view/edit/delete all) ----------------- #
     @dashboard_list(
-        "wga_profiles", "Profile", mount="guild_settings", permission="guild_admin", order=2,
+        "wga_profiles", L("Profile", "Profiles"), mount="guild_settings", permission="guild_admin", order=2,
         columns=[
-            {"key": "key", "label": "Profil"},
+            {"key": "key", "label": "Profile"},
             {"key": "version", "label": "Version"},
             {"key": "realm", "label": "Realm"},
-            {"key": "guild", "label": "Gilde"},
-            {"key": "active", "label": "Aktiv"},
+            {"key": "guild", "label": "Guild"},
+            {"key": "active", "label": "Active"},
         ],
-        description="Alle WoW-Profile dieses Servers. Bearbeiten oder löschen pro Zeile; Anlegen im Tab Profil.",
+        description=L("Alle WoW-Profile dieses Servers. Bearbeiten oder löschen pro Zeile; Anlegen im Tab Profil.", "All WoW profiles of this server. Edit or delete per row; create in the Profile tab."),
     )
     async def wga_profiles_list(self, ctx):
         profiles = await self.config.guild(ctx.guild).wow_profiles()
@@ -571,13 +583,13 @@ class WowGuildAutomation(commands.Cog):
             {"value": "sod", "label": "SoD"},
         ]
         return PanelSchema(
-            description=f"Profil '{item_id}' bearbeiten.",
+            description=tr(ctx, f"Profil '{item_id}' bearbeiten.", f"Edit profile '{item_id}'."),
             fields=[
-                Field.switch("active", "Als aktives Profil festlegen", value=(str(item_id) == active)),
+                Field.switch("active", "Set as active profile", value=(str(item_id) == active)),
                 Field.text("region", "Region", value=str(p.get("region", "eu"))),
                 Field.select("version", "Version", version_options, value=str(p.get("version", "retail"))),
                 Field.text("realm", "Realm", value=str(p.get("realm", ""))),
-                Field.text("guild_name", "Gildenname", value=str(p.get("guild_name", ""))),
+                Field.text("guild_name", "Guild name", value=str(p.get("guild_name", ""))),
             ],
         )
 
@@ -621,7 +633,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: onboarding ----------------------------------------- #
     @dashboard_panel(
-        "wga_onboarding_cfg", "Onboarding", mount="guild_settings", permission="guild_admin",
+        "wga_onboarding_cfg", L("Onboarding", "Onboarding"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_onboarding_cfg_panel(self, ctx):
         onboarding = await self.config.guild(ctx.guild).onboarding()
@@ -637,33 +649,33 @@ class WowGuildAutomation(commands.Cog):
         if not isinstance(features, dict):
             features = {}
         return PanelSchema(
-            description="Onboarding-Texte, Channel, Rollen und Feature-Schalter.",
+            description=tr(ctx, "Onboarding-Texte, Channel, Rollen und Feature-Schalter.", "Onboarding texts, channel, roles and feature toggles."),
             fields=[
                 Field.textarea(
-                    "welcome_text_de", "Willkommenstext (DE)",
+                    "welcome_text_de", "Welcome text (DE)",
                     value=str(onboarding.get("welcome_text_de", "")),
                 ),
                 Field.textarea(
-                    "welcome_text_en", "Willkommenstext (EN)",
+                    "welcome_text_en", "Welcome text (EN)",
                     value=str(onboarding.get("welcome_text_en", "")),
                 ),
                 Field.select(
-                    "onboarding_channel", "Onboarding-Channel",
+                    "onboarding_channel", "Onboarding channel",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("onboarding_channel_id", 0) or ""),
                 ),
                 Field.select(
-                    "onboarding_new_role", "Rolle: Onboarding neu",
+                    "onboarding_new_role", "Role: new onboarding",
                     self._wga_role_options(ctx),
                     value=str(roles.get("onboarding_new_role_id", 0) or ""),
                 ),
                 Field.select(
-                    "onboarding_complete_role", "Rolle: Onboarding abgeschlossen",
+                    "onboarding_complete_role", "Role: onboarding complete",
                     self._wga_role_options(ctx),
                     value=str(roles.get("onboarding_complete_role_id", 0) or ""),
                 ),
                 Field.switch(
-                    "feature_onboarding", "Feature: Onboarding aktiv",
+                    "feature_onboarding", "Feature: onboarding enabled",
                     value=bool(features.get("onboarding", True)),
                 ),
             ],
@@ -693,21 +705,21 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: rules ---------------------------------------------- #
     @dashboard_panel(
-        "wga_rules", "Rules", mount="guild_settings", permission="guild_admin",
+        "wga_rules", L("Rules", "Rules"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_rules_panel(self, ctx):
         rules = await self.config.guild(ctx.guild).rules()
         if not isinstance(rules, dict):
             rules = {}
         return PanelSchema(
-            description="Regel-Channel und Reaktions-Emoji für die Regelbestätigung.",
+            description=tr(ctx, "Regel-Channel und Reaktions-Emoji für die Regelbestätigung.", "Rules channel and reaction emoji for rule confirmation."),
             fields=[
                 Field.select(
-                    "rule_channel", "Regel-Channel",
+                    "rule_channel", "Rules channel",
                     self._wga_channel_options(ctx),
                     value=str(rules.get("rule_channel_id", 0) or ""),
                 ),
-                Field.text("rule_emoji", "Regel-Emoji", value=str(rules.get("rule_emoji", "✅"))),
+                Field.text("rule_emoji", "Rules emoji", value=str(rules.get("rule_emoji", "✅"))),
             ],
         )
 
@@ -723,7 +735,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: roles ---------------------------------------------- #
     @dashboard_panel(
-        "wga_roles", "Rollen", mount="guild_settings", permission="guild_admin",
+        "wga_roles", L("Rollen", "Roles"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_roles_panel(self, ctx):
         roles = await self.config.guild(ctx.guild).roles()
@@ -733,34 +745,34 @@ class WowGuildAutomation(commands.Cog):
         if not isinstance(features, dict):
             features = {}
         return PanelSchema(
-            description="Basis-Rollen und Feature-Schalter.",
+            description=tr(ctx, "Basis-Rollen und Feature-Schalter.", "Base roles and feature toggles."),
             fields=[
                 Field.select(
-                    "guest_role", "Gast-Rolle", self._wga_role_options(ctx),
+                    "guest_role", "Guest role", self._wga_role_options(ctx),
                     value=str(roles.get("guest_role_id", 0) or ""),
                 ),
                 Field.select(
-                    "member_role", "Mitglieds-Rolle", self._wga_role_options(ctx),
+                    "member_role", "Member role", self._wga_role_options(ctx),
                     value=str(roles.get("member_role_id", 0) or ""),
                 ),
                 Field.select(
-                    "allied_role", "Verbündeten-Rolle", self._wga_role_options(ctx),
+                    "allied_role", "Allied role", self._wga_role_options(ctx),
                     value=str(roles.get("allied_role_id", 0) or ""),
                 ),
                 Field.switch(
-                    "feature_allied", "Feature: Verbündete Gilden",
+                    "feature_allied", "Feature: allied guilds",
                     value=bool(features.get("allied_guilds", False)),
                 ),
                 Field.switch(
-                    "feature_sync_rank", "Feature: Rang-Sync",
+                    "feature_sync_rank", "Feature: rank sync",
                     value=bool(features.get("sync_rank", True)),
                 ),
                 Field.switch(
-                    "feature_auto_verify", "Feature: Auto-Verifizierung",
+                    "feature_auto_verify", "Feature: auto-verification",
                     value=bool(features.get("auto_verify", True)),
                 ),
                 Field.switch(
-                    "feature_ready_times", "Feature: Bereitschaftszeiten",
+                    "feature_ready_times", "Feature: ready times",
                     value=bool(features.get("ready_times", True)),
                 ),
             ],
@@ -785,37 +797,37 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: channels ------------------------------------------- #
     @dashboard_panel(
-        "wga_channels", "Channels", mount="guild_settings", permission="guild_admin",
+        "wga_channels", L("Channels", "Channels"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_channels_panel(self, ctx):
         channels = await self.config.guild(ctx.guild).channels()
         if not isinstance(channels, dict):
             channels = {}
         return PanelSchema(
-            description="Benachrichtigungs- und Review-Channels.",
+            description=tr(ctx, "Benachrichtigungs- und Review-Channels.", "Notification and review channels."),
             fields=[
                 Field.select(
-                    "manual_review_channel", "Manuelle Review",
+                    "manual_review_channel", "Manual review",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("manual_review_channel_id", 0) or ""),
                 ),
                 Field.select(
-                    "raid_guest_channel", "Raid-Gäste",
+                    "raid_guest_channel", "Raid guests",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("raid_guest_channel_id", 0) or ""),
                 ),
                 Field.select(
-                    "officer_character_notify_channel", "Offizier: Char-Benachrichtigung",
+                    "officer_character_notify_channel", "Officer: character notification",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("officer_character_notify_channel_id", 0) or ""),
                 ),
                 Field.select(
-                    "rank_protected_notify_channel", "Geschützte Ränge: Benachrichtigung",
+                    "rank_protected_notify_channel", "Protected ranks: notification",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("rank_protected_notify_channel_id", 0) or ""),
                 ),
                 Field.select(
-                    "rank_lock_notify_channel", "Rank-Lock: Benachrichtigung",
+                    "rank_lock_notify_channel", "Rank lock: notification",
                     self._wga_channel_options(ctx),
                     value=str(channels.get("rank_lock_notify_channel_id", 0) or ""),
                 ),
@@ -841,61 +853,61 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: texts (templates) ---------------------------------- #
     @dashboard_panel(
-        "wga_templates", "Texte", mount="guild_settings", permission="guild_admin",
+        "wga_templates", L("Texte", "Texts"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_templates_panel(self, ctx):
         templates = await self.config.guild(ctx.guild).templates()
         if not isinstance(templates, dict):
             templates = {}
         rank_vars = [
-            {"token": "{member}", "desc": "Mitglied (Mention)"},
-            {"token": "{game}", "desc": "Spiel/Version"},
-            {"token": "{char}", "desc": "Charaktername"},
-            {"token": "{rank}", "desc": "Ingame-Rang"},
-            {"token": "{profile}", "desc": "Profil-Schlüssel"},
-            {"token": "{detail}", "desc": "Zusatzinfo"},
+            {"token": "{member}", "desc": "Member (mention)"},
+            {"token": "{game}", "desc": "Game/version"},
+            {"token": "{char}", "desc": "Character name"},
+            {"token": "{rank}", "desc": "In-game rank"},
+            {"token": "{profile}", "desc": "Profile key"},
+            {"token": "{detail}", "desc": "Additional info"},
         ]
         return PanelSchema(
-            description="Benachrichtigungs- und Hinweistexte. Platzhalter in geschweiften Klammern.",
+            description=tr(ctx, "Benachrichtigungs- und Hinweistexte. Platzhalter in geschweiften Klammern.", "Notification and notice texts. Placeholders in curly braces."),
             fields=[
                 Field.textarea(
-                    "duplicate_character_message", "Doppelter Charakter",
+                    "duplicate_character_message", "Duplicate character",
                     value=str(templates.get("duplicate_character_message", "")),
-                    variables=[{"token": "{detail}", "desc": "Zusatzinfo"}],
+                    variables=[{"token": "{detail}", "desc": "Additional info"}],
                 ),
                 Field.textarea(
-                    "member_left_characters_notice", "Mitglied verlassen",
+                    "member_left_characters_notice", "Member left",
                     value=str(templates.get("member_left_characters_notice", "")),
                     variables=[
-                        {"token": "{user}", "desc": "Mitglied (Mention)"},
-                        {"token": "{username}", "desc": "Benutzername"},
-                        {"token": "{chars}", "desc": "Verknüpfte Chars"},
+                        {"token": "{user}", "desc": "Member (mention)"},
+                        {"token": "{username}", "desc": "Username"},
+                        {"token": "{chars}", "desc": "Linked characters"},
                     ],
                 ),
                 Field.textarea(
-                    "admin_removed_char_dm", "Admin hat Char entfernt (DM)",
+                    "admin_removed_char_dm", "Admin removed character (DM)",
                     value=str(templates.get("admin_removed_char_dm", "")),
                     variables=[
-                        {"token": "{chars}", "desc": "Entfernte Chars"},
-                        {"token": "{reason}", "desc": "Grund"},
+                        {"token": "{chars}", "desc": "Removed characters"},
+                        {"token": "{reason}", "desc": "Reason"},
                     ],
                 ),
                 Field.textarea(
-                    "protected_rank_sync_notice", "Geschützter Rang: Hinweis",
+                    "protected_rank_sync_notice", "Protected rank: notice",
                     value=str(templates.get("protected_rank_sync_notice", "")),
                     variables=rank_vars,
                 ),
                 Field.textarea(
-                    "rank_lock_officer_notice", "Rank-Lock: Offizier-Hinweis",
+                    "rank_lock_officer_notice", "Rank lock: officer notice",
                     value=str(templates.get("rank_lock_officer_notice", "")),
                     variables=rank_vars,
                 ),
                 Field.textarea(
-                    "manual_verification", "Manuelle Verifizierung",
+                    "manual_verification", "Manual verification",
                     value=str(templates.get("manual_verification", "")),
                     variables=[
-                        {"token": "{username}", "desc": "Benutzername"},
-                        {"token": "{charname}", "desc": "Charaktername"},
+                        {"token": "{username}", "desc": "Username"},
+                        {"token": "{charname}", "desc": "Character name"},
                     ],
                 ),
             ],
@@ -921,13 +933,13 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild list: rank mapping ---------------------------------------- #
     @dashboard_list(
-        "wga_rank_mapping", "Rank-Mapping", mount="guild_settings", permission="guild_admin",
+        "wga_rank_mapping", L("Rank-Mapping", "Rank mapping"), mount="guild_settings", permission="guild_admin",
         columns=[
             {"key": "index", "label": "Index"},
-            {"key": "title", "label": "Titel"},
-            {"key": "role", "label": "Discord-Rolle"},
+            {"key": "title", "label": "Title"},
+            {"key": "role", "label": "Discord role"},
         ],
-        description="Rang 0–9 → Discord-Rolle (aktives Profil).",
+        description=L("Rang 0–9 → Discord-Rolle (aktives Profil).", "Rank 0–9 → Discord role (active profile)."),
     )
     async def wga_rank_mapping_list(self, ctx):
         prof = await self._wga_active_profile(ctx)
@@ -974,11 +986,11 @@ class WowGuildAutomation(commands.Cog):
         except Exception:
             cur_role_id = 0
         return PanelSchema(
-            description=f"Rang {idx} (Profil {prof}) bearbeiten.",
+            description=tr(ctx, f"Rang {idx} (Profil {prof}) bearbeiten.", f"Edit rank {idx} (profile {prof})."),
             fields=[
-                Field.text("title", "Titel", value=title),
+                Field.text("title", "Title", value=title),
                 Field.select(
-                    "role", "Discord-Rolle", self._wga_role_options(ctx),
+                    "role", "Discord role", self._wga_role_options(ctx),
                     value=str(cur_role_id or ""),
                 ),
             ],
@@ -1036,7 +1048,7 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild panel: protected & rank-lock ------------------------------ #
     @dashboard_panel(
-        "wga_protected_lock", "Protected & Rank-Lock", mount="guild_settings", permission="guild_admin",
+        "wga_protected_lock", L("Protected & Rank-Lock", "Protected & rank lock"), mount="guild_settings", permission="guild_admin",
     )
     async def wga_protected_lock_panel(self, ctx):
         prof = await self._wga_active_profile(ctx)
@@ -1049,14 +1061,14 @@ class WowGuildAutomation(commands.Cog):
         if not isinstance(locked, list):
             locked = []
         return PanelSchema(
-            description=f"Geschützte und gesperrte Ränge (aktives Profil {prof}). Ein Eintrag pro Zeile.",
+            description=tr(ctx, f"Geschützte und gesperrte Ränge (aktives Profil {prof}). Ein Eintrag pro Zeile.", f"Protected and locked ranks (active profile {prof}). One entry per line."),
             fields=[
                 Field.textarea(
-                    "protected_list", "Geschützte Ränge",
+                    "protected_list", "Protected ranks",
                     value="\n".join(str(x) for x in protected),
                 ),
                 Field.textarea(
-                    "lock_list", "Gesperrte Ränge (Rank-Lock)",
+                    "lock_list", "Locked ranks (rank lock)",
                     value="\n".join(str(x) for x in locked),
                 ),
             ],
@@ -1079,9 +1091,9 @@ class WowGuildAutomation(commands.Cog):
 
     # --- Guild list: registrations --------------------------------------- #
     @dashboard_list(
-        "wga_registrations", "Registrierungen", mount="guild_settings", permission="guild_admin",
-        columns=[{"key": "member", "label": "Mitglied"}],
-        description="Gespeicherte Onboarding-Registrierungen. Löschen entfernt die Registrierung eines Mitglieds.",
+        "wga_registrations", L("Registrierungen", "Registrations"), mount="guild_settings", permission="guild_admin",
+        columns=[{"key": "member", "label": "Member"}],
+        description=L("Gespeicherte Onboarding-Registrierungen. Löschen entfernt die Registrierung eines Mitglieds.", "Stored onboarding registrations. Deleting removes a member's registration."),
     )
     async def wga_registrations_list(self, ctx):
         all_members = await self.config.all_members(ctx.guild)
@@ -1190,6 +1202,7 @@ class WowGuildAutomation(commands.Cog):
         names: List[str],
     ) -> tuple:
         cfg = await self._guild_config(guild)
+        lang = await self._guild_lang(guild, member)
         templates = cfg.get("templates", {})
         dup_tpl = templates.get(
             "duplicate_character_message",
@@ -1198,7 +1211,11 @@ class WowGuildAutomation(commands.Cog):
         prof = await wow_profile_for_game(cfg, game_type)
         if not prof or not prof.get("realm") or not prof.get("guild_name"):
             return (
-                f"Profil für **{game_label(game_type)}** ist unvollständig (Realm/Gilde im Dashboard setzen).",
+                tr_lang(
+                    lang,
+                    f"Profil für **{game_label(game_type)}** ist unvollständig (Realm/Gilde im Dashboard setzen).",
+                    f"Profile for **{game_label(game_type)}** is incomplete (set realm/guild in the dashboard).",
+                ),
                 False,
             )
         roster = await self.blizzard.roster_character_names(
@@ -1216,7 +1233,11 @@ class WowGuildAutomation(commands.Cog):
                 continue
             if name.lower() not in roster_l:
                 return (
-                    f"`{name}` ist im **{game_label(game_type)}**-Gildenroster nicht (oder API-Fehler).",
+                    tr_lang(
+                        lang,
+                        f"`{name}` ist im **{game_label(game_type)}**-Gildenroster nicht (oder API-Fehler).",
+                        f"`{name}` is not in the **{game_label(game_type)}** guild roster (or API error).",
+                    ),
                     False,
                 )
             key = char_tuple_key(name, game_type)
@@ -1224,16 +1245,32 @@ class WowGuildAutomation(commands.Cog):
                 self.config, guild, name, game_type, exclude_user_id=member.id
             )
             if owner is not None:
-                return (dup_tpl.format(detail=f"bereits mit <@{owner}> verknüpft"), False)
+                return (
+                    dup_tpl.format(
+                        detail=tr_lang(
+                            lang,
+                            f"bereits mit <@{owner}> verknüpft",
+                            f"already linked to <@{owner}>",
+                        )
+                    ),
+                    False,
+                )
             if any(char_tuple_key(e["name"], e["game_type"]) == key for e in linked):
-                return (dup_tpl.format(detail="bereits bei dir verknüpft"), False)
+                return (
+                    dup_tpl.format(
+                        detail=tr_lang(lang, "bereits bei dir verknüpft", "already linked to you")
+                    ),
+                    False,
+                )
             if any(char_tuple_key(e["name"], e["game_type"]) == key for e in to_add):
                 continue
             to_add.append({"name": name, "game_type": game_type})
         merged = linked + to_add
         await set_linked_list(self.config.member(member), merged)
         labels = ", ".join(f"{x['name']} ({game_label(x['game_type'])})" for x in to_add)
-        return (f"Verknüpft: {labels}" if labels else "Nichts hinzugefügt.", True)
+        if labels:
+            return (tr_lang(lang, f"Verknüpft: {labels}", f"Linked: {labels}"), True)
+        return (tr_lang(lang, "Nichts hinzugefügt.", "Nothing added."), True)
 
     async def _guild_has_sync_rank(self, guild: discord.Guild) -> bool:
         cfg = await self._guild_config(guild)
@@ -1337,8 +1374,13 @@ class WowGuildAutomation(commands.Cog):
         guild: discord.Guild,
         member: discord.Member,
     ) -> str:
+        lang = await self._guild_lang(guild)
         if not await self._guild_has_sync_rank(guild):
-            return "Rang-Sync ist auf diesem Server deaktiviert (`features.sync_rank`)."
+            return tr_lang(
+                lang,
+                "Rang-Sync ist auf diesem Server deaktiviert (`features.sync_rank`).",
+                "Rank sync is disabled on this server (`features.sync_rank`).",
+            )
         cfg = await self._guild_config(guild)
         wow_profiles = cfg.get("wow_profiles") or {}
         main_map = await get_main_characters(self.config.member(member))
@@ -1351,7 +1393,11 @@ class WowGuildAutomation(commands.Cog):
             if m and str(m.get("name", "")).strip():
                 jobs.append((g, str(m["name"]).strip()))
         if not jobs:
-            return "Kein Main für ein konfiguriertes Profil bei diesem Mitglied."
+            return _NO_MAIN_MARKER + tr_lang(
+                lang,
+                "Kein Main für ein konfiguriertes Profil bei diesem Mitglied.",
+                "No main for a configured profile for this member.",
+            )
         lines: List[str] = []
         for game, name in jobs:
             rank_title, reason, role_id = await self._sync_rank_for_main(member, guild, game, name)
@@ -1363,28 +1409,62 @@ class WowGuildAutomation(commands.Cog):
                     last_title=str(rank_title),
                     last_role_id=int(role_id),
                 )
-                lines.append(f"• **{gl}:** `{rank_title}` synchronisiert.")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** `{rank_title}` synchronisiert.",
+                    f"• **{gl}:** `{rank_title}` synced.",
+                ))
             elif reason == "protected":
-                lines.append(f"• **{gl}:** geschützter Rang (Hinweis ggf. im Offizierskanal).")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** geschützter Rang (Hinweis ggf. im Offizierskanal).",
+                    f"• **{gl}:** protected rank (notice may be in the officer channel).",
+                ))
             elif reason == "rank_locked":
-                lines.append(
-                    f"• **{gl}:** **Rank-Lock** (dieser Ingame-Rang) — keine Discord-Rolle vom Bot."
-                )
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** **Rank-Lock** (dieser Ingame-Rang) — keine Discord-Rolle vom Bot.",
+                    f"• **{gl}:** **rank lock** (this in-game rank) — no Discord role from the bot.",
+                ))
             elif reason == "no_profile":
-                lines.append(f"• **{gl}:** kein Profil konfiguriert.")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** kein Profil konfiguriert.",
+                    f"• **{gl}:** no profile configured.",
+                ))
             elif reason in ("not_found", "no_role"):
-                lines.append(f"• **{gl}:** nicht im Roster / kein Rollen-Mapping.")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** nicht im Roster / kein Rollen-Mapping.",
+                    f"• **{gl}:** not in roster / no role mapping.",
+                ))
             elif reason == "no_perms":
-                lines.append(f"• **{gl}:** Bot darf Rollen nicht setzen.")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** Bot darf Rollen nicht setzen.",
+                    f"• **{gl}:** bot may not assign roles.",
+                ))
             elif reason == "http":
-                lines.append(f"• **{gl}:** Discord-API-Fehler.")
+                lines.append(tr_lang(
+                    lang,
+                    f"• **{gl}:** Discord-API-Fehler.",
+                    f"• **{gl}:** Discord API error.",
+                ))
             else:
                 lines.append(f"• **{gl}:** {reason}")
-        return f"**{member.display_name}** — Rang-Sync:\n" + "\n".join(lines)
+        return tr_lang(
+            lang,
+            f"**{member.display_name}** — Rang-Sync:\n",
+            f"**{member.display_name}** — rank sync:\n",
+        ) + "\n".join(lines)
 
     async def _slash_admin_sync_all_members_report(self, guild: discord.Guild) -> str:
         if not await self._guild_has_sync_rank(guild):
-            return "Rang-Sync ist deaktiviert."
+            return tr_lang(
+                await self._guild_lang(guild),
+                "Rang-Sync ist deaktiviert.",
+                "Rank sync is disabled.",
+            )
         data = await self.config.all_members(guild)
         blocks: List[str] = []
         for uid_str, payload in data.items():
@@ -1406,14 +1486,23 @@ class WowGuildAutomation(commands.Cog):
             if not has_main:
                 continue
             block = await self._slash_admin_sync_report_for_member(guild, mem)
-            if "Kein Main für ein konfiguriertes Profil" in block:
+            if block.startswith(_NO_MAIN_MARKER):
                 continue
             blocks.append(block)
+        lang = await self._guild_lang(guild)
         if not blocks:
-            return "Keine Mitglieder mit verknüpften Chars und gesetztem Main."
+            return tr_lang(
+                lang,
+                "Keine Mitglieder mit verknüpften Chars und gesetztem Main.",
+                "No members with linked characters and a set main.",
+            )
         out = "\n\n".join(blocks[:15])
         if len(blocks) > 15:
-            out += f"\n\n… gekürzt: **{len(blocks) - 15}** weitere Mitglieder — erneut ausführen oder einzeln syncen."
+            out += tr_lang(
+                lang,
+                f"\n\n… gekürzt: **{len(blocks) - 15}** weitere Mitglieder — erneut ausführen oder einzeln syncen.",
+                f"\n\n… truncated: **{len(blocks) - 15}** more members — run again or sync individually.",
+            )
         return out[:3900]
 
     async def _background_rank_sync_guild_members(self, guild: discord.Guild) -> None:
@@ -1439,7 +1528,7 @@ class WowGuildAutomation(commands.Cog):
             if not has_main:
                 continue
             report = await self._slash_admin_sync_report_for_member(guild, mem)
-            if "Kein Main für ein konfiguriertes Profil" in report:
+            if report.startswith(_NO_MAIN_MARKER):
                 continue
 
     async def _maybe_auto_rank_sync_guild(self, guild: discord.Guild) -> None:
@@ -1480,10 +1569,11 @@ class WowGuildAutomation(commands.Cog):
         pk = str(cfg.get("active_profile_key") or "retail")
         titles = (cfg.get("rank_titles_by_profile") or {}).get(pk) or cfg.get("rank_titles") or {}
         m = (cfg.get("rank_mapping_by_profile") or {}).get(pk) or cfg.get("rank_mapping") or {}
+        lang = await self._guild_lang(guild)
         lines: List[str] = [
-            f"**Rang-Mapping** — aktives Profil `{pk}`",
+            tr_lang(lang, f"**Rang-Mapping** — aktives Profil `{pk}`", f"**Rank mapping** — active profile `{pk}`"),
             "",
-            "**Indizes → Titel:**",
+            tr_lang(lang, "**Indizes → Titel:**", "**Indexes → titles:**"),
         ]
         any_title = False
         for i in range(10):
@@ -1492,10 +1582,10 @@ class WowGuildAutomation(commands.Cog):
                 any_title = True
                 lines.append(f"• [{i}] `{t}`")
         if not any_title:
-            lines.append("_(keine Titel gesetzt)_")
-        lines.extend(["", "**Titel/Name → Rolle:**"])
+            lines.append(tr_lang(lang, "_(keine Titel gesetzt)_", "_(no titles set)_"))
+        lines.extend(["", tr_lang(lang, "**Titel/Name → Rolle:**", "**Title/name → role:**")])
         if not m:
-            lines.append("_(keine Einträge)_")
+            lines.append(tr_lang(lang, "_(keine Einträge)_", "_(no entries)_"))
         else:
             for name, rid in sorted(m.items(), key=lambda x: str(x[0]).lower()):
                 try:
@@ -1519,7 +1609,13 @@ class WowGuildAutomation(commands.Cog):
             mem = guild.get_member(uid)
             who = mem.display_name if mem else str(uid)
             lines.append(f"• **{who}** (`{uid}`): `{reg}`")
-        return "\n".join(lines) if lines else "Keine Registrierungsdaten bei Mitgliedern."
+        if lines:
+            return "\n".join(lines)
+        return tr_lang(
+            await self._guild_lang(guild),
+            "Keine Registrierungsdaten bei Mitgliedern.",
+            "No registration data for members.",
+        )
 
     async def _slash_format_admin_readytimes_text(self, guild: discord.Guild) -> str:
         data = await self.config.all_members(guild)
@@ -1537,7 +1633,11 @@ class WowGuildAutomation(commands.Cog):
             block = format_member_ready_times_block(rt)
             blocks.append(f"{label}\n{block}")
         if not blocks:
-            return "Niemand hat aktive Bereitschaftszeiten eingetragen."
+            return tr_lang(
+                await self._guild_lang(guild),
+                "Niemand hat aktive Bereitschaftszeiten eingetragen.",
+                "Nobody has entered active ready times.",
+            )
         return "\n\n".join(blocks)
 
     async def _format_user_char_list_ephemeral(
@@ -1551,16 +1651,18 @@ class WowGuildAutomation(commands.Cog):
         mains = await get_main_characters(self.config.member(member))
         rs_raw = await self.config.member(member).rank_sync_by_game()
         rank_line = format_rank_sync_summary(guild, rs_raw)
+        lang = await self._guild_lang(guild, member)
+        last_sync_label = tr_lang(lang, "**Letzter Rang-Sync:**", "**Last rank sync:**")
         head = f"**{member.display_name}** (`{member.id}`)\n" if header_user else ""
         if not linked:
             extra = format_mains_summary(mains)
             if rank_line:
-                extra += f"\n**Letzter Rang-Sync:** {rank_line}"
-            return head + "Keine Chars verknüpft.\n" + extra
+                extra += f"\n{last_sync_label} {rank_line}"
+            return head + tr_lang(lang, "Keine Chars verknüpft.\n", "No characters linked.\n") + extra
         lines = [format_char_line(e, mains) for e in linked]
         block = format_mains_summary(mains)
         if rank_line:
-            block += f"\n**Letzter Rang-Sync:** {rank_line}"
+            block += f"\n{last_sync_label} {rank_line}"
         return head + block + "\n\n" + "\n".join(lines)
 
     async def _officer_format_all_linked_chars(self, guild: discord.Guild) -> str:
@@ -1583,7 +1685,13 @@ class WowGuildAutomation(commands.Cog):
             rank_snip = format_rank_sync_summary(guild, payload.get("rank_sync_by_game"))
             suffix = f" | {rank_snip}" if rank_snip else ""
             lines.append(f"{label}: {', '.join(parts)}{suffix}")
-        return "\n".join(lines) if lines else "Keine verknüpften Chars auf diesem Server."
+        if lines:
+            return "\n".join(lines)
+        return tr_lang(
+            await self._guild_lang(guild),
+            "Keine verknüpften Chars auf diesem Server.",
+            "No linked characters on this server.",
+        )
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
@@ -1745,11 +1853,14 @@ class WowGuildAutomation(commands.Cog):
         if registration.get("rules_confirmed", False):
             return
         try:
+            rlang = await self._guild_lang(member.guild, member)
             dm = await member.create_dm()
-            await dm.send(
-                "Erinnerung: Bitte bestätige noch die Serverregeln — im Regel-Kanal mit dem konfigurierten Emoji "
-                "(z. B. ✅) auf die **bestehende** Regelnachricht, damit dein Onboarding abgeschlossen wird."
-            )
+            await dm.send(tr_lang(rlang,
+                "Erinnerung: Bitte bestätige noch die Serverregeln— im Regel-Kanal mit dem konfigurierten Emoji "
+                "(z. B. ✅) auf die **bestehende** Regelnachricht, damit dein Onboarding abgeschlossen wird.",
+                "Reminder: Please confirm the server rules - in the rules channel with the configured emoji "
+                "on the existing rules message so your onboarding can be completed.",
+            ))
         except Exception:
             pass
 
@@ -1758,9 +1869,9 @@ class WowGuildAutomation(commands.Cog):
         await self._run_onboarding_flow(member, simulated=False)
 
 
-    @app_commands.command(name="wow-user", description="WoW: Panel, Chars, Rang-Sync, Bereitschaftszeiten.")
+    @app_commands.command(name="wow-user", description="WoW: panel, characters, rank sync, ready times.")
     @app_commands.guild_only()
-    @app_commands.describe(action="Aktion")
+    @app_commands.describe(action="Action")
     @app_commands.choices(
         action=[
             app_commands.Choice(name="Panel (interaktives Menü)", value="panel"),
@@ -1771,11 +1882,14 @@ class WowGuildAutomation(commands.Cog):
     )
     async def slash_wow_user(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+            )
             return
+        lang = await self._guild_lang(interaction.guild, interaction.user)
         if action == "panel":
             await interaction.response.send_message(
-                PANEL_INTRO,
+                _panel_intro(lang),
                 ephemeral=True,
                 view=CharMainMenuView(self, interaction.guild, interaction.user),
             )
@@ -1800,15 +1914,17 @@ class WowGuildAutomation(commands.Cog):
         if action == "readytimes":
             await send_member_readytimes_panel(self, interaction, interaction.user)
             return
-        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(lang, "Unbekannte Aktion.", "Unknown action."), ephemeral=True
+        )
 
     @app_commands.command(
         name="wow-admin",
-        description="Officer: Char-Panel, Rang-Sync, Gildeninfos, Onboarding-Daten (Manage Server).",
+        description="Officer: character panel, rank sync, guild info, onboarding data (Manage Server).",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(action="Aktion")
+    @app_commands.describe(action="Action")
     @app_commands.choices(
         action=[
             app_commands.Choice(
@@ -1827,40 +1943,56 @@ class WowGuildAutomation(commands.Cog):
     )
     async def slash_wow_admin(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+            )
             return
+        lang = await self._guild_lang(interaction.guild, interaction.user)
         if not officer_can_manage_characters(interaction.user):
             await interaction.response.send_message(
-                "Nur für Mitglieder mit **Server verwalten** (oder Administrator).",
+                tr_lang(
+                    lang,
+                    "Nur für Mitglieder mit **Server verwalten** (oder Administrator).",
+                    "Only for members with **Manage Server** (or Administrator).",
+                ),
                 ephemeral=True,
             )
             return
         guild = interaction.guild
         if action == "panel":
             await interaction.response.send_message(
-                ADMIN_PANEL_INTRO,
+                _admin_panel_intro(lang),
                 ephemeral=True,
                 view=WowAdminCharPanelView(self, guild, interaction.user),
             )
             return
         if action == "sync_specific_member":
             await interaction.response.send_message(
-                "Welches Mitglied synchronisieren?",
+                tr_lang(lang, "Welches Mitglied synchronisieren?", "Which member to sync?"),
                 ephemeral=True,
                 view=AdminPickOneMemberView(self, guild, interaction.user, mode="sync_rank_member"),
             )
             return
         if action == "sync_all_members":
             await interaction.response.send_message(
-                "Alle Mitglieder mit verknüpften Chars **und** gesetztem Main werden nacheinander synchronisiert "
-                "(kann bei großen Gilden lange dauern). Bitte bestätigen:",
+                tr_lang(
+                    lang,
+                    "Alle Mitglieder mit verknüpften Chars **und** gesetztem Main werden nacheinander synchronisiert "
+                    "(kann bei großen Gilden lange dauern). Bitte bestätigen:",
+                    "All members with linked characters **and** a set main will be synced one after another "
+                    "(can take a while for large guilds). Please confirm:",
+                ),
                 ephemeral=True,
                 view=SlashWowAdminSyncAllConfirmView(self, guild, interaction.user),
             )
             return
         if action == "simulate_join":
             await interaction.response.send_message(
-                "Welches Mitglied? Der Bot führt das Onboarding **simuliert** aus.",
+                tr_lang(
+                    lang,
+                    "Welches Mitglied? Der Bot führt das Onboarding **simuliert** aus.",
+                    "Which member? The bot runs the onboarding in **simulation** mode.",
+                ),
                 ephemeral=True,
                 view=AdminPickOneMemberView(self, guild, interaction.user, mode="simulate_join"),
             )
@@ -1870,7 +2002,11 @@ class WowGuildAutomation(commands.Cog):
             return
         if action == "remove_registration":
             await interaction.response.send_message(
-                "Welche Registrierung soll gelöscht werden?",
+                tr_lang(
+                    lang,
+                    "Welche Registrierung soll gelöscht werden?",
+                    "Which registration should be deleted?",
+                ),
                 ephemeral=True,
                 view=AdminPickOneMemberView(self, guild, interaction.user, mode="remove_registration"),
             )
@@ -1893,15 +2029,17 @@ class WowGuildAutomation(commands.Cog):
             for chunk in [text[i : i + 1900] for i in range(0, len(text), 1900)] or ["—"]:
                 await interaction.followup.send(chunk, ephemeral=True)
             return
-        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(lang, "Unbekannte Aktion.", "Unknown action."), ephemeral=True
+        )
 
     @app_commands.command(
         name="wow-masteradmin",
-        description="Erweitert: Onboarding, Blizzard-API, Rang-Mapping, Auto-Sync, Rank-Lock pro Mitglied.",
+        description="Advanced: onboarding, Blizzard API, rank mapping, auto sync, per-member rank lock.",
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.describe(action="Aktion")
+    @app_commands.describe(action="Action")
     @app_commands.choices(
         action=[
             app_commands.Choice(name="Onboarding Kanal & Rollen (Modal)", value="onboarding_setup"),
@@ -1916,16 +2054,26 @@ class WowGuildAutomation(commands.Cog):
     )
     async def slash_wow_masteradmin(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
-            await interaction.response.send_message("Nur auf einem Server.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+            )
             return
+        lang = await self._guild_lang(interaction.guild, interaction.user)
         if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message("Fehlende Berechtigung **Server verwalten**.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(
+                    lang,
+                    "Fehlende Berechtigung **Server verwalten**.",
+                    "Missing permission **Manage Server**.",
+                ),
+                ephemeral=True,
+            )
             return
         guild = interaction.guild
         if action in ("botsetup", "mastersetup_bot"):
             if interaction.user.id not in self.bot.owner_ids:
                 await interaction.response.send_message(
-                    "Nur der **Bot-Besitzer** kann das.",
+                    tr_lang(lang, "Nur der **Bot-Besitzer** kann das.", "Only the **bot owner** can do this."),
                     ephemeral=True,
                 )
                 return
@@ -1953,7 +2101,9 @@ class WowGuildAutomation(commands.Cog):
         if action == "rank_unlock":
             await interaction.response.send_modal(RankLockRemoveModal(self, guild))
             return
-        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(lang, "Unbekannte Aktion.", "Unknown action."), ephemeral=True
+        )
 
     @_dashboard_page(name=None, description="WoW Guild Automation Dashboard")
     async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:

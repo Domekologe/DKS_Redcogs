@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, List
 
 import discord
 
+from .dks_dashboard import tr_lang
+
 if TYPE_CHECKING:
     from .wowguild_automation import WowGuildAutomation
 
@@ -56,7 +58,11 @@ class GuildSettingsModal(discord.ui.Modal, title="WoW-Gildenprofil (aktives Prof
         cfg["wow"] = profile
         cfg["active_profile_key"] = version_key
         await self.cog.config.guild(self.guild).set(cfg)
-        await interaction.response.send_message("Gildenprofil gespeichert.", ephemeral=True)
+        glang = await self.cog._guild_lang(self.guild)
+        await interaction.response.send_message(
+            tr_lang(glang, "Gildenprofil gespeichert.", "Guild profile saved."),
+            ephemeral=True,
+        )
 
 
 class BotSetupModal(discord.ui.Modal, title="Blizzard API (Bot-Besitzer)"):
@@ -73,8 +79,11 @@ class BotSetupModal(discord.ui.Modal, title="Blizzard API (Bot-Besitzer)"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "de-DE"
         if interaction.user.id not in self.cog.bot.owner_ids:
-            await interaction.response.send_message("Nur Bot-Besitzer.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur Bot-Besitzer.", "Bot owner only."), ephemeral=True
+            )
             return
         data = await self.cog.config.bot_setup()
         owners = set(data.get("owner_ids", []))
@@ -85,7 +94,9 @@ class BotSetupModal(discord.ui.Modal, title="Blizzard API (Bot-Besitzer)"):
         await self.cog.config.bot_setup.set(data)
         self.cog.blizzard.client_id = data["client_id"]
         self.cog.blizzard.client_secret = data["client_secret"]
-        await interaction.response.send_message("Blizzard API gespeichert.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(glang, "Blizzard API gespeichert.", "Blizzard API saved."), ephemeral=True
+        )
 
 
 class MasterSetupModal(discord.ui.Modal, title="Globale Defaults"):
@@ -105,8 +116,11 @@ class MasterSetupModal(discord.ui.Modal, title="Globale Defaults"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "de-DE"
         if interaction.user.id not in self.cog.bot.owner_ids:
-            await interaction.response.send_message("Nur Bot-Besitzer.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur Bot-Besitzer.", "Bot owner only."), ephemeral=True
+            )
             return
         lang = str(self.default_language.value).strip()
         if lang not in ("de-DE", "en-US"):
@@ -118,7 +132,10 @@ class MasterSetupModal(discord.ui.Modal, title="Globale Defaults"):
         data["default_version"] = str(self.default_version.value).strip().lower()
         data["dashboard_enabled"] = en
         await self.cog.config.bot_setup.set(data)
-        await interaction.response.send_message("Master-Defaults gespeichert.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(glang, "Master-Defaults gespeichert.", "Master defaults saved."),
+            ephemeral=True,
+        )
 
 
 class SetRankTitleModal(discord.ui.Modal, title="Rangtitel (Index 0–9)"):
@@ -133,13 +150,18 @@ class SetRankTitleModal(discord.ui.Modal, title="Rangtitel (Index 0–9)"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        glang = await self.cog._guild_lang(self.guild)
         try:
             idx = int(str(self.rank_index.value).strip())
         except ValueError:
-            await interaction.response.send_message("Ungültiger Index.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Ungültiger Index.", "Invalid index."), ephemeral=True
+            )
             return
         if idx < 0 or idx > 9:
-            await interaction.response.send_message("Index 0–9.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Index 0–9.", "Index 0–9."), ephemeral=True
+            )
             return
         cfg = await self.cog._guild_config(self.guild)
         pk = cfg.get("active_profile_key", "retail") or "retail"
@@ -149,7 +171,14 @@ class SetRankTitleModal(discord.ui.Modal, title="Rangtitel (Index 0–9)"):
         titles[str(idx)] = str(self.title.value).strip()
         cfg.setdefault("rank_titles_by_profile", {})[pk] = titles
         await self.cog.config.guild(self.guild).set(cfg)
-        await interaction.response.send_message(f"Rang {idx}: `{self.title.value}` gespeichert.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(
+                glang,
+                f"Rang {idx}: `{self.title.value}` gespeichert.",
+                f"Rank {idx}: `{self.title.value}` saved.",
+            ),
+            ephemeral=True,
+        )
 
 
 class MapRankModal(discord.ui.Modal, title="Rang → Discord-Rolle"):
@@ -164,14 +193,19 @@ class MapRankModal(discord.ui.Modal, title="Rang → Discord-Rolle"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        glang = await self.cog._guild_lang(self.guild)
         try:
             rid = int(str(self.role_id.value).strip())
         except ValueError:
-            await interaction.response.send_message("Ungültige Rollen-ID.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Ungültige Rollen-ID.", "Invalid role ID."), ephemeral=True
+            )
             return
         role = self.guild.get_role(rid)
         if not role:
-            await interaction.response.send_message("Rolle nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Rolle nicht gefunden.", "Role not found."), ephemeral=True
+            )
             return
         cfg = await self.cog._guild_config(self.guild)
         pk = cfg.get("active_profile_key", "retail") or "retail"
@@ -181,7 +215,9 @@ class MapRankModal(discord.ui.Modal, title="Rang → Discord-Rolle"):
         m[str(self.rank_name.value).strip()] = rid
         cfg.setdefault("rank_mapping_by_profile", {})[pk] = m
         await self.cog.config.guild(self.guild).set(cfg)
-        await interaction.response.send_message(f"Mapping: `{self.rank_name.value}` → {role.mention}", ephemeral=True)
+        await interaction.response.send_message(
+            f"Mapping: `{self.rank_name.value}` → {role.mention}", ephemeral=True
+        )
 
 
 class SyncIntervalModal(discord.ui.Modal, title="Auto Rang-Sync Intervall"):
@@ -201,10 +237,13 @@ class SyncIntervalModal(discord.ui.Modal, title="Auto Rang-Sync Intervall"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        glang = await self.cog._guild_lang(self.guild)
         try:
             m = int(str(self.minutes.value).strip())
         except ValueError:
-            await interaction.response.send_message("Ungültige Zahl.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Ungültige Zahl.", "Invalid number."), ephemeral=True
+            )
             return
         if m < 0:
             m = 0
@@ -212,7 +251,11 @@ class SyncIntervalModal(discord.ui.Modal, title="Auto Rang-Sync Intervall"):
         cfg["rank_sync_interval_minutes"] = m
         await self.cog.config.guild(self.guild).set(cfg)
         await interaction.response.send_message(
-            f"Intervall: **{m}** Min. (0 = kein automatischer Sync).",
+            tr_lang(
+                glang,
+                f"Intervall: **{m}** Min. (0 = kein automatischer Sync).",
+                f"Interval: **{m}** min (0 = no automatic sync).",
+            ),
             ephemeral=True,
         )
 
@@ -258,11 +301,14 @@ class OnboardingSetupModal(discord.ui.Modal, title="Onboarding: Kanal & Rollen")
             except ValueError:
                 return -1
 
+        glang = await self.cog._guild_lang(self.guild)
         ch = _parse_id(self.channel_id.value)
         nr = _parse_id(self.new_role_id.value)
         cr = _parse_id(self.complete_role_id.value)
         if -1 in (ch, nr, cr):
-            await interaction.response.send_message("Ungültige IDs.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Ungültige IDs.", "Invalid IDs."), ephemeral=True
+            )
             return
         cfg = await self.cog._guild_config(self.guild)
         channels = dict(cfg.get("channels") or {})
@@ -278,7 +324,11 @@ class OnboardingSetupModal(discord.ui.Modal, title="Onboarding: Kanal & Rollen")
         await self.cog.config.guild(self.guild).set(cfg)
         await self.cog._apply_onboarding_channel_permissions(self.guild)
         await interaction.response.send_message(
-            "Onboarding-IDs gespeichert und Kanalrechte angewendet (soweit möglich).",
+            tr_lang(
+                glang,
+                "Onboarding-IDs gespeichert und Kanalrechte angewendet (soweit möglich).",
+                "Onboarding IDs saved and channel permissions applied (where possible).",
+            ),
             ephemeral=True,
         )
 
@@ -302,25 +352,42 @@ class AdminPickOneMemberView(discord.ui.View):
 
     @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Mitglied wählen", min_values=1, max_values=1)
     async def pick(self, interaction: discord.Interaction, select: discord.ui.UserSelect) -> None:
+        glang = await self.cog._guild_lang(self.guild)
         if interaction.user.id != self.officer.id:
-            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur für dich.", "For you only."), ephemeral=True
+            )
             return
         u = select.values[0]
         member = self.guild.get_member(u.id)
         if member is None:
-            await interaction.response.send_message("Mitglied nicht auf dem Server.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Mitglied nicht auf dem Server.", "Member not on the server."),
+                ephemeral=True,
+            )
             return
         if self.mode == "simulate_join":
             await interaction.response.defer(ephemeral=True)
             await self.cog._run_onboarding_flow(member, simulated=True)
-            await interaction.followup.send(f"Onboarding-Simulation für {member.mention} fertig.", ephemeral=True)
+            await interaction.followup.send(
+                tr_lang(
+                    glang,
+                    f"Onboarding-Simulation für {member.mention} fertig.",
+                    f"Onboarding simulation for {member.mention} done.",
+                ),
+                ephemeral=True,
+            )
             self.stop()
             return
         if self.mode == "remove_registration":
             await self.cog.config.member(member).registration.clear()
             await self.cog.config.member(member).selected_game.clear()
             await interaction.response.send_message(
-                f"Registrierung von {member.mention} gelöscht.",
+                tr_lang(
+                    glang,
+                    f"Registrierung von {member.mention} gelöscht.",
+                    f"Registration of {member.mention} deleted.",
+                ),
                 ephemeral=True,
             )
             self.stop()
@@ -331,7 +398,9 @@ class AdminPickOneMemberView(discord.ui.View):
             await interaction.followup.send(text[:1900], ephemeral=True)
             self.stop()
             return
-        await interaction.response.send_message("Unbekannt.", ephemeral=True)
+        await interaction.response.send_message(
+            tr_lang(glang, "Unbekannt.", "Unknown."), ephemeral=True
+        )
 
 
 class RankLockAddModal(discord.ui.Modal, title="Rank-Lock: Rang sperren"):
@@ -350,9 +419,12 @@ class RankLockAddModal(discord.ui.Modal, title="Rank-Lock: Rang sperren"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        glang = await self.cog._guild_lang(self.guild)
         new_l = str(self.line.value).strip()
         if not new_l:
-            await interaction.response.send_message("Leer.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Leer.", "Empty."), ephemeral=True
+            )
             return
         cfg = await self.cog._guild_config(self.guild)
         pk = str(cfg.get("active_profile_key") or "retail")
@@ -374,7 +446,11 @@ class RankLockAddModal(discord.ui.Modal, title="Rank-Lock: Rang sperren"):
         cfg["locked_rank_titles_by_profile"] = lr
         await self.cog.config.guild(self.guild).set(cfg)
         await interaction.response.send_message(
-            f"Rank-Lock für **{new_l}** gespeichert (aktives Profil `{pk}`).",
+            tr_lang(
+                glang,
+                f"Rank-Lock für **{new_l}** gespeichert (aktives Profil `{pk}`).",
+                f"Rank lock for **{new_l}** saved (active profile `{pk}`).",
+            ),
             ephemeral=True,
         )
 
@@ -395,9 +471,12 @@ class RankLockRemoveModal(discord.ui.Modal, title="Rank-Lock: Eintrag entfernen"
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
             return
+        glang = await self.cog._guild_lang(self.guild)
         needle = str(self.line.value).strip().lower()
         if not needle:
-            await interaction.response.send_message("Leer.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Leer.", "Empty."), ephemeral=True
+            )
             return
         cfg = await self.cog._guild_config(self.guild)
         pk = str(cfg.get("active_profile_key") or "retail")
@@ -414,7 +493,11 @@ class RankLockRemoveModal(discord.ui.Modal, title="Rank-Lock: Eintrag entfernen"
         removed = before - len(lines)
         if removed == 0:
             await interaction.response.send_message(
-                f"Kein Treffer in der Rank-Lock-Liste für Profil `{pk}`.",
+                tr_lang(
+                    glang,
+                    f"Kein Treffer in der Rank-Lock-Liste für Profil `{pk}`.",
+                    f"No match in the rank-lock list for profile `{pk}`.",
+                ),
                 ephemeral=True,
             )
             return
@@ -422,6 +505,10 @@ class RankLockRemoveModal(discord.ui.Modal, title="Rank-Lock: Eintrag entfernen"
         cfg["locked_rank_titles_by_profile"] = lr
         await self.cog.config.guild(self.guild).set(cfg)
         await interaction.response.send_message(
-            f"**{removed}** Eintrag/Einträge aus Rank-Lock entfernt (`{pk}`).",
+            tr_lang(
+                glang,
+                f"**{removed}** Eintrag/Einträge aus Rank-Lock entfernt (`{pk}`).",
+                f"**{removed}** entry/entries removed from rank lock (`{pk}`).",
+            ),
             ephemeral=True,
         )

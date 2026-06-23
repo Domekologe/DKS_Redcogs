@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import discord
 
+from .dks_dashboard import tr_lang
+
 if TYPE_CHECKING:
     from .wowguild_automation import WowGuildAutomation
 
@@ -19,6 +21,15 @@ DAY_LABEL_DE = {
     "friday": "Freitag",
     "saturday": "Samstag",
     "sunday": "Sonntag",
+}
+DAY_LABEL_EN = {
+    "monday": "Monday",
+    "tuesday": "Tuesday",
+    "wednesday": "Wednesday",
+    "thursday": "Thursday",
+    "friday": "Friday",
+    "saturday": "Saturday",
+    "sunday": "Sunday",
 }
 TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
 
@@ -57,8 +68,9 @@ def _norm_time(s: Optional[str]) -> Optional[str]:
     return None
 
 
-def format_day_line(key: str, cell: Dict[str, Any]) -> str:
-    label = DAY_LABEL_DE.get(key, key)
+def format_day_line(key: str, cell: Dict[str, Any], lang: str = "de-DE") -> str:
+    labels = DAY_LABEL_EN if str(lang).startswith("en") else DAY_LABEL_DE
+    label = labels.get(key, key)
     if not cell.get("can"):
         return f"**{label}:** —"
     start, end = cell.get("start"), cell.get("end")
@@ -66,10 +78,10 @@ def format_day_line(key: str, cell: Dict[str, Any]) -> str:
         extra = " (+1)" if _hhmm_to_min(str(end)) < _hhmm_to_min(str(start)) else ""
         return f"**{label}:** {start} – {end}{extra}"
     if start:
-        return f"**{label}:** ab {start}"
+        return f"**{label}:** {tr_lang(lang, 'ab', 'from')} {start}"
     if end:
-        return f"**{label}:** bis {end}"
-    return f"**{label}:** (aktiv, keine Zeiten)"
+        return f"**{label}:** {tr_lang(lang, 'bis', 'until')} {end}"
+    return f"**{label}:** {tr_lang(lang, '(aktiv, keine Zeiten)', '(active, no times)')}"
 
 
 def _hhmm_to_min(s: str) -> int:
@@ -77,9 +89,9 @@ def _hhmm_to_min(s: str) -> int:
     return int(h) * 60 + int(m)
 
 
-def format_member_ready_times_block(raw: Any) -> str:
+def format_member_ready_times_block(raw: Any, lang: str = "de-DE") -> str:
     data = _merge_ready_times(raw)
-    lines = [format_day_line(k, data[k]) for k in DAY_KEYS]
+    lines = [format_day_line(k, data[k], lang) for k in DAY_KEYS]
     return "\n".join(lines)
 
 
@@ -121,8 +133,11 @@ class ReadyDayModal(discord.ui.Modal):
         self.day_key = day_key
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        glang = await self.cog._guild_lang(self.member.guild)
         if interaction.user.id != self.member.id:
-            await interaction.response.send_message("Nur für den Besitzer.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur für den Besitzer.", "Owner only."), ephemeral=True
+            )
             return
         yn = str(self.active.value).lower().strip()
         can = yn in ("ja", "yes", "y", "j", "1", "true", "on")
@@ -132,9 +147,11 @@ class ReadyDayModal(discord.ui.Modal):
         data = _merge_ready_times(raw)
         data[self.day_key] = {"can": can, "start": st, "end": en}
         await self.cog.config.member(self.member).ready_times.set(data)
-        label = DAY_LABEL_DE.get(self.day_key, self.day_key)
+        labels = DAY_LABEL_EN if str(glang).startswith("en") else DAY_LABEL_DE
+        label = labels.get(self.day_key, self.day_key)
         await interaction.response.send_message(
-            f"{label} gespeichert: `{format_day_line(self.day_key, data[self.day_key])}`",
+            f"{label} {tr_lang(glang, 'gespeichert', 'saved')}: "
+            f"`{format_day_line(self.day_key, data[self.day_key], glang)}`",
             ephemeral=True,
         )
 
@@ -155,7 +172,10 @@ class MemberReadyTimesView(discord.ui.View):
 
     async def _on_day(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.member.id:
-            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            glang = await self.cog._guild_lang(self.member.guild)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur für dich.", "Just for you."), ephemeral=True
+            )
             return
         self._day_key = str((interaction.data.get("values") or ["monday"])[0])
         await interaction.response.defer()
@@ -163,7 +183,10 @@ class MemberReadyTimesView(discord.ui.View):
     @discord.ui.button(label="Gewählten Tag bearbeiten", style=discord.ButtonStyle.primary, row=1)
     async def edit_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if interaction.user.id != self.member.id:
-            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            glang = await self.cog._guild_lang(self.member.guild)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur für dich.", "Just for you."), ephemeral=True
+            )
             return
         raw = await self.cog.config.member(self.member).ready_times()
         data = _merge_ready_times(raw)
@@ -171,12 +194,16 @@ class MemberReadyTimesView(discord.ui.View):
 
     @discord.ui.button(label="Übersicht aktualisieren", style=discord.ButtonStyle.secondary, row=1)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        glang = await self.cog._guild_lang(self.member.guild)
         if interaction.user.id != self.member.id:
-            await interaction.response.send_message("Nur für dich.", ephemeral=True)
+            await interaction.response.send_message(
+                tr_lang(glang, "Nur für dich.", "Just for you."), ephemeral=True
+            )
             return
         raw = await self.cog.config.member(self.member).ready_times()
-        block = format_member_ready_times_block(raw)
-        await interaction.response.edit_message(content=f"**Deine Bereitschaftszeiten**\n\n{block}", view=self)
+        block = format_member_ready_times_block(raw, glang)
+        header = tr_lang(glang, "**Deine Bereitschaftszeiten**", "**Your ready times**")
+        await interaction.response.edit_message(content=f"{header}\n\n{block}", view=self)
 
 
 async def send_member_readytimes_panel(
@@ -184,10 +211,12 @@ async def send_member_readytimes_panel(
     interaction: discord.Interaction,
     member: discord.Member,
 ) -> None:
+    glang = await cog._guild_lang(member.guild)
     raw = await cog.config.member(member).ready_times()
-    block = format_member_ready_times_block(raw)
+    block = format_member_ready_times_block(raw, glang)
+    header = tr_lang(glang, "**Bereitschaftszeiten**", "**Ready times**")
     await interaction.response.send_message(
-        f"**Bereitschaftszeiten** — {member.display_name}\n\n{block}",
+        f"{header} — {member.display_name}\n\n{block}",
         view=MemberReadyTimesView(cog, member),
         ephemeral=True,
     )

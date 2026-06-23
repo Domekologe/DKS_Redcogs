@@ -14,7 +14,7 @@ from discord import app_commands
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 
-from .dks_dashboard import register_dashboard, unregister_dashboard
+from .dks_dashboard import register_dashboard, unregister_dashboard, tr_lang
 
 WEEKDAYS = [
     ("monday", "Montag"),
@@ -30,6 +30,18 @@ WEEKDAYS = [
 DAY_KEY_TO_DE = {k: de for k, de in WEEKDAYS}
 DAY_DE_TO_KEY = {de: k for k, de in WEEKDAYS}
 DAY_ORDER = [k for k, _ in WEEKDAYS]
+
+DAY_KEY_TO_EN = {
+    "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday",
+    "thursday": "Thursday", "friday": "Friday", "saturday": "Saturday",
+    "sunday": "Sunday",
+}
+
+
+def day_label(key: str, lang: str = "de-DE") -> str:
+    if lang.startswith("en"):
+        return DAY_KEY_TO_EN.get(key, key)
+    return DAY_KEY_TO_DE.get(key, key)
 
 TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")  # 24h HH:MM
 
@@ -130,7 +142,7 @@ def format_range_with_parens(start: Optional[str], end: Optional[str]) -> str:
 
 
 class ReadyTimes(commands.Cog):
-    """GuildTools Zusatz: Verfügbarkeiten pro Wochentag verwalten & abfragen (ephemeral)."""
+    """GuildTools add-on: manage & query availability per weekday (ephemeral)."""
 
     __author__ = "Domekologe"
     __version__ = "1.0.0"
@@ -149,14 +161,27 @@ class ReadyTimes(commands.Cog):
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
+    async def _lang(self, guild) -> str:
+        """Read the per-guild output language from the GuildTools cog (shared setting)."""
+        if guild is None:
+            return "de-DE"
+        gt = self.bot.get_cog("GuildTools")
+        if gt is None or not hasattr(gt, "config"):
+            return "de-DE"
+        try:
+            return await gt.config.guild(guild).language()
+        except Exception:
+            return "de-DE"
+
     # ------------------------------
     # Slash: /set-readytimes (ephemeral UI)
     # ------------------------------
 
-    @app_commands.command(name="set-readytimes", description="Setze/verwalte deine Raid-Verfügbarkeiten privat.")
+    @app_commands.command(name="set-readytimes", description="Set/manage your raid availability privately.")
     async def set_readytimes(self, interaction: discord.Interaction):
+        lang = await self._lang(interaction.guild)
         if not interaction.guild or not isinstance(interaction.user, (discord.Member,)):
-            return await interaction.response.send_message("Nur in einem Server benutzbar.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Nur in einem Server benutzbar.", "Only usable inside a server."), ephemeral=True)
 
         # Load current state
         member_cfg = await self.config.member(interaction.user).get_raw()
@@ -164,7 +189,7 @@ class ReadyTimes(commands.Cog):
             day: DayAvailability(can=v["can"], start=v["start"], end=v["end"]) for day, v in member_cfg.items()
         }
 
-        view = ReadyTimesView(self, interaction.user, avail_map)
+        view = ReadyTimesView(self, interaction.user, avail_map, lang=lang)
         embed = await view.build_embed()
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         try:
@@ -176,8 +201,8 @@ class ReadyTimes(commands.Cog):
     # Slash: /get-readytimes [day] [start] [end]
     # ------------------------------
 
-    @app_commands.command(name="get-readytimes", description="Abfrage, wer wann kann (Antwort ist privat).")
-    @app_commands.describe(day="Optional: Wochentag", start="Optional: Startzeit HH:MM", end="Optional: Endzeit HH:MM",user="Optional: Benutzer (zeigt nur dessen Zeiten)")
+    @app_commands.command(name="get-readytimes", description="Query who is available and when (reply is private).")
+    @app_commands.describe(day="Optional: weekday", start="Optional: start time HH:MM", end="Optional: end time HH:MM",user="Optional: user (shows only their times)")
     async def get_readytimes(
         self,
         interaction: discord.Interaction,
@@ -186,40 +211,41 @@ class ReadyTimes(commands.Cog):
         end: Optional[str] = None,
         user: Optional[discord.Member] = None,
     ):
+        lang = await self._lang(interaction.guild)
         if not interaction.guild:
-            return await interaction.response.send_message("Nur in einem Server benutzbar.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Nur in einem Server benutzbar.", "Only usable inside a server."), ephemeral=True)
 
         # ——— Read-only single overview like /set-readytimes when a user is chosen ———
         if user is not None:
             if user.bot:
-                return await interaction.response.send_message("Bots werden nicht berücksichtigt.", ephemeral=True)
+                return await interaction.response.send_message(tr_lang(lang, "Bots werden nicht berücksichtigt.", "Bots are not considered."), ephemeral=True)
             if user not in interaction.guild.members:
-                return await interaction.response.send_message("Dieser Benutzer ist nicht auf diesem Server.", ephemeral=True)
+                return await interaction.response.send_message(tr_lang(lang, "Dieser Benutzer ist nicht auf diesem Server.", "This user is not on this server."), ephemeral=True)
 
             data = await self.config.member(user).get_raw()
 
             embed = discord.Embed(
-                title=f"Verfügbarkeiten von {user.display_name}",
-                description="**Status:** Read-only",
+                title=tr_lang(lang, f"Verfügbarkeiten von {user.display_name}", f"Availability of {user.display_name}"),
+                description=tr_lang(lang, "**Status:** Schreibgeschützt", "**Status:** Read-only"),
                 color=discord.Color.blurple(),
             )
             for key in DAY_ORDER:
                 info = data.get(key, {"can": False, "start": None, "end": None})
                 icon = "✅" if info["can"] else "❌"
-                text = "Kann nicht" if not info["can"] else format_range(info["start"], info["end"])
-                embed.add_field(name=DAY_KEY_TO_DE[key], value=f"{icon} {text}", inline=False)
+                text = tr_lang(lang, "Kann nicht", "Not available") if not info["can"] else format_range(info["start"], info["end"])
+                embed.add_field(name=day_label(key, lang), value=f"{icon} {text}", inline=False)
 
             # Optional: footer analogous to /set, but without controls
-            embed.set_footer(text="Übersicht ohne Bearbeitungsmöglichkeiten (read-only)")
+            embed.set_footer(text=tr_lang(lang, "Übersicht ohne Bearbeitungsmöglichkeiten (read-only)", "Overview without editing options (read-only)"))
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
         start_t = parse_time_or_none(start)
         end_t   = parse_time_or_none(end)
         if start and not start_t:
-            return await interaction.response.send_message("Ungültige Startzeit. Nutze HH:MM (24h).", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Ungültige Startzeit. Nutze HH:MM (24h).", "Invalid start time. Use HH:MM (24h)."), ephemeral=True)
         if end and not end_t:
-            return await interaction.response.send_message("Ungültige Endzeit. Nutze HH:MM (24h).", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Ungültige Endzeit. Nutze HH:MM (24h).", "Invalid end time. Use HH:MM (24h)."), ephemeral=True)
 
         # Guild members (excluding bots)
         results = []
@@ -237,16 +263,21 @@ class ReadyTimes(commands.Cog):
             if d in DAY_ORDER:
                 day_key = d
             else:
-                # try German label -> key
+                # try German/English label -> key
                 de2key = {v.lower(): k for k, v in DAY_KEY_TO_DE.items()}
+                en2key = {v.lower(): k for k, v in DAY_KEY_TO_EN.items()}
                 if d in de2key:
                     day_key = de2key[d]
+                elif d in en2key:
+                    day_key = en2key[d]
                 else:
-                    return await interaction.response.send_message("Unbekannter Wochentag.", ephemeral=True)
+                    return await interaction.response.send_message(tr_lang(lang, "Unbekannter Wochentag.", "Unknown weekday."), ephemeral=True)
+
+        none_str = tr_lang(lang, "Keiner!", "Nobody!")
 
         # 1) No args => overall overview
         if not day_key and not start_t and not end_t:
-            embed = discord.Embed(title="Gesamtübersicht Verfügbarkeiten", color=discord.Color.blurple())
+            embed = discord.Embed(title=tr_lang(lang, "Gesamtübersicht Verfügbarkeiten", "Overall availability"), color=discord.Color.blurple())
             for key in DAY_ORDER:
                 parts: List[str] = []
                 for member, data in results:
@@ -254,8 +285,8 @@ class ReadyTimes(commands.Cog):
                     if info["can"]:
                         parts.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
                 embed.add_field(
-                    name=DAY_KEY_TO_DE[key],
-                    value=", ".join(parts) if parts else "Keiner!",
+                    name=day_label(key, lang),
+                    value=", ".join(parts) if parts else none_str,
                     inline=False,
                 )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -268,8 +299,8 @@ class ReadyTimes(commands.Cog):
                 if info["can"]:
                     lines.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
             embed = discord.Embed(
-                title=f"{DAY_KEY_TO_DE[day_key]}",
-                description="\n".join(lines) if lines else "Keiner!",
+                title=f"{day_label(day_key, lang)}",
+                description="\n".join(lines) if lines else none_str,
                 color=discord.Color.blurple(),
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -297,10 +328,10 @@ class ReadyTimes(commands.Cog):
                         # both times given -> as before: names only
                         lines.append(member.display_name)
 
-            title = f"{DAY_KEY_TO_DE[day_key]} — {format_range_with_parens(start_t, end_t)}"
+            title = f"{day_label(day_key, lang)} — {format_range_with_parens(start_t, end_t)}"
             embed = discord.Embed(
                 title=title,
-                description="\n".join(lines) if lines else "Keiner!",
+                description="\n".join(lines) if lines else none_str,
                 color=discord.Color.green(),
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -322,33 +353,34 @@ class ReadyTimes(commands.Cog):
                     b_end   = want_end   if want_end   is not None else 24 * 60 - 1
                     if overlaps_wrap(a_start, a_end, b_start, b_end):
                         if start_t and not end_t:
-                            day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['end']})")
+                            day_tokens.append(f"{day_label(key, lang)} ({info['end']})")
                         elif end_t and not start_t:
-                            day_tokens.append(f"{DAY_KEY_TO_DE[key]} ({info['start']})")
+                            day_tokens.append(f"{day_label(key, lang)} ({info['start']})")
                         else:
-                            day_tokens.append(DAY_KEY_TO_DE[key])
+                            day_tokens.append(day_label(key, lang))
                 if day_tokens:
                     lines.append(f"{member.display_name} ({', '.join(day_tokens)})")
 
-            title = f"Zeitfenster — {format_range_with_parens(start_t, end_t)}"
+            title = tr_lang(lang, f"Zeitfenster — {format_range_with_parens(start_t, end_t)}", f"Time window — {format_range_with_parens(start_t, end_t)}")
             embed = discord.Embed(
                 title=title,
-                description="\n".join(lines) if lines else "Keiner!",
+                description="\n".join(lines) if lines else none_str,
                 color=discord.Color.purple(),
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         # Fallback
-        return await interaction.response.send_message("Ungültige Kombination.", ephemeral=True)
+        return await interaction.response.send_message(tr_lang(lang, "Ungültige Kombination.", "Invalid combination."), ephemeral=True)
 
 
 
 class ReadyTimesView(discord.ui.View):
-    def __init__(self, cog: ReadyTimes, member: discord.Member, state: Dict[str, DayAvailability]):
+    def __init__(self, cog: ReadyTimes, member: discord.Member, state: Dict[str, DayAvailability], lang: str = "de-DE"):
         super().__init__(timeout=600)
         self.cog = cog
         self.member = member
         self.state = state  # key -> DayAvailability
+        self.lang = lang
 
         self.finished = False
 
@@ -363,7 +395,7 @@ class ReadyTimesView(discord.ui.View):
 
         self.edit_times = EditTimesButton(self)
         self.edit_times.disabled = not self.state.get(self.current_day_key, DayAvailability()).can
-        self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
+        self.edit_times.label = tr_lang(self.lang, f"Zeiten setzen ({day_label(self.current_day_key, self.lang)})", f"Set times ({day_label(self.current_day_key, self.lang)})")
         self.add_item(self.edit_times)
 
         self.finished_btn = FinishedButton(self)
@@ -373,24 +405,25 @@ class ReadyTimesView(discord.ui.View):
         self.current_day_key = DAY_ORDER[0]
 
     async def build_embed(self) -> discord.Embed:
+        lang = self.lang
         emb = discord.Embed(
-            title=f"Verfügbarkeiten von {self.member.display_name}",
+            title=tr_lang(lang, f"Verfügbarkeiten von {self.member.display_name}", f"Availability of {self.member.display_name}"),
             color=discord.Color.blurple() if not self.finished else discord.Color.green(),
         )
-        status = "Bearbeitung" if not self.finished else "Fertig (read-only)"
+        status = tr_lang(lang, "Bearbeitung", "Editing") if not self.finished else tr_lang(lang, "Fertig (schreibgeschützt)", "Done (read-only)")
         emb.description = (
-            f"**Aktuell ausgewählt:** {DAY_KEY_TO_DE.get(self.current_day_key, '-')}\n"
-            f"**Status:** {status}"
+            tr_lang(lang, f"**Aktuell ausgewählt:** {day_label(self.current_day_key, lang)}\n", f"**Currently selected:** {day_label(self.current_day_key, lang)}\n")
+            + tr_lang(lang, f"**Status:** {status}", f"**Status:** {status}")
         )
         for key in DAY_ORDER:
             info = self.state.get(key, DayAvailability())
             icon = "✅" if info.can else "❌"
-            text = "Kann nicht" if not info.can else format_range(info.start, info.end)
-            emb.add_field(name=DAY_KEY_TO_DE[key], value=f"{icon} {text}", inline=False)
+            text = tr_lang(lang, "Kann nicht", "Not available") if not info.can else format_range(info.start, info.end)
+            emb.add_field(name=day_label(key, lang), value=f"{icon} {text}", inline=False)
 
-        footer = "Tag auswählen ▶️ | Ja/Nein togglen | Zeiten bearbeiten"
+        footer = tr_lang(lang, "Tag auswählen ▶️ | Ja/Nein togglen | Zeiten bearbeiten", "Select day ▶️ | toggle yes/no | edit times")
         if self.finished:
-            footer = "Fertig – diese Ansicht ist gesperrt."
+            footer = tr_lang(lang, "Fertig – diese Ansicht ist gesperrt.", "Done – this view is locked.")
         emb.set_footer(text=footer)
         return emb
 
@@ -403,7 +436,7 @@ class ReadyTimesView(discord.ui.View):
         else:
             can_today = self.state.get(self.current_day_key, DayAvailability()).can
             self.edit_times.disabled = not can_today
-            self.edit_times.label = f"Zeiten setzen ({DAY_KEY_TO_DE[self.current_day_key]})"
+            self.edit_times.label = tr_lang(self.lang, f"Zeiten setzen ({day_label(self.current_day_key, self.lang)})", f"Set times ({day_label(self.current_day_key, self.lang)})")
 
         embed = await self.build_embed()
 
@@ -422,8 +455,9 @@ class ReadyTimesView(discord.ui.View):
 class DaySelect(discord.ui.Select):
     def __init__(self, parent: ReadyTimesView):
         self.parent_view = parent
-        options = [discord.SelectOption(label=de, value=key) for key, de in WEEKDAYS]
-        super().__init__(placeholder="Wochentag wählen", min_values=1, max_values=1, options=options)
+        lang = parent.lang
+        options = [discord.SelectOption(label=day_label(key, lang), value=key) for key, _ in WEEKDAYS]
+        super().__init__(placeholder=tr_lang(lang, "Wochentag wählen", "Choose weekday"), min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         self.parent_view.current_day_key = self.values[0]
@@ -433,7 +467,7 @@ class DaySelect(discord.ui.Select):
 class ToggleCanButton(discord.ui.Button):
     def __init__(self, parent: ReadyTimesView):
         self.parent_view = parent
-        super().__init__(style=discord.ButtonStyle.primary, label="Kann / Kann nicht", emoji="🔁")
+        super().__init__(style=discord.ButtonStyle.primary, label=tr_lang(parent.lang, "Kann / Kann nicht", "Available / Not available"), emoji="🔁")
 
     async def callback(self, interaction: discord.Interaction):
         key = self.parent_view.current_day_key
@@ -452,7 +486,7 @@ class ToggleCanButton(discord.ui.Button):
 class EditTimesButton(discord.ui.Button):
     def __init__(self, parent: ReadyTimesView):
         self.parent_view = parent
-        super().__init__(style=discord.ButtonStyle.secondary, label="Zeiten setzen", emoji="⏱️")
+        super().__init__(style=discord.ButtonStyle.secondary, label=tr_lang(parent.lang, "Zeiten setzen", "Set times"), emoji="⏱️")
         # Disabled if current day cannot
         self.disabled = not self.parent_view.state.get(self.parent_view.current_day_key, DayAvailability()).can
 
@@ -465,12 +499,12 @@ class EditTimesButton(discord.ui.Button):
 class FinishedButton(discord.ui.Button):
     def __init__(self, parent: ReadyTimesView):
         self.parent_view = parent
-        super().__init__(style=discord.ButtonStyle.success, label="Fertig!", emoji="✅")
+        super().__init__(style=discord.ButtonStyle.success, label=tr_lang(parent.lang, "Fertig!", "Done!"), emoji="✅")
 
     async def callback(self, interaction: discord.Interaction):
         self.parent_view.finished = True
         # Optional: change label so it stays visible even though disabled
-        self.label = "Fertig ✓"
+        self.label = tr_lang(self.parent_view.lang, "Fertig ✓", "Done ✓")
         await self.parent_view.refresh_message(interaction)
 
 
@@ -480,9 +514,15 @@ class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
     end = discord.ui.TextInput(label="Bis (Ende)", placeholder="z. B. 23:00", required=True, max_length=5)
 
     def __init__(self, parent: ReadyTimesView, day_key: str, cur_start: Optional[str], cur_end: Optional[str]):
-        super().__init__()
+        lang = parent.lang
+        super().__init__(title=tr_lang(lang, "Zeiten eintragen (HH:MM)", "Enter times (HH:MM)"))
         self.parent_view = parent
         self.day_key = day_key
+        self.lang = lang
+        self.start.label = tr_lang(lang, "Von (Start)", "From (start)")
+        self.start.placeholder = tr_lang(lang, "z. B. 19:30", "e.g. 19:30")
+        self.end.label = tr_lang(lang, "Bis (Ende)", "To (end)")
+        self.end.placeholder = tr_lang(lang, "z. B. 23:00", "e.g. 23:00")
         if cur_start:
             self.start.default = cur_start
         if cur_end:
@@ -492,9 +532,9 @@ class TimesModal(discord.ui.Modal, title="Zeiten eintragen (HH:MM)"):
         s = normalize_time_input(self.start.value)
         e = normalize_time_input(self.end.value)
         if not TIME_RE.match(s) or not TIME_RE.match(e):
-            return await interaction.response.send_message("Bitte HH:MM 24h-Format verwenden.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(self.lang, "Bitte HH:MM 24h-Format verwenden.", "Please use HH:MM 24h format."), ephemeral=True)
         if hhmm_to_min(s) == hhmm_to_min(e):
-            return await interaction.response.send_message("Start und Ende dürfen nicht gleich sein.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(self.lang, "Start und Ende dürfen nicht gleich sein.", "Start and end must not be equal."), ephemeral=True)
         # If end < start, we interpret this as 'until next day' → allowed.
 
 

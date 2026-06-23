@@ -16,8 +16,9 @@ except ImportError:
     aiohttp = None
 
 from .dks_dashboard import (
-    dashboard_widget, WidgetData,
+    dashboard_widget, dashboard_panel, WidgetData, PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
+    L, tr, tr_lang,
 )
 
 ONLINE_STATES = {discord.Status.online, discord.Status.idle, discord.Status.dnd}
@@ -47,7 +48,7 @@ def _slugify_char(s: str) -> str:
     return re.sub(r"-{2,}", "-", s).strip("-")
 
 class GuildTools(commands.Cog):
-    """Cog: Tools für WoW-Gilden – Export, Abwesenheiten & /whois (ENV-first)."""
+    """Cog: Tools for WoW guilds - export, absences & /whois (ENV-first)."""
 
     __author__ = "Domekologe"
     __version__ = "1.3.0"
@@ -58,7 +59,8 @@ class GuildTools(commands.Cog):
         self.config.register_guild(
             last_seen={},
             wow_default_region="eu",
-            wow_default_realm=""
+            wow_default_realm="",
+            language="de-DE"
         )
         self.config.register_global(
             blizz_client_id="",
@@ -77,13 +79,48 @@ class GuildTools(commands.Cog):
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
-    @dashboard_widget("tracked_members", "Erfasste Mitglieder", size="sm", permission="guild_member")
+    @dashboard_widget("tracked_members", L("Erfasste Mitglieder", "Tracked Members"), size="sm", permission="guild_member")
     async def tracked_members_widget(self, ctx):
         try:
             data = await self.config.guild(ctx.guild).last_seen()
             return WidgetData.kpi(value=int(len(data)), label="Erfasste Mitglieder")
         except Exception:
             return WidgetData.kpi(value="–", label="Erfasste Mitglieder")
+
+    async def _lang(self, guild) -> str:
+        if guild is None:
+            return "de-DE"
+        return await self.config.guild(guild).language()
+
+    @dashboard_panel(
+        "settings", L("GuildTools-Einstellungen", "GuildTools settings"),
+        mount="guild_settings", permission="guild_admin", order=5,
+    )
+    async def settings_panel(self, ctx):
+        return PanelSchema(
+            description=tr(
+                ctx,
+                "Sprache der Bot-Ausgaben für diesen Server.",
+                "Output language for this server.",
+            ),
+            fields=[
+                Field.select(
+                    "language", L("Sprache", "Language"),
+                    [
+                        {"value": "de-DE", "label": "Deutsch"},
+                        {"value": "en-US", "label": "English"},
+                    ],
+                    value=str(await self.config.guild(ctx.guild).language()),
+                    reload_on_change=True,
+                )
+            ],
+        )
+
+    @settings_panel.on_submit
+    async def _save_settings(self, ctx, data):
+        lang = str(data.get("language", "de-DE")).strip() or "de-DE"
+        await self.config.guild(ctx.guild).language.set(lang)
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # ---------- Presence Tracking ----------
     @commands.Cog.listener()
@@ -103,21 +140,26 @@ class GuildTools(commands.Cog):
         await self.config.guild(after.guild).last_seen.set(data)
 
     # ---------- /export-userlist ----------
-    @app_commands.command(name="export-userlist", description="Exportiert alle User in eine CSV.")
+    @app_commands.command(name="export-userlist", description="Export all users to a CSV.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def export_userlist(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
+        lang = await self._lang(guild)
         if guild is None:
-            return await interaction.followup.send("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Dieser Befehl muss in einer Guild ausgeführt werden.", "This command must be used in a server."), ephemeral=True)
         members = []
         try:
             async for m in guild.fetch_members(limit=None):
                 members.append(m)
         except discord.Forbidden:
             return await interaction.followup.send(
-                "Mir fehlen Berechtigungen, um Mitglieder zu lesen. Bitte gib mir **Mitglieder anzeigen** (View Guild Members).",
+                tr_lang(
+                    lang,
+                    "Mir fehlen Berechtigungen, um Mitglieder zu lesen. Bitte gib mir **Mitglieder anzeigen** (View Guild Members).",
+                    "I'm missing permissions to read members. Please grant me **View Guild Members**.",
+                ),
                 ephemeral=True
             )
         last_seen_map = await self.config.guild(guild).last_seen()
@@ -135,26 +177,27 @@ class GuildTools(commands.Cog):
             ])
         buf.seek(0)
         file = discord.File(io.BytesIO(buf.getvalue().encode("utf-8-sig")), filename=f"user_export_{guild.id}.csv")
-        await interaction.followup.send("Hier ist dein Export (nur für dich sichtbar).", file=file, ephemeral=True)
+        await interaction.followup.send(tr_lang(lang, "Hier ist dein Export (nur für dich sichtbar).", "Here is your export (only visible to you)."), file=file, ephemeral=True)
 
     # ---------- Abwesenheiten ----------
-    @app_commands.command(name="add-absence", description="Trage eine Abwesenheit ein (DD-MM-YYYY / DD.MM.YYYY / DD/MM/YYYY).")
-    @app_commands.describe(von="Startdatum", bis="Enddatum")
+    @app_commands.command(name="add-absence", description="Add an absence (DD-MM-YYYY / DD.MM.YYYY / DD/MM/YYYY).")
+    @app_commands.describe(von="Start date", bis="End date")
     @app_commands.guild_only()
     async def add_absence(self, interaction: discord.Interaction, von: str, bis: str):
+        lang = await self._lang(interaction.guild)
         start, end = _parse_date(von), _parse_date(bis)
         if not start:
-            return await interaction.response.send_message("❌ Ungültiges **von**-Datum.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "❌ Ungültiges **von**-Datum.", "❌ Invalid **start** date."), ephemeral=True)
         if not end:
-            return await interaction.response.send_message("❌ Ungültiges **bis**-Datum.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "❌ Ungültiges **bis**-Datum.", "❌ Invalid **end** date."), ephemeral=True)
         if end < start:
-            return await interaction.response.send_message("❌ **bis** darf nicht vor **von** liegen.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "❌ **bis** darf nicht vor **von** liegen.", "❌ **end** must not be before **start**."), ephemeral=True)
         if (end - start).days > 365:
-            return await interaction.response.send_message("❌ Abwesenheiten dürfen max. 365 Tage umfassen.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "❌ Abwesenheiten dürfen max. 365 Tage umfassen.", "❌ Absences may span at most 365 days."), ephemeral=True)
 
         guild = interaction.guild
         if guild is None:
-            return await interaction.response.send_message("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Dieser Befehl muss in einer Guild ausgeführt werden.", "This command must be used in a server."), ephemeral=True)
 
         data_dir = cog_data_path(raw_name=self.__class__.__name__)
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -178,22 +221,29 @@ class GuildTools(commands.Cog):
             await asyncio.to_thread(_write)
 
         await interaction.response.send_message(
-            f"✅ Neue Abwesenheit gespeichert für **{interaction.user.mention}**\n"
-            f"• Von: **{_out_date(start)}**\n"
-            f"• Bis: **{_out_date(end)}**",
+            tr_lang(
+                lang,
+                f"✅ Neue Abwesenheit gespeichert für **{interaction.user.mention}**\n"
+                f"• Von: **{_out_date(start)}**\n"
+                f"• Bis: **{_out_date(end)}**",
+                f"✅ New absence saved for **{interaction.user.mention}**\n"
+                f"• From: **{_out_date(start)}**\n"
+                f"• To: **{_out_date(end)}**",
+            ),
         )
 
-    @app_commands.command(name="list-absence", description="Zeigt deine Abwesenheiten (ephemeral).")
+    @app_commands.command(name="list-absence", description="Show your absences (ephemeral).")
     @app_commands.guild_only()
     async def list_absence(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
+        lang = await self._lang(guild)
         if guild is None:
-            return await interaction.followup.send("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Dieser Befehl muss in einer Guild ausgeführt werden.", "This command must be used in a server."), ephemeral=True)
         data_dir = cog_data_path(raw_name=self.__class__.__name__)
         path = data_dir / f"absences_{guild.id}.txt"
         if not path.exists():
-            return await interaction.followup.send("Keine Abwesenheiten gefunden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Keine Abwesenheiten gefunden.", "No absences found."), ephemeral=True)
 
         uid = str(interaction.user.id)
         async with self._abs_lock:
@@ -210,24 +260,28 @@ class GuildTools(commands.Cog):
             rows = await asyncio.to_thread(_read_rows)
 
         if not rows:
-            return await interaction.followup.send("Du hast keine Abwesenheiten hinterlegt.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Du hast keine Abwesenheiten hinterlegt.", "You have no absences on file."), ephemeral=True)
 
-        desc = "\n".join(f"• **{r[3]}** → **{r[4]}** (als *{r[2]}*)" for r in rows)
-        embed = discord.Embed(title="Deine Abwesenheiten", description=desc, color=discord.Color.blurple())
+        desc = "\n".join(
+            tr_lang(lang, f"• **{r[3]}** → **{r[4]}** (als *{r[2]}*)", f"• **{r[3]}** → **{r[4]}** (as *{r[2]}*)")
+            for r in rows
+        )
+        embed = discord.Embed(title=tr_lang(lang, "Deine Abwesenheiten", "Your absences"), description=desc, color=discord.Color.blurple())
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="get-absence", description="CSV mit allen Abwesenheiten (nur Mods).")
+    @app_commands.command(name="get-absence", description="CSV with all absences (mods only).")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def get_absence(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
+        lang = await self._lang(guild)
         if guild is None:
-            return await interaction.followup.send("Dieser Befehl muss in einer Guild ausgeführt werden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Dieser Befehl muss in einer Guild ausgeführt werden.", "This command must be used in a server."), ephemeral=True)
         data_dir = cog_data_path(raw_name=self.__class__.__name__)
         path = data_dir / f"absences_{guild.id}.txt"
         if not path.exists():
-            return await interaction.followup.send("Keine Abwesenheiten gefunden.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Keine Abwesenheiten gefunden.", "No absences found."), ephemeral=True)
 
         async with self._abs_lock:
             def _read_all():
@@ -237,13 +291,13 @@ class GuildTools(commands.Cog):
 
         out_bytes = ("\ufeff" + content).encode("utf-8")
         file = discord.File(io.BytesIO(out_bytes), filename=f"absences_{guild.id}.csv")
-        await interaction.followup.send("Hier ist die Abwesenheitsliste (nur für dich sichtbar).", file=file, ephemeral=True)
+        await interaction.followup.send(tr_lang(lang, "Hier ist die Abwesenheitsliste (nur für dich sichtbar).", "Here is the absence list (only visible to you)."), file=file, ephemeral=True)
 
     # ---------- Blizzard API: ENV-first Credentials ----------
     @commands.command(name="setblizzard")
     @commands.is_owner()
     async def set_blizzard_credentials(self, ctx: commands.Context, client_id: str, client_secret: str):
-        """Owner-only: Setzt Blizzard API Client-ID/-Secret (Fallback, wenn ENV nicht genutzt wird)."""
+        """Owner-only: Set the Blizzard API client ID/secret (fallback when ENV is not used)."""
         await self.config.blizz_client_id.set(client_id)
         await self.config.blizz_client_secret.set(client_secret)
         await self.config.blizz_token.set("")
@@ -256,7 +310,7 @@ class GuildTools(commands.Cog):
     @commands.command(name="clearblizzard")
     @commands.is_owner()
     async def clear_blizzard_credentials(self, ctx: commands.Context):
-        """Owner-only: Löscht Blizzard API Credentials aus der Config."""
+        """Owner-only: Remove the Blizzard API credentials from the config."""
         await self.config.blizz_client_id.set("")
         await self.config.blizz_client_secret.set("")
         await self.config.blizz_token.set("")
@@ -265,17 +319,18 @@ class GuildTools(commands.Cog):
         self._token_mem_exp = 0
         await ctx.tick()
 
-    @app_commands.command(name="set-wow-defaults", description="Setzt Default-Region/Realm für /whois.")
-    @app_commands.describe(region="eu/us/kr/tw", realm="Realmname (z. B. 'Blackmoore')")
+    @app_commands.command(name="set-wow-defaults", description="Set the default region/realm for /whois.")
+    @app_commands.describe(region="eu/us/kr/tw", realm="Realm name (e.g. 'Blackmoore')")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def set_wow_defaults(self, interaction: discord.Interaction, region: str, realm: str):
+        lang = await self._lang(interaction.guild)
         region = region.lower()
         if region not in {"eu", "us", "kr", "tw"}:
-            return await interaction.response.send_message("Region muss **eu/us/kr/tw** sein.", ephemeral=True)
+            return await interaction.response.send_message(tr_lang(lang, "Region muss **eu/us/kr/tw** sein.", "Region must be **eu/us/kr/tw**."), ephemeral=True)
         await self.config.guild(interaction.guild).wow_default_region.set(region)
         await self.config.guild(interaction.guild).wow_default_realm.set(realm.strip())
-        await interaction.response.send_message(f"✅ Defaults gesetzt: Region **{region}**, Realm **{realm.strip()}**", ephemeral=True)
+        await interaction.response.send_message(tr_lang(lang, f"✅ Defaults gesetzt: Region **{region}**, Realm **{realm.strip()}**", f"✅ Defaults set: region **{region}**, realm **{realm.strip()}**"), ephemeral=True)
 
     async def _get_token(self) -> str:
         """ENV-first token acquisition. If ENV is used, token is kept only in memory; otherwise also in Config."""
@@ -358,31 +413,34 @@ class GuildTools(commands.Cog):
         prof["_equipped_ilvl"] = ilvl
         return prof
 
-    @app_commands.command(name="whois", description="Zeigt WoW-Charakterinfos (Level, Klasse, Gilde, iLvl wenn möglich).")
-    @app_commands.describe(charname="Charaktername", realm="Optionaler Realm (sonst Gilden-Default)")
+    @app_commands.command(name="whois", description="Show WoW character info (level, class, guild, iLvl if available).")
+    @app_commands.describe(charname="Character name", realm="Optional realm (otherwise the guild default)")
     @app_commands.guild_only()
     async def whois(self, interaction: discord.Interaction, charname: str, realm: str | None = None):
         await interaction.response.defer(ephemeral=True)
+        lang = await self._lang(interaction.guild)
         gconf = self.config.guild(interaction.guild)
         region = (await gconf.wow_default_region()) or "eu"
         def_realm = (await gconf.wow_default_realm()) or ""
         realm_use = realm.strip() if realm else def_realm
         if not realm_use:
-            return await interaction.followup.send("Bitte Realm angeben oder `/set-wow-defaults` setzen.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "Bitte Realm angeben oder `/set-wow-defaults` setzen.", "Please provide a realm or set `/set-wow-defaults`."), ephemeral=True)
 
+        locale = "en_US" if lang.startswith("en") else "de_DE"
         try:
-            prof = await self._get_profile(region, realm_use, charname, locale="de_DE")
+            prof = await self._get_profile(region, realm_use, charname, locale=locale)
         except Exception as e:
-            return await interaction.followup.send(f"❌ Fehler bei der Blizzard API: {e}", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, f"❌ Fehler bei der Blizzard API: {e}", f"❌ Blizzard API error: {e}"), ephemeral=True)
 
         if not prof:
-            return await interaction.followup.send("❌ Charakter nicht gefunden (Name/Realm/Region prüfen).", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Charakter nicht gefunden (Name/Realm/Region prüfen).", "❌ Character not found (check name/realm/region)."), ephemeral=True)
 
+        unknown = tr_lang(lang, "Unbekannt", "Unknown")
         name = prof.get("name", charname)
         realm_name = prof.get("realm", {}).get("name", realm_use)
         level = prof.get("level", "?")
-        char_class = prof.get("character_class", {}).get("name", "Unbekannt")
-        race = prof.get("race", {}).get("name", "Unbekannt")
+        char_class = prof.get("character_class", {}).get("name", unknown)
+        race = prof.get("race", {}).get("name", unknown)
         guild_name = prof.get("guild", {}).get("name", "—")
         ilvl = prof.get("_equipped_ilvl")
         faction = prof.get("faction", {}).get("name", "")
@@ -393,13 +451,13 @@ class GuildTools(commands.Cog):
             last_login_str = dt.strftime("%d.%m.%Y %H:%M UTC")
 
         embed = discord.Embed(title=f"{name} @ {realm_name}", color=discord.Color.gold())
-        embed.add_field(name="Level / Klasse", value=f"{level} / {char_class}", inline=True)
-        embed.add_field(name="Rasse / Fraktion", value=f"{race} / {faction or '—'}", inline=True)
-        embed.add_field(name="Gilde", value=guild_name or "—", inline=True)
+        embed.add_field(name=tr_lang(lang, "Level / Klasse", "Level / Class"), value=f"{level} / {char_class}", inline=True)
+        embed.add_field(name=tr_lang(lang, "Rasse / Fraktion", "Race / Faction"), value=f"{race} / {faction or '—'}", inline=True)
+        embed.add_field(name=tr_lang(lang, "Gilde", "Guild"), value=guild_name or "—", inline=True)
         if ilvl:
-            embed.add_field(name="Ø Itemlevel", value=str(ilvl), inline=True)
+            embed.add_field(name=tr_lang(lang, "Ø Itemlevel", "Avg. item level"), value=str(ilvl), inline=True)
         if last_login_str:
-            embed.add_field(name="Zuletzt eingeloggt", value=last_login_str, inline=False)
+            embed.add_field(name=tr_lang(lang, "Zuletzt eingeloggt", "Last login"), value=last_login_str, inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 async def setup(bot: Red):

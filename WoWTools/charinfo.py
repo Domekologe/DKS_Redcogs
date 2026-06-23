@@ -17,6 +17,7 @@ from .autocomplete import (
     _API_HOST,
     _AUTH_HOST,
 )
+from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
 
@@ -101,7 +102,7 @@ async def _fetch_statistics(
 
 @cog_i18n(_)
 class CharInfo(commands.Cog):
-    """Zeigt Kern-Charakterwerte (HP, Mana, Primärwerte, Crit/Haste/Mastery, etc.)."""
+    """Show core character stats (HP, mana, primary stats, crit/haste/mastery, etc.)."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -109,10 +110,10 @@ class CharInfo(commands.Cog):
     @commands.hybrid_command(name="charinfo")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
-        realm="Realm (mit Bindestrich statt Leerzeichen)",
-        character="Charaktername",
-        game="Classic (MoP Classic) oder Retail",
-        locale="Locale (z. B. de oder de_DE, en oder en_US)",
+        realm="Realm (use a hyphen instead of spaces)",
+        character="Character name",
+        game="Classic (MoP Classic) or Retail",
+        locale="Locale (e.g. de or de_DE, en or en_US)",
     )
     @app_commands.choices(
         game=[
@@ -132,6 +133,7 @@ class CharInfo(commands.Cog):
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
         region = region.lower()
         locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")
@@ -145,7 +147,10 @@ class CharInfo(commands.Cog):
         try:
             js = await _fetch_statistics(self, region=region, realm=realm_slug, character=char_slug, game=game, locale=locale)
         except Exception as e:
-            return await ctx.send(f"Fehler beim Abrufen der Charakterwerte: {e}", ephemeral=bool(ctx.interaction))
+            return await ctx.send(
+                tr_lang(lang, f"Fehler beim Abrufen der Charakterwerte: {e}", f"Failed to fetch character stats: {e}"),
+                ephemeral=bool(ctx.interaction),
+            )
 
         # Rohwerte
         health = js.get("health")
