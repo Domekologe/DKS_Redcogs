@@ -935,6 +935,7 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
     cog_name = str((params.get("args") or {}).get("cog", "")).strip()
     if not cog_name:
         raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    bot = gateway.bot
     try:
         installed = await _installed_cogs(dl)
         target = next((m for m in installed if m.name == cog_name), None)
