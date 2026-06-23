@@ -782,12 +782,17 @@ class WebServerStats(commands.Cog):
             "kinds": {kind: top(d) for kind, d in kinds.items()},
         }
 
-    async def _entity_options(self, guild: discord.Guild, group: str, kind: str) -> List[Dict[str, str]]:
-        data = await getattr(self.config.guild(guild), group)()
+    async def _entity_options(self, guild: discord.Guild, groups, kind: str) -> List[Dict[str, str]]:
+        # `groups` may be a single store name or several – members/channels with
+        # only VOICE activity (no messages) should also appear in the dropdown.
+        if isinstance(groups, str):
+            groups = (groups,)
         tot: Dict[str, float] = defaultdict(float)
-        for day in (data or {}).values():
-            for _id, c in (day or {}).items():
-                tot[_id] += c
+        for group in groups:
+            data = await getattr(self.config.guild(guild), group)()
+            for day in (data or {}).values():
+                for _id, c in (day or {}).items():
+                    tot[_id] += c
         return [{"id": e["id"], "name": e["name"]} for e in self._top(guild, tot, kind, limit=200)]
 
     async def stats_commands(self, guild: discord.Guild, days: int = 30) -> Dict[str, Any]:
@@ -830,7 +835,7 @@ class WebServerStats(commands.Cog):
         keys = self._range_keys(days)
         mem = await self.config.guild(guild).msg_members()
         vmem = await self.config.guild(guild).voice_members()
-        options = await self._entity_options(guild, "msg_members", "member")
+        options = await self._entity_options(guild, ("msg_members", "voice_members"), "member")
         if not member_id and options:
             member_id = int(options[0]["id"])
         mid = str(member_id)
@@ -871,7 +876,7 @@ class WebServerStats(commands.Cog):
         keys = self._range_keys(days)
         ch = await self.config.guild(guild).msg_channels()
         vch = await self.config.guild(guild).voice_channels()
-        options = await self._entity_options(guild, "msg_channels", "channel")
+        options = await self._entity_options(guild, ("msg_channels", "voice_channels"), "channel")
         if not channel_id and options:
             channel_id = int(options[0]["id"])
         cid = str(channel_id)
