@@ -888,6 +888,14 @@ class WowGuildAutomation(commands.Cog):
                     value=str(templates.get("rank_lock_officer_notice", "")),
                     variables=rank_vars,
                 ),
+                Field.textarea(
+                    "manual_verification", "Manuelle Verifizierung",
+                    value=str(templates.get("manual_verification", "")),
+                    variables=[
+                        {"token": "{username}", "desc": "Benutzername"},
+                        {"token": "{charname}", "desc": "Charaktername"},
+                    ],
+                ),
             ],
         )
 
@@ -899,6 +907,7 @@ class WowGuildAutomation(commands.Cog):
             "admin_removed_char_dm",
             "protected_rank_sync_notice",
             "rank_lock_officer_notice",
+            "manual_verification",
         ]
         async with self.config.guild(ctx.guild).templates() as tpl:
             if not isinstance(tpl, dict):
