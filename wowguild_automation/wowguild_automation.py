@@ -560,6 +560,7 @@ class WowGuildAutomation(commands.Cog):
         p = (profiles.get(str(item_id)) or {}) if isinstance(profiles, dict) else {}
         if not isinstance(p, dict):
             p = {}
+        active = await self._wga_active_profile(ctx)
         version_options = [
             {"value": "retail", "label": "Retail"},
             {"value": "classic", "label": "Classic"},
@@ -570,6 +571,7 @@ class WowGuildAutomation(commands.Cog):
         return PanelSchema(
             description=f"Profil '{item_id}' bearbeiten.",
             fields=[
+                Field.switch("active", "Als aktives Profil festlegen", value=(str(item_id) == active)),
                 Field.text("region", "Region", value=str(p.get("region", "eu"))),
                 Field.select("version", "Version", version_options, value=str(p.get("version", "retail"))),
                 Field.text("realm", "Realm", value=str(p.get("realm", ""))),
@@ -592,6 +594,10 @@ class WowGuildAutomation(commands.Cog):
                 "guild_name": str(data.get("guild_name", "")).strip(),
             })
             profiles[str(item_id)] = entry
+
+        if bool(data.get("active", False)):
+            await self.config.guild(ctx.guild).active_profile_key.set(str(item_id))
+
         return SubmitResult.ok("Profil aktualisiert.")
 
     @wga_profiles_list.on_delete

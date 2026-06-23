@@ -329,14 +329,14 @@ class ChannelJoinNotification(commands.Cog):
         voice = [c for c in ctx.guild.channels if isinstance(c, discord.VoiceChannel)]
         voice = sorted(voice, key=lambda c: (c.position or 0, c.name.lower()))
 
-        voice_choices = [("0", "-- Sprachkanal wählen --")]
+        voice_choices = [{"value": "0", "label": "-- Sprachkanal wählen --"}]
         for c in voice:
-            voice_choices.append((str(c.id), f"🔊 {c.name} ({c.id})"))
+            voice_choices.append({"value": str(c.id), "label": f"🔊 {c.name} ({c.id})"})
 
         selection = self._selected_channel.get((guild_id, user_id), "0")
 
         # Ensure selection is still valid (exists in choices)
-        choice_vals = {v[0] for v in voice_choices}
+        choice_vals = {v["value"] for v in voice_choices}
         if selection not in choice_vals:
             selection = "0"
             self._selected_channel[(guild_id, user_id)] = "0"

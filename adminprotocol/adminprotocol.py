@@ -144,12 +144,12 @@ class AdminProtocol(commands.Cog):
         sel_ev = self._selected_event[guild_id][user_id].get(category, "0")
 
         # Build dropdown choices
-        event_choices = [("0", "-- Ereignis wählen --")]
+        event_choices = [{"value": "0", "label": "-- Ereignis wählen --"}]
         for ev in keys:
-            event_choices.append((ev, EVENTS.get(ev, ev)))
+            event_choices.append({"value": ev, "label": EVENTS.get(ev, ev)})
 
         # Ensure selection is still valid
-        choice_vals = {v[0] for v in event_choices}
+        choice_vals = {v["value"] for v in event_choices}
         if sel_ev not in choice_vals:
             sel_ev = "0"
             self._selected_event[guild_id][user_id][category] = "0"

@@ -121,14 +121,14 @@ class EventMessages(commands.Cog):
             "join": "Beitritt", "leave": "Verlassen", "kick": "Kick", "ban": "Ban",
             "unban": "Entbann", "timeout": "Timeout", "timeout_end": "Timeout-Ende",
         }
-        event_choices = [("0", "-- Ereignis wählen --")]
+        event_choices = [{"value": "0", "label": "-- Ereignis wählen --"}]
         for ev in EVENTS:
-            event_choices.append((ev, labels.get(ev, ev)))
+            event_choices.append({"value": ev, "label": labels.get(ev, ev)})
 
         selection = self._selected_event.get((guild_id, user_id), "0")
 
         # Ensure selection is still valid
-        choice_vals = {v[0] for v in event_choices}
+        choice_vals = {v["value"] for v in event_choices}
         if selection not in choice_vals:
             selection = "0"
             self._selected_event[(guild_id, user_id)] = "0"
