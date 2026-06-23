@@ -448,6 +448,24 @@ class EventMessages(commands.Cog):
         except Exception:
             self._dashboard_attached = False
 
+    @_dashboard_page(name=None, description="EventMessages Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>EventMessages</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use the page <b>eventmessages</b> for guild-specific settings.</p>
+</div>
+"""
+        return {
+            "status": 0,
+            "web_content": {
+                "source": source,
+                "standalone": True,
+            },
+        }
+
     @_dashboard_page(
         name="eventmessages",
         description="Configure event messages, templates and variables.",

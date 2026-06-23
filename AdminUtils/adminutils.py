@@ -865,6 +865,24 @@ class AdminUtils(commands.Cog):
 
         await interaction.followup.send(msg, ephemeral=True)
 
+    @_dashboard_page(name=None, description="AdminUtils Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>AdminUtils</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use the page <b>adminutils</b> for guild-specific settings.</p>
+</div>
+"""
+        return {
+            "status": 0,
+            "web_content": {
+                "source": source,
+                "standalone": True,
+            },
+        }
+
     @_dashboard_page(
         name="adminutils",
         description="Guild-side AdminUtils templates and quick settings.",

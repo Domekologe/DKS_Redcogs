@@ -681,6 +681,24 @@ class WoWTools(
         except Exception:
             self._dashboard_attached = False
 
+    @_dashboard_page(name=None, description="WoWTools Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>WoWTools</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use the page <b>wowtools</b> for guild-specific settings.</p>
+</div>
+"""
+        return {
+            "status": 0,
+            "web_content": {
+                "source": source,
+                "standalone": True,
+            },
+        }
+
     @_dashboard_page(
         name="wowtools",
         description="Guild-side WoWTools settings and text defaults.",

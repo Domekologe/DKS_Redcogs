@@ -1251,6 +1251,25 @@ async def dashboard_settings_set(gateway: Any, params: Dict[str, Any]) -> Dict[s
     return {"ok": True, "ui": ui}
 
 
+@dispatcher.method("dashboard.branding")
+async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Public branding (title/icon/description/support/color/theme) for the UI.
+
+    No auth required: these values are shown to every visitor (header title, icon,
+    landing description, support link). Only the safe public subset is returned.
+    """
+    cog = _dashboard_cog(gateway)
+    ui = dict(await cog.config.ui()) if cog else {}
+    return {
+        "title": ui.get("title") or "",
+        "icon": ui.get("icon") or "",
+        "description": ui.get("description") or "",
+        "support_url": ui.get("support_url") or "",
+        "color": ui.get("color") or "indigo",
+        "theme": ui.get("theme") or "dark",
+    }
+
+
 @dispatcher.method("dashboard.lock")
 async def dashboard_lock(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     ctx = await _build_context(gateway, params)

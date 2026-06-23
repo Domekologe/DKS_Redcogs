@@ -532,6 +532,24 @@ class ReactionRole(commands.Cog):
         async with self.config.guild(guild).panels() as panels_mut:
             panels_mut.pop(panel_id, None)
 
+    @_dashboard_page(name=None, description="ReactionRole Dashboard")
+    async def dashboard_home(self, **kwargs: Any) -> Dict[str, Any]:
+        _ = kwargs
+        source = """
+<div style="padding: 12px;">
+  <h2>ReactionRole</h2>
+  <p>Dashboard integration is active.</p>
+  <p>Use the page <b>reactionrole</b> for guild-specific settings.</p>
+</div>
+"""
+        return {
+            "status": 0,
+            "web_content": {
+                "source": source,
+                "standalone": True,
+            },
+        }
+
     @_dashboard_page(
         name="reactionrole",
         description="Configure reaction roles and text templates.",

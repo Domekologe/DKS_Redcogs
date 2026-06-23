@@ -411,7 +411,38 @@ class WowGuildAutomation(commands.Cog):
             prof = ""
         return str(prof or "retail")
 
-    # --- Guild panel: profile -------------------------------------------- #
+    # --- Guild panel: profile switcher (leftmost, switch only) ----------- #
+    @dashboard_panel(
+        "wga_switch", "Profil wechseln", mount="guild_settings", permission="guild_admin", order=0,
+    )
+    async def wga_switch_panel(self, ctx):
+        prof = await self._wga_active_profile(ctx)
+        profiles = await self.config.guild(ctx.guild).wow_profiles()
+        if not isinstance(profiles, dict):
+            profiles = {}
+        profile_options = [{"value": k, "label": k} for k in profiles.keys()] or [
+            {"value": prof, "label": prof}
+        ]
+        return PanelSchema(
+            description="Aktives WoW-Profil dieses Servers wählen. Bearbeitet und angelegt wird im Tab „Profil“.",
+            submit_label="Wechseln",
+            fields=[
+                Field.select("active_profile_key", "Profil", profile_options, value=prof),
+            ],
+        )
+
+    @wga_switch_panel.on_submit
+    async def _wga_switch_submit(self, ctx, data):
+        profiles = await self.config.guild(ctx.guild).wow_profiles()
+        if not isinstance(profiles, dict):
+            profiles = {}
+        selected = str(data.get("active_profile_key", "")).strip()
+        if selected and selected in profiles:
+            await self.config.guild(ctx.guild).active_profile_key.set(selected)
+            return SubmitResult.ok(f"Profil „{selected}“ aktiviert.")
+        return SubmitResult.fail("Unbekanntes Profil.")
+
+    # --- Guild panel: profile (edit/create active profile) --------------- #
     @dashboard_panel(
         "wga_profile", "Profil", mount="guild_settings", permission="guild_admin", order=1,
     )
@@ -424,9 +455,6 @@ class WowGuildAutomation(commands.Cog):
         active = profiles.get(prof, {})
         if not isinstance(active, dict):
             active = {}
-        profile_options = [{"value": k, "label": k} for k in profiles.keys()] or [
-            {"value": prof, "label": prof}
-        ]
         version_options = [
             {"value": "retail", "label": "Retail"},
             {"value": "classic", "label": "Classic"},
@@ -435,17 +463,13 @@ class WowGuildAutomation(commands.Cog):
             {"value": "sod", "label": "SoD"},
         ]
         return PanelSchema(
-            description="Sprache und WoW-Profil (Region/Version/Realm/Gilde) des aktiven Profils.",
+            description=f"Sprache und Werte des aktiven Profils „{prof}“ bearbeiten. "
+                        "Profil wechseln über den Tab „Profil wechseln“.",
             fields=[
                 Field.select(
                     "language", "Sprache",
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=str(language or "de-DE"),
-                ),
-                Field.select(
-                    "active_profile_key", "Aktives Profil", profile_options, value=prof,
-                    reload_on_change=True,
-                    description="Profil wechseln – die Werte unten laden automatisch neu.",
                 ),
                 Field.text(
                     "new_profile_key", "Neues Profil (Schlüssel)", value="",
@@ -467,7 +491,6 @@ class WowGuildAutomation(commands.Cog):
         version = str(data.get("version", "retail")).strip() or "retail"
         realm = str(data.get("realm", "")).strip()
         guild_name = str(data.get("guild_name", "")).strip()
-        selected = str(data.get("active_profile_key", "")).strip()
         current = await self._wga_active_profile(ctx)
         msg = "Profil gespeichert."
         async with self.config.guild(ctx.guild).wow_profiles() as profiles:
@@ -480,13 +503,9 @@ class WowGuildAutomation(commands.Cog):
                 }
                 active_key = new_key
                 msg = f"Profil '{new_key}' angelegt und aktiviert."
-            elif selected and selected != current:
-                # Pure switch: the fields still belong to the OLD profile –
-                # do NOT overwrite, only switch active (loads on next open).
-                active_key = selected
-                msg = f"Profil '{selected}' geladen."
             else:
-                # Edit the same profile.
+                # Edit the currently active profile (switching happens in the
+                # dedicated "Profil wechseln" tab only).
                 active_key = current
                 entry = profiles.get(active_key)
                 if not isinstance(entry, dict):
