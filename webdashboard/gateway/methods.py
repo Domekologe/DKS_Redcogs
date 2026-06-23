@@ -942,13 +942,20 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
     cog_name = str((params.get("args") or {}).get("cog", "")).strip()
     if not cog_name:
         raise RpcError(INVALID_PARAMS, "cog erforderlich")
+    # A full bot.tree.sync() is slow + heavily rate-limited by Discord. Per-cog
+    # syncing makes the UI hang. The client therefore updates+reloads per cog and
+    # triggers ONE slash sync at the end (sync=True only on the final call / or via
+    # the Slash tab). Default: no sync here.
+    do_sync = bool((params.get("args") or {}).get("sync", False))
     # Serialise mutating Downloader work so rapid/parallel clicks queue (FIFO)
-    # instead of racing the Downloader or running concurrent slash syncs.
+    # instead of racing the Downloader or running concurrent operations.
     async with _downloader_lock:
-        return await _do_cog_update(gateway, dl, cog_name, ctx)
+        return await _do_cog_update(gateway, dl, cog_name, ctx, do_sync)
 
 
-async def _do_cog_update(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> Dict[str, Any]:
+async def _do_cog_update(
+    gateway: Any, dl: Any, cog_name: str, ctx: Any, do_sync: bool = False
+) -> Dict[str, Any]:
     bot = gateway.bot
     try:
         installed = await _installed_cogs(dl)
@@ -1009,10 +1016,11 @@ async def _do_cog_update(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> Dict
             reload_error = str(e)
 
     synced = None
-    try:
-        synced = len(await bot.tree.sync())
-    except Exception:
-        synced = None
+    if do_sync:
+        try:
+            synced = len(await bot.tree.sync())
+        except Exception:
+            synced = None
 
     gateway.audit("downloader.cog_update", ctx,
                   {"cog": cog_name, "reloaded": reloaded, "synced": synced})
