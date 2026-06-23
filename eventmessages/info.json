@@ -1,8 +1,10 @@
 {
     "name": "EventMessages",
-    "short": "Automatische Join/Leave/Ban/Timeout Nachrichten",
-    "description": "Sendet automatisch öffentliche Nachrichten bei Server-Events wie Join, Leave, Ban, Unban und Timeouts. Einstellungen per Slash-Command (em-).",
-    "end_user_data_statement": "Dieses Cog speichert ausschließlich Guild-bezogene Einstellungen (Enabled-Status und Channel-IDs). Es werden keine personenbezogenen Daten dauerhaft gespeichert.",
+    "short": "Automatic join/leave/ban/timeout messages",
+    "description": "Automatically sends public messages on server events like join, leave, ban, unban and timeouts. Configured via slash commands (em-).",
+    "end_user_data_statement": "This cog only stores guild-specific settings (enabled state and channel IDs). No personal data is stored permanently.",
+    "install_msg": "EventMessages loaded. Configure it with the em- slash commands or via the web dashboard.",
+    "type": "COG",
     "author": [
         "Domekologe"
     ],

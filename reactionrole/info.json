@@ -10,5 +10,9 @@
         "add_reactions",
         "read_message_history"
     ],
-    "min_bot_version": "3.5.0"
+    "min_bot_version": "3.5.0",
+    "install_msg": "ReactionRole loaded. See [p]help ReactionRole to set up reaction roles.",
+    "end_user_data_statement": "This cog stores per-guild reaction-role mappings (message, emoji and role IDs). It does not store personal user data.",
+    "tags": ["roles", "reactionrole", "dashboard"],
+    "type": "COG"
 }

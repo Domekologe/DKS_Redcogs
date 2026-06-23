@@ -1706,6 +1706,52 @@ async def serverstats_channel_drilldown(gateway: Any, params: Dict[str, Any]) ->
     return await cog.stats_channel_drilldown(ctx.guild, channel_id, int(args.get("days", 30) or 30))
 
 
+async def _stats_guild_only(gateway: Any, params: Dict[str, Any], method_name: str) -> Dict[str, Any]:
+    """Shared helper for serverstats methods that take only the guild (no days/extra)."""
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    cog = _serverstats(gateway)
+    if cog is None:
+        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+    return await getattr(cog, method_name)(ctx.guild)
+
+
+@dispatcher.method("serverstats.peaks")
+async def serverstats_peaks(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_call(gateway, params, "stats_peaks")
+
+
+@dispatcher.method("serverstats.heatmap")
+async def serverstats_heatmap(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    ctx = await _build_context(gateway, params)
+    if ctx.guild is None:
+        raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
+    await _require(gateway, ctx, "guild_member")
+    cog = _serverstats(gateway)
+    if cog is None:
+        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+    args = params.get("args") or {}
+    metric = str(args.get("metric", "messages"))
+    return await cog.stats_heatmap(ctx.guild, int(args.get("days", 30) or 30), metric)
+
+
+@dispatcher.method("serverstats.now")
+async def serverstats_now(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_guild_only(gateway, params, "stats_now")
+
+
+@dispatcher.method("serverstats.leaderboard")
+async def serverstats_leaderboard(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_guild_only(gateway, params, "stats_leaderboard")
+
+
+@dispatcher.method("serverstats.retention")
+async def serverstats_retention(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    return await _stats_guild_only(gateway, params, "stats_retention")
+
+
 def _maybe_integration_base():
     from ..integration.base import DashboardIntegration
     return DashboardIntegration

@@ -1,8 +1,10 @@
 {
     "name": "AdminProtocol",
-    "short": "Detailliertes Administrations- und Aktivitätsprotokoll",
-    "description": "Protokolliert administrative Aktionen und Benutzeraktivitäten auf dem Server in frei wählbaren Kanälen. Vollständig über die WebUI konfigurierbar.",
-    "end_user_data_statement": "Dieses Cog speichert ausschließlich guild-bezogene Einstellungen (Kanalauswahlen, Ignorier-Listen und Aktivierungs-Status). Es werden keine personenbezogenen Daten dauerhaft gespeichert.",
+    "short": "Detailed administration & activity log",
+    "description": "Logs administrative actions and user activity on the server to channels of your choice. Fully configurable via the web UI.",
+    "end_user_data_statement": "This cog only stores guild-specific settings (channel selections, ignore lists and enabled state). No personal data is stored permanently.",
+    "install_msg": "AdminProtocol loaded. Configure the logging channels via the web dashboard.",
+    "type": "COG",
     "author": [
         "Domekologe"
     ],

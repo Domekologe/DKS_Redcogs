@@ -1,10 +1,11 @@
 {
   "author": ["Domekologe"],
-  "install_msg": "AdminUtils geladen. Nutze /kick, /ban, /timeout, /purge, /messagemove.",
+  "install_msg": "AdminUtils loaded. Use /kick, /ban, /timeout, /purge, /messagemove.",
   "name": "AdminUtils",
-  "short": "Slash/Hybrid Admin-Tools",
-  "description": "Kick, Ban, Timeout, Purge (mit Ausnahmen), MessageMove (kopieren+löschen).",
-  "end_user_data_statement": "Dieses Cog speichert keine personenbezogenen Daten.",
+  "short": "Slash/hybrid admin tools",
+  "description": "Kick, ban, timeout, purge (with exceptions), MessageMove (copy + delete).",
+  "end_user_data_statement": "This cog does not store any personal user data.",
   "tags": ["moderation", "admin", "slash"],
-  "min_bot_version": "3.5.0"
+  "min_bot_version": "3.5.0",
+  "type": "COG"
 }

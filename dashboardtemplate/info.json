@@ -1,14 +1,14 @@
 {
     "author": ["Domekologe"],
     "name": "DashboardTemplate",
-    "short": "Vorlage-Cog für die DKS-Web-Dashboard-Integration.",
-    "description": "Kommentierte Referenz, wie man einen Cog ans DKS Web Dashboard anbindet: Widget, Guild-Panel (alle Feldtypen) und globales Panel (Owner). Macht selbst nichts Produktives.",
-    "install_msg": "Lade zusätzlich `webdashboard`. Prüfen mit `[p]dashboardtemplate`. Migrations-Anleitung: README.md im Cog-Ordner.",
+    "short": "Template cog for the DKS web dashboard integration.",
+    "description": "Annotated reference for wiring a cog into the DKS web dashboard: widget, guild panel (all field types) and global panel (owner). Does nothing productive on its own.",
+    "install_msg": "Also load `webdashboard`. Check with `[p]dashboardtemplate`. Migration guide: README.md in the cog folder.",
     "tags": ["dashboard", "template", "example", "web"],
     "requirements": [],
     "min_bot_version": "3.5.0",
     "type": "COG",
     "hidden": true,
     "disabled": false,
-    "end_user_data_statement": "Dieser Vorlage-Cog speichert nur Beispiel-Einstellungen (pro Server und global). Es werden keine personenbezogenen Daten gespeichert."
+    "end_user_data_statement": "This template cog only stores example settings (per server and global). No personal data is stored."
 }

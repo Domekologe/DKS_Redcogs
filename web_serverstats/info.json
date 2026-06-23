@@ -1,12 +1,14 @@
 {
   "name": "WebServerStats",
-  "short": "Server-Statistiken für das DKS Web-Dashboard.",
-  "description": "Sammelt Nachrichten-, Voice-, Mitglieder-, Status-, Einladungs- und Aktivitätsstatistiken pro Server und stellt sie dem DKS Web-Dashboard (Seite /stats) bereit. Speichert zeitliche Tagesbuckets mit Aufbewahrungsfrist.",
+  "short": "Server statistics for the DKS web dashboard.",
+  "description": "Collects message, voice, member, status, invite and activity statistics per server and exposes them to the DKS web dashboard (the /stats page). Stores daily time buckets with a retention period.",
   "tags": ["stats", "analytics", "dashboard", "web"],
   "author": ["Domekologe"],
   "requirements": [],
   "hidden": false,
   "disabled": false,
   "min_bot_version": "3.5.0",
-  "install_msg": "WebServerStats installiert. Aktiviere Presence-/Member-Intents für volle Status-/Aktivitätsdaten. Im Web-Dashboard erscheint die Seite 'Statistiken'."
+  "install_msg": "WebServerStats installed. Enable the presence/member intents for full status/activity data. The 'Statistics' page appears in the web dashboard.",
+  "end_user_data_statement": "This cog stores aggregated per-guild statistics in daily buckets (message/voice/activity counts, member and channel IDs with counts). Old data is pruned after the retention period. It does not store message content.",
+  "type": "COG"
 }
