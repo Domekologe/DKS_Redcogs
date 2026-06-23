@@ -1,7 +1,7 @@
-"""Mapping der Dashboard-Permission-Stufen auf Reds Rechtesystem.
+"""Mapping of the dashboard permission levels onto Red's permission system.
 
-Alle Zugriffe werden **serverseitig** im Gateway erzwungen. Das Frontend-Filtering
-dient nur der UX.
+All access is enforced **server-side** in the gateway. Frontend filtering
+serves UX only.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     import discord
     from redbot.core.bot import Red
 
-# Reihenfolge = Stärke (höher schließt niedriger ein)
+# Order = strength (higher includes lower)
 LEVELS = [
     "authenticated",
     "guild_member",
@@ -36,7 +36,7 @@ def _level_value(name: str) -> int:
     try:
         return LEVELS.index(name)
     except ValueError:
-        return Level.BOT_OWNER  # unbekannt -> restriktivste Stufe
+        return Level.BOT_OWNER  # unknown -> most restrictive level
 
 
 async def resolve_level(
@@ -44,8 +44,8 @@ async def resolve_level(
     user: "discord.abc.User",
     guild: "Optional[discord.Guild]" = None,
 ) -> int:
-    """Bestimmt die höchste Stufe, die ``user`` (ggf. in ``guild``) erfüllt."""
-    # Bot-Owner
+    """Determines the highest level that ``user`` satisfies (optionally in ``guild``)."""
+    # Bot owner
     if await bot.is_owner(user):
         return Level.BOT_OWNER
 
@@ -54,13 +54,13 @@ async def resolve_level(
 
     member = guild.get_member(user.id)
     if member is None:
-        # nicht (mehr) Mitglied dieser Guild
+        # no longer (or never) a member of this guild
         return Level.AUTHENTICATED
 
     if guild.owner_id == member.id:
         return Level.GUILD_OWNER
 
-    # Reds Admin/Mod-Rollen bzw. Discord-Permissions
+    # Red's admin/mod roles or Discord permissions
     try:
         if await bot.is_admin(member) or member.guild_permissions.manage_guild:
             return Level.GUILD_ADMIN
@@ -82,5 +82,5 @@ async def has_permission(
     required: str,
     guild: "Optional[discord.Guild]" = None,
 ) -> bool:
-    """True, wenn ``user`` mindestens die Stufe ``required`` erfüllt."""
+    """True if ``user`` satisfies at least the level ``required``."""
     return await resolve_level(bot, user, guild) >= _level_value(required)

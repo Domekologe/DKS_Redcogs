@@ -525,7 +525,7 @@ class WoWTools(
         except Exception:
             return WidgetData.kpi(value="–", label="WoW Auto-Reply")
 
-    # --- Guild-Panel: Auto-Reply & Kanäle -------------------------------- #
+    # --- Guild panel: auto-reply & channels ------------------------------ #
     @dashboard_panel("settings", "WoWTools (Server)", mount="guild_settings", permission="guild_admin")
     async def wowtools_guild_panel(self, ctx):
         g = self.config.guild(ctx.guild)
@@ -593,7 +593,7 @@ class WoWTools(
             await g.countdown_channel.set(int(v) if v else None)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Globales Panel (Bot-Owner): API-Tokens -------------------------- #
+    # --- Global panel (bot owner): API tokens ---------------------------- #
     @dashboard_panel("api_tokens", "WoW API-Tokens", scope="global", mount="bot_settings", permission="bot_owner")
     async def wowtools_api_panel(self, ctx):
         bliz = await self.bot.get_shared_api_tokens("blizzard")
@@ -624,7 +624,7 @@ class WoWTools(
             pass
         return SubmitResult.ok("API-Tokens gespeichert.")
 
-    # --- Guild-Liste: Scoreboard-Blacklist (Charakternamen) -------------- #
+    # --- Guild list: scoreboard blacklist (character names) -------------- #
     @dashboard_list(
         "scoreboard_blacklist", "Scoreboard-Blacklist", mount="guild_settings",
         permission="guild_admin",
@@ -641,7 +641,7 @@ class WoWTools(
     @wowtools_blacklist_list.on_delete
     async def _wowtools_blacklist_delete(self, ctx, item_id):
         async with self.config.guild(ctx.guild).scoreboard_blacklist() as bl:
-            # nach Wert entfernen (Liste von Namen)
+            # remove by value (list of names)
             matches = [n for n in bl if str(n) == str(item_id)]
             if not matches:
                 return SubmitResult.fail("Eintrag nicht gefunden.")

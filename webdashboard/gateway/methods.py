@@ -1,14 +1,14 @@
-"""Core-RPC-Methoden des Gateways.
+"""Core RPC methods of the gateway.
 
-Konvention für ``params``::
+Convention for ``params``::
 
     {
       "auth": {"user_id": "123", "guild_id": "456", "locale": "de-DE"},
-      "args": { ... methodenspezifisch ... }
+      "args": { ... method-specific ... }
     }
 
-Die Auth-Angaben stammen vom (vertrauenswürdigen) BFF, der den Discord-OAuth2-Login
-bereits durchgeführt hat. Berechtigungen werden hier serverseitig erneut geprüft.
+The auth data comes from the (trusted) BFF, which has already performed the
+Discord OAuth2 login. Permissions are re-checked here on the server side.
 """
 from __future__ import annotations
 
@@ -34,9 +34,9 @@ dispatcher = Dispatcher()
 
 
 class _LightUser:
-    """Minimaler User-Stellvertreter (nur ID), falls der echte User weder im Cache
-    liegt noch per API abrufbar ist. Reicht für alle Permission-Checks (id-basiert)
-    und vermeidet ein hartes Fehlschlagen bei Cache-/Netzwerkproblemen."""
+    """Minimal user stand-in (ID only) for when the real user is neither in the
+    cache nor retrievable via the API. Sufficient for all permission checks
+    (id-based) and avoids a hard failure on cache/network problems."""
 
     __slots__ = ("id", "name", "bot")
 
@@ -47,7 +47,7 @@ class _LightUser:
 
 
 # --------------------------------------------------------------------------- #
-# Hilfen
+# Helpers
 # --------------------------------------------------------------------------- #
 async def _build_context(gateway: Any, params: Dict[str, Any]) -> DashboardContext:
     bot = gateway.bot
@@ -66,7 +66,7 @@ async def _build_context(gateway: Any, params: Dict[str, Any]) -> DashboardConte
         try:
             user = await bot.fetch_user(uid)
         except Exception:
-            # Kein harter Fehler: id-basierte Permission-Checks funktionieren weiter.
+            # Not a hard error: id-based permission checks still work.
             user = _LightUser(uid)
 
     guild = None
@@ -88,7 +88,7 @@ async def _build_context(gateway: Any, params: Dict[str, Any]) -> DashboardConte
 
 
 async def _require(gateway: Any, ctx: DashboardContext, permission: str) -> None:
-    # Lock: ist das Dashboard gesperrt, dürfen nur Bot-Owner geschützte Calls ausführen.
+    # Lock: if the dashboard is locked, only the bot owner may run protected calls.
     cog = gateway.bot.get_cog("WebDashboard")
     if cog is not None:
         try:
@@ -98,9 +98,9 @@ async def _require(gateway: Any, ctx: DashboardContext, permission: str) -> None
             raise
         except Exception:
             pass
-    # SICHERHEIT: Jeder Guild-Kontext erfordert mindestens Mitgliedschaft – auch wenn
-    # der Beitrag nur "authenticated" verlangt. Sonst könnten eingeloggte Nicht-Mitglieder
-    # durch Manipulation der guild_id Inhalte fremder Server lesen.
+    # SECURITY: Any guild context requires at least membership – even if the
+    # contribution only requires "authenticated". Otherwise logged-in non-members
+    # could read content of other servers by manipulating the guild_id.
     required = permission
     if ctx.guild is not None and _level_value(permission) < int(Level.GUILD_MEMBER):
         required = "guild_member"
@@ -129,16 +129,16 @@ async def core_botinfo(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("core.guilds")
 async def core_guilds(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Guilds, in denen der User Rechte hat (mit höchster Stufe je Guild)."""
+    """Guilds in which the user has permissions (with the highest level per guild)."""
     ctx = await _build_context(gateway, params)
     bot = gateway.bot
-    is_owner = await bot.is_owner(ctx.user)  # einmal berechnen
+    is_owner = await bot.is_owner(ctx.user)  # compute once
     result = []
     for guild in bot.guilds:
         if guild.get_member(ctx.user.id) is None and not is_owner:
             continue
         level = await resolve_level(bot, ctx.user, guild)
-        if level < 1:  # weniger als guild_member
+        if level < 1:  # less than guild_member
             continue
         result.append({
             "id": str(guild.id),
@@ -152,7 +152,7 @@ async def core_guilds(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("core.guild_detail")
 async def core_guild_detail(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Detailübersicht einer Guild (Mitglieder, Kanäle, Rollen, Status, Daten)."""
+    """Detailed overview of a guild (members, channels, roles, status, data)."""
     ctx = await _build_context(gateway, params)
     if ctx.guild is None:
         raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
@@ -196,10 +196,10 @@ async def core_guild_detail(gateway: Any, params: Dict[str, Any]) -> Dict[str, A
 
 
 # --------------------------------------------------------------------------- #
-# Öffentliche Befehlsübersicht (KEIN Login nötig – nur aktive Commands)
+# Public command overview (NO login required – only active commands)
 # --------------------------------------------------------------------------- #
 async def _repo_map(bot: Any) -> Dict[str, str]:
-    """Paketname (lowercase) → Repo-Name, aus Reds Downloader. Leeres Dict, wenn n/v."""
+    """Package name (lowercase) → repo name, from Red's Downloader. Empty dict if n/a."""
     out: Dict[str, str] = {}
     dl = bot.get_cog("Downloader")
     if dl is None:
@@ -211,7 +211,7 @@ async def _repo_map(bot: Any) -> Dict[str, str]:
     for m in installed or []:
         try:
             name = getattr(m, "name", None)
-            # Je nach Red-Version: repo_name (str) ODER repo.name (Repo-Objekt).
+            # Depending on the Red version: repo_name (str) OR repo.name (Repo object).
             repo = getattr(m, "repo_name", None) or getattr(getattr(m, "repo", None), "name", None)
             if name and repo:
                 out[str(name).lower()] = str(repo)
@@ -221,7 +221,7 @@ async def _repo_map(bot: Any) -> Dict[str, str]:
 
 
 def _repo_for_cog(cog_obj: Any, repo_map: Dict[str, str]) -> Optional[str]:
-    """Repo-Name für eine Cog-Instanz (über deren Python-Paket)."""
+    """Repo name for a cog instance (via its Python package)."""
     if cog_obj is None:
         return None
     try:
@@ -233,9 +233,9 @@ def _repo_for_cog(cog_obj: Any, repo_map: Dict[str, str]) -> Optional[str]:
 
 @dispatcher.method("core.commands")
 async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Liste der aktiven Text- und Slash-Commands. Öffentlich (ohne User-Kontext).
+    """List of active text and slash commands. Public (without user context).
 
-    Es werden nur sichtbare, aktivierte Commands ausgegeben (keine versteckten).
+    Only visible, enabled commands are returned (no hidden ones).
     """
     bot = gateway.bot
     repo_map = await _repo_map(bot)
@@ -256,13 +256,13 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
     slash: list = []
     try:
-        from discord import app_commands  # lokal, um harte Importabhängigkeit zu meiden
+        from discord import app_commands  # local, to avoid a hard import dependency
 
         tree = getattr(bot, "tree", None)
         if tree is not None:
             for c in tree.walk_commands():
                 if not isinstance(c, app_commands.Command):
-                    continue  # Gruppen ohne eigenen Callback überspringen
+                    continue  # skip groups without their own callback
                 binding = getattr(c, "binding", None)
                 slash.append({
                     "name": c.qualified_name,
@@ -273,7 +273,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         log.exception("Fehler beim Sammeln der Slash-Commands")
 
-    # eindeutige, sortierte Ausgabe
+    # unique, sorted output
     seen_p, uniq_p = set(), []
     for c in sorted(prefix, key=lambda x: x["name"]):
         if c["name"] in seen_p:
@@ -296,7 +296,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("core.stats")
 async def core_stats(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Öffentliche Bot-Statistik für die Landing/Übersicht (ohne Login)."""
+    """Public bot statistics for the landing/overview (without login)."""
     bot = gateway.bot
     cog = _dashboard_cog(gateway)
     ui = (await cog.config.ui()) if cog else {}
@@ -332,17 +332,17 @@ async def core_stats(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Manifest & Beiträge (Widgets / Panels / Pages)
+# Manifest & contributions (widgets / panels / pages)
 # --------------------------------------------------------------------------- #
 @dispatcher.method("manifest.get")
 async def manifest_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Liefert alle Beiträge, die der User sehen darf (gefiltert nach Rechten)."""
+    """Returns all contributions the user is allowed to see (filtered by permissions)."""
     ctx = await _build_context(gateway, params)
-    # Permission-Stufe nur EINMAL auflösen und dann vergleichen (statt teurer
-    # Auflösung pro Beitrag – spart bei vielen Cogs zahlreiche Config-Reads).
+    # Resolve the permission level only ONCE and then compare (instead of an
+    # expensive resolution per contribution – saves many config reads with many cogs).
     level = await resolve_level(gateway.bot, ctx.user, ctx.guild)
-    # SICHERHEIT: In einem Guild-Kontext dürfen nur Mitglieder überhaupt Beiträge
-    # dieser Guild sehen (sonst Info-Leak fremder Server für eingeloggte Nicht-Mitglieder).
+    # SECURITY: In a guild context, only members may see contributions of that
+    # guild at all (otherwise an info leak of other servers for logged-in non-members).
     if ctx.guild is not None and level < int(Level.GUILD_MEMBER):
         return {"contributions": []}
     visible = [
@@ -407,7 +407,7 @@ async def page_schema(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Cog-Verwaltung (nur Bot-Owner)
+# Cog management (bot owner only)
 # --------------------------------------------------------------------------- #
 @dispatcher.method("list.rows")
 async def list_rows(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -474,17 +474,17 @@ async def list_edit(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("cogs.list")
 async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Alle installierten Cogs mit Ladezustand (Owner)."""
+    """All installed cogs with load state (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
-    loaded = set(bot.extensions.keys())  # Paketnamen (klein)
+    loaded = set(bot.extensions.keys())  # package names (lowercase)
     try:
         available = set(await bot._cog_mgr.available_modules())
     except Exception:
         available = set(loaded)
     contributing = {c.cog_name.lower() for c in gateway.registry.all()}
-    repo_map = await _repo_map(bot)  # Paketname (lowercase) -> Repo-Name
+    repo_map = await _repo_map(bot)  # package name (lowercase) -> repo name
     names = sorted(available | loaded)
     cogs = [
         {
@@ -500,7 +500,7 @@ async def cogs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("cogs.set")
 async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Cog laden/entladen/neu laden (Owner). action: load | unload | reload."""
+    """Load/unload/reload a cog (owner). action: load | unload | reload."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     args = params.get("args") or {}
@@ -510,8 +510,8 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "name/action fehlt oder ungültig")
     bot = gateway.bot
 
-    # Eigenes Paket (das den Gateway betreibt) ermitteln – ein Self-Reload
-    # würde den Gateway mitten in der Antwort beenden.
+    # Determine our own package (which runs the gateway) – a self-reload
+    # would terminate the gateway in the middle of the response.
     own_pkg = None
     try:
         dcog = bot.get_cog("WebDashboard")
@@ -521,7 +521,7 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         own_pkg = None
 
     async def _reload_pkg(pkg: str) -> None:
-        # discord.py 2.x: load/unload/reload_extension sind Coroutines → awaiten!
+        # discord.py 2.x: load/unload/reload_extension are coroutines → await them!
         if pkg in bot.extensions:
             await bot.unload_extension(pkg)
         spec = await bot._cog_mgr.find_cog(pkg)
@@ -532,8 +532,8 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             if pkg not in pkgs:
                 pkgs.append(pkg)
 
-    # Self-Reload des Dashboard-Cogs: verzögert ausführen, damit diese Antwort
-    # noch rausgeht, bevor der Gateway neu startet.
+    # Self-reload of the dashboard cog: run deferred so this response still
+    # goes out before the gateway restarts.
     if action == "reload" and own_pkg and name == own_pkg:
         import asyncio
 
@@ -570,7 +570,7 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                     pkgs.remove(name)
     except RpcError:
         raise
-    except Exception as e:  # Red-/Import-Fehler sauber durchreichen
+    except Exception as e:  # cleanly pass through Red/import errors
         raise RpcError(INTERNAL_ERROR, f"{action} fehlgeschlagen: {e}")
 
     gateway.audit(f"cogs.{action}", ctx, {"name": name})
@@ -578,11 +578,11 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Slash-/App-Command-Verwaltung (nur Bot-Owner)
+# Slash/app command management (bot owner only)
 # --------------------------------------------------------------------------- #
 @dispatcher.method("slash.list")
 async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Top-Level-App-Commands mit Cog und Aktiv-Status (Owner)."""
+    """Top-level app commands with cog and enabled status (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
@@ -603,11 +603,11 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 return int(getattr(c, "type").value)  # 2=user, 3=message
         except Exception:
             pass
-        return 1  # chat_input / Slash
+        return 1  # chat_input / slash
 
-    # AKTIV-Status: PRIMÄR aus Reds Enabled-Config (spiegelt enable/disable_app_command
-    # SOFORT wider, auch ohne Sync). list_enabled_app_commands() ist je nach Red-Version
-    # sync ODER async → beides abfangen. FALLBACK: Tree-Mitgliedschaft (Steady-State).
+    # ENABLED status: PRIMARILY from Red's enabled config (reflects enable/disable_app_command
+    # IMMEDIATELY, even without sync). list_enabled_app_commands() is, depending on the
+    # Red version, sync OR async → handle both. FALLBACK: tree membership (steady state).
     enabled_keys = set()
     used_cfg = False
     try:
@@ -626,14 +626,14 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     try:
         tree_cmds = list(bot.tree.get_commands())
         if not used_cfg:
-            # Kein Config-Zugriff → Tree als Aktiv-Indikator (Red entfernt deaktivierte
-            # App-Commands aus dem Tree).
+            # No config access → use the tree as enabled indicator (Red removes disabled
+            # app commands from the tree).
             for c in tree_cmds:
                 enabled_keys.add((getattr(c, "name", None), _ctype(c)))
     except Exception:
         pass
 
-    # Cog für einen Tree-Befehl bestimmen – Binding zuerst, sonst über das Modul.
+    # Determine the cog for a tree command – binding first, otherwise via the module.
     def _cog_for(c) -> str:
         b = getattr(c, "binding", None)
         if b is not None:
@@ -668,7 +668,7 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return
 
-    # 1) Alle von Cogs DEFINIERTEN App-Commands – inkl. deaktivierter (nicht im Tree).
+    # 1) All app commands DEFINED by cogs – including disabled ones (not in the tree).
     try:
         for cog_name, cog in list(bot.cogs.items()):
             try:
@@ -685,7 +685,7 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 2) Tree-Befehle ergänzen (mit Modul-Fallback für die Kategorisierung).
+    # 2) Add tree commands (with module fallback for categorization).
     try:
         for c in tree_cmds:
             _add(c, _cog_for(c))
@@ -698,7 +698,7 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("slash.sync")
 async def slash_sync(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """App-Commands mit Discord synchronisieren (Owner)."""
+    """Synchronize app commands with Discord (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     try:
@@ -711,7 +711,7 @@ async def slash_sync(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("slash.set")
 async def slash_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Einzelnen App-Command aktivieren/deaktivieren (Owner). Danach synchronisieren."""
+    """Enable/disable a single app command (owner). Sync afterwards."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     args = params.get("args") or {}
@@ -739,7 +739,7 @@ async def slash_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("slash.set_cog")
 async def slash_set_cog(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Alle Top-Level-App-Commands eines Cogs aktivieren/deaktivieren (Owner)."""
+    """Enable/disable all top-level app commands of a cog (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     args = params.get("args") or {}
@@ -773,14 +773,14 @@ async def slash_set_cog(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Downloader (Repos/Cogs) – nutzt Reds Downloader-Cog (nur Bot-Owner)
+# Downloader (repos/cogs) – uses Red's Downloader cog (bot owner only)
 # --------------------------------------------------------------------------- #
 def _downloader(gateway: Any):
     return gateway.bot.get_cog("Downloader")
 
 
 def _iter_repos(dl):
-    """Repos je nach Red-Version: dict {name: Repo} ODER Tuple/Liste von Repo."""
+    """Repos depending on the Red version: dict {name: Repo} OR tuple/list of Repo."""
     repos = dl._repo_manager.repos
     if isinstance(repos, dict):
         return list(repos.values())
@@ -795,10 +795,10 @@ async def _installed_cogs(dl):
 
 
 async def _cogs_with_updates(dl, installed):
-    """Namen installierter Cogs, für die ein Update bereitliegt (best effort).
+    """Names of installed cogs for which an update is available (best effort).
 
-    Nutzt Reds internes ``_available_updates`` (vergleicht installierten Commit mit
-    dem aktuellen Repo-Checkout – kein Netzwerk). Schlägt es fehl, leeres Set.
+    Uses Red's internal ``_available_updates`` (compares the installed commit with
+    the current repo checkout – no network). On failure, returns an empty set.
     """
     try:
         result = await dl._available_updates(installed)
@@ -809,10 +809,10 @@ async def _cogs_with_updates(dl, installed):
 
 
 async def _update_all_repos(dl):
-    """Aktualisiert alle Repos versions-robust und liefert die Namen geänderter Repos."""
+    """Updates all repos in a version-robust way and returns the names of changed repos."""
     before = {r.name: getattr(r, "commit", None) for r in _iter_repos(dl)}
     rm = dl._repo_manager
-    # Neuere Red-Versionen: update_all_repos(); ältere: pro Repo Repo.update().
+    # Newer Red versions: update_all_repos(); older ones: Repo.update() per repo.
     if hasattr(rm, "update_all_repos"):
         await rm.update_all_repos()
     else:
@@ -826,7 +826,7 @@ async def _update_all_repos(dl):
 
 @dispatcher.method("downloader.repos")
 async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Repos mit installierten und verfügbaren Cogs (Owner)."""
+    """Repos with installed and available cogs (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     dl = _downloader(gateway)
@@ -893,7 +893,7 @@ async def downloader_repo_remove(gateway: Any, params: Dict[str, Any]) -> Dict[s
     name = str((params.get("args") or {}).get("name", "")).strip()
     if not name:
         raise RpcError(INVALID_PARAMS, "name erforderlich")
-    # Schutz: nur entfernen, wenn keine Cogs aus diesem Repo mehr installiert sind.
+    # Safeguard: only remove if no cogs from this repo are still installed.
     installed = await _installed_cogs(dl)
     if any(getattr(m, "repo_name", None) == name for m in installed):
         raise RpcError(INVALID_PARAMS, "Repo hat noch installierte Cogs – diese zuerst deinstallieren.")
@@ -907,7 +907,7 @@ async def downloader_repo_remove(gateway: Any, params: Dict[str, Any]) -> Dict[s
 
 @dispatcher.method("downloader.update_check")
 async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Aktualisiert die Repos (git fetch/pull) und meldet, was sich geändert hat."""
+    """Updates the repos (git fetch/pull) and reports what has changed."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     dl = _downloader(gateway)
@@ -915,7 +915,7 @@ async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[
         raise RpcError(INVALID_PARAMS, "Downloader-Cog ist nicht geladen")
     try:
         changed = await _update_all_repos(dl)
-        # Nach dem Repo-Update: welche installierten Cogs haben jetzt ein Update?
+        # After the repo update: which installed cogs now have an update?
         installed = await _installed_cogs(dl)
         cogs_update = sorted(await _cogs_with_updates(dl, installed))
     except Exception as e:
@@ -926,7 +926,7 @@ async def downloader_update_check(gateway: Any, params: Dict[str, Any]) -> Dict[
 
 @dispatcher.method("downloader.cog_update")
 async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Einen installierten Cog auf den neuesten Stand des Repos bringen (Owner)."""
+    """Bring an installed cog up to the latest state of the repo (owner)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     dl = _downloader(gateway)
@@ -940,9 +940,9 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
         target = next((m for m in installed if m.name == cog_name), None)
         if target is None:
             raise RpcError(INVALID_PARAMS, f"Cog '{cog_name}' ist nicht installiert")
-        # WICHTIG: NICHT den Install-Pfad (_filter_incorrect_cogs_by_names) nutzen –
-        # der lehnt bereits installierte Cogs ab ("bereits installiert"). Für ein
-        # Update das Installable direkt neu installieren (überschreibt die Dateien).
+        # IMPORTANT: Do NOT use the install path (_filter_incorrect_cogs_by_names) –
+        # it rejects already-installed cogs ("already installed"). For an update,
+        # reinstall the installable directly (overwrites the files).
         cog_obj = None
         try:
             res = await dl._available_updates(installed)
@@ -951,7 +951,7 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
         except Exception:
             cog_obj = None
         if cog_obj is None:
-            # Kein erkanntes Update mehr → direkt aus dem (aktualisierten) Repo-Checkout holen.
+            # No detected update left → fetch directly from the (updated) repo checkout.
             repo = dl._repo_manager.get_repo(getattr(target, "repo_name", ""))
             if repo is None:
                 raise RpcError(INVALID_PARAMS, "Zugehöriges Repo nicht gefunden")
@@ -971,7 +971,7 @@ async def downloader_cog_update(gateway: Any, params: Dict[str, Any]) -> Dict[st
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Update fehlgeschlagen: {e}")
 
-    # Nach dem Update automatisch: 1) Cog neu laden (falls geladen), 2) Slash syncen.
+    # Automatically after the update: 1) reload the cog (if loaded), 2) sync slash.
     pkg = cog_name.lower()
     own_pkg = None
     try:
@@ -1054,17 +1054,17 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
     if not cog_name:
         raise RpcError(INVALID_PARAMS, "cog erforderlich")
     bot = gateway.bot
-    # 1) Slash-Commands abschalten: durch Entladen verschwinden die App-Commands
-    #    aus dem Tree; anschließend wird synchronisiert.
+    # 1) Disable slash commands: unloading removes the app commands from the tree;
+    #    a sync follows afterwards.
     try:
         if cog_name.lower() in bot.extensions:
-            await bot.unload_extension(cog_name.lower())  # discord.py 2.x: Coroutine!
+            await bot.unload_extension(cog_name.lower())  # discord.py 2.x: coroutine!
         async with bot._config.packages() as pkgs:
             if cog_name.lower() in pkgs:
                 pkgs.remove(cog_name.lower())
     except Exception:
         pass
-    # 2) Dateien/Installation entfernen
+    # 2) Remove files/installation
     try:
         installed = await _installed_cogs(dl)
         target = [m for m in installed if m.name == cog_name]
@@ -1079,7 +1079,7 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
         raise
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Deinstallation fehlgeschlagen: {e}")
-    # 3) Tree synchronisieren (Slash sauber abmelden)
+    # 3) Sync the tree (cleanly deregister slash commands)
     try:
         await bot.tree.sync()
     except Exception:
@@ -1089,7 +1089,7 @@ async def downloader_cog_uninstall(gateway: Any, params: Dict[str, Any]) -> Dict
 
 
 # --------------------------------------------------------------------------- #
-# Bot-Settings (Reds Prefixe/Rollen/Nick/Embeds) – global & pro Guild
+# Bot settings (Red's prefixes/roles/nick/embeds) – global & per guild
 # --------------------------------------------------------------------------- #
 @dispatcher.method("settings.get")
 async def settings_get(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1188,7 +1188,7 @@ def _dashboard_cog(gateway: Any):
 
 @dispatcher.method("dashboard.branding")
 async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Öffentliches Branding (Titel/Icon/Theme) – ohne Login nutzbar."""
+    """Public branding (title/icon/theme) – usable without login."""
     cog = _dashboard_cog(gateway)
     ui = (await cog.config.ui()) if cog else {}
     locked = bool(await cog.config.locked()) if cog else False
@@ -1197,7 +1197,7 @@ async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, 
 
 @dispatcher.method("dashboard.overview")
 async def dashboard_overview(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    ctx = await _build_context(gateway, params)  # authentifiziert genügt
+    ctx = await _build_context(gateway, params)  # authenticated is sufficient
     bot = gateway.bot
     cog = _dashboard_cog(gateway)
 
@@ -1275,14 +1275,14 @@ async def dashboard_refresh_sessions(gateway: Any, params: Dict[str, Any]) -> Di
 
 @dispatcher.method("dashboard.session_epoch")
 async def dashboard_session_epoch(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Aktueller Session-Epoch (vom BFF zur Invalidierung genutzt)."""
+    """Current session epoch (used by the BFF for invalidation)."""
     cog = _dashboard_cog(gateway)
     return {"epoch": float(await cog.config.session_epoch()) if cog else 0.0}
 
 
 @dispatcher.method("system.info")
 async def system_info(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Bot-Health/Ops (nur Bot-Owner): Uptime, Latenz, Versionen, Speicher, Cogs."""
+    """Bot health/ops (bot owner only): uptime, latency, versions, memory, cogs."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     bot = gateway.bot
@@ -1300,7 +1300,7 @@ async def system_info(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     memory_mb = None
     try:
         import resource  # Linux/Unix
-        # ru_maxrss: Linux = KB, macOS = Bytes. Wir nehmen KB an (Linux-Server).
+        # ru_maxrss: Linux = KB, macOS = bytes. We assume KB (Linux server).
         memory_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0, 1)
     except Exception:
         memory_mb = None
@@ -1345,7 +1345,7 @@ async def system_info(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 @dispatcher.method("audit.list")
 async def audit_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Audit-Log (nur Bot-Owner): wer hat wann was geändert (neueste zuerst)."""
+    """Audit log (bot owner only): who changed what and when (newest first)."""
     ctx = await _build_context(gateway, params)
     await _require(gateway, ctx, "bot_owner")
     cog = _dashboard_cog(gateway)
@@ -1354,7 +1354,7 @@ async def audit_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     args = params.get("args") or {}
     limit = max(1, min(int(args.get("limit", 200) or 200), 1000))
     out = []
-    for e in reversed(logs[-limit:]):  # neueste zuerst
+    for e in reversed(logs[-limit:]):  # newest first
         uid = e.get("user")
         gid = e.get("guild")
         uname = None
@@ -1380,7 +1380,7 @@ async def audit_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 # ----- Custom Pages -------------------------------------------------------- #
 @dispatcher.method("pages.list")
 async def pages_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Öffentliche Liste der Custom Pages (ohne HTML, für Navigation)."""
+    """Public list of custom pages (without HTML, for navigation)."""
     cog = _dashboard_cog(gateway)
     pages = list(await cog.config.custom_pages()) if cog else []
     return {"pages": [{
@@ -1415,7 +1415,7 @@ async def pages_save(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     entry = {
         "slug": slug,
         "title": str(args.get("title", slug)),
-        # Inhalt wird als Markdown gespeichert; `html` bleibt als Legacy-Fallback erhalten.
+        # Content is stored as Markdown; `html` is kept as a legacy fallback.
         "markdown": str(args.get("markdown", "")),
         "html": str(args.get("html", "")),
         "nav": bool(args.get("nav", True)),
@@ -1444,14 +1444,14 @@ async def pages_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
-# ----- Server-Statistiken (WebServerStats-Cog) ----------------------------- #
+# ----- Server statistics (WebServerStats cog) ------------------------------ #
 def _serverstats(gateway: Any):
     bot = gateway.bot
     cog = bot.get_cog("WebServerStats")
     if cog is not None:
         return cog
-    # Fallback: Cog über Klassennamen oder Modul (web_serverstats) finden,
-    # falls der qualifizierte Name abweicht.
+    # Fallback: find the cog via class name or module (web_serverstats),
+    # in case the qualified name differs.
     for c in bot.cogs.values():
         try:
             if type(c).__name__ == "WebServerStats":
@@ -1464,7 +1464,7 @@ def _serverstats(gateway: Any):
 
 
 async def _stats_call(gateway: Any, params: Dict[str, Any], method_name: str, *extra_keys):
-    """Gemeinsamer Helfer: Kontext + Recht + Cog-Methode aufrufen."""
+    """Shared helper: build context + check permission + call the cog method."""
     ctx = await _build_context(gateway, params)
     if ctx.guild is None:
         raise RpcError(INVALID_PARAMS, "Unbekannte Guild")
@@ -1517,7 +1517,7 @@ async def serverstats_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str
     return await _stats_call(gateway, params, "stats_commands")
 
 
-# ----- Ankündigungen / Embed-Builder (guild_admin) ------------------------- #
+# ----- Announcements / embed builder (guild_admin) ------------------------- #
 @dispatcher.method("announce.channels")
 async def announce_channels(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     ctx = await _build_context(gateway, params)
@@ -1624,5 +1624,5 @@ def _maybe_integration_base():
 
 
 def setup_core_methods(gateway: Any) -> Dispatcher:
-    """Liefert den vorbereiteten Dispatcher (Core-Methoden bereits registriert)."""
+    """Returns the prepared dispatcher (core methods already registered)."""
     return dispatcher

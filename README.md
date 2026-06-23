@@ -4,6 +4,10 @@ This are my Cogs for Redbot. This Cogs will be used for my private Discord and c
 
 As you can read from my grammar, you see the reason why :D
 
+![Screenshot: DKS cogs overview](assets/readme-cogs-overview.png)
+
+> 📖 **Full documentation:** [DKS_Redcogs Wiki](https://github.com/Domekologe/DKS_Redcogs/wiki) (English & Deutsch)
+
 ## Status Information
 
 | Status | Description |
@@ -31,6 +35,8 @@ besteht aus diesen Cogs hier:
 Eigenen Cog anbinden: siehe `webdashboard/INTEGRATION.md` + den Drop-in `dks_dashboard.py`
 (1:1 kopierbar, funktioniert auch ohne installiertes Dashboard und parallel zu AAA3A).
 Jeder Cog erscheint als **ein Modul mit Tabs** auf der Server-Detailseite.
+
+![Screenshot: DKS Web Dashboard – Cog als Modul mit Tabs](assets/readme-dashboard-module.png)
 
 ## About Cogs
 

@@ -1,13 +1,13 @@
-"""WebServerStats – sammelt Server-Statistiken für das DKS Web-Dashboard.
+"""WebServerStats – collects server statistics for the DKS web dashboard.
 
-Daten werden in Tages-Buckets (und für Status/Activity in Stunden-Samples) in der
-Red-Config gespeichert und über öffentliche Lese-Methoden (``stats_*``) vom
-WebDashboard-Gateway abgefragt. Die Diagramm-Darstellung passiert in der Web-App.
+Data is stored in daily buckets (and for status/activity in hourly samples) in the
+Red config and queried by the WebDashboard gateway via public read methods
+(``stats_*``). The chart rendering happens in the web app.
 
-Hinweise:
-- Bots werden bei Nachrichten/Voice/Activity ignoriert (User Type = Users).
-- Status/Activity benötigen die Presence- und Member-Intents für volle Daten.
-- Alte Buckets werden nach RETENTION_DAYS automatisch entfernt.
+Notes:
+- Bots are ignored for messages/voice/activity (user type = users).
+- Status/activity require the presence and member intents for complete data.
+- Old buckets are removed automatically after RETENTION_DAYS.
 """
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from redbot.core.bot import Red
 
 log = logging.getLogger("red.dks.web_serverstats")
 
-RETENTION_DAYS = 400          # wie lange Tages-Buckets aufbewahrt werden
-SAMPLE_MINUTES = 30           # Intervall der Status-/Activity-Snapshots
-STATUS_RETENTION = 60 * 24 * 60 // SAMPLE_MINUTES  # ~60 Tage an Status-Samples
+RETENTION_DAYS = 400          # how long daily buckets are kept
+SAMPLE_MINUTES = 30           # interval of the status/activity snapshots
+STATUS_RETENTION = 60 * 24 * 60 // SAMPLE_MINUTES  # ~60 days of status samples
 
 
 def _utcnow() -> datetime:
@@ -38,7 +38,7 @@ def _daykey(dt: Optional[datetime] = None) -> str:
 
 
 class WebServerStats(commands.Cog):
-    """Server-Statistiken für das DKS Web-Dashboard."""
+    """Server statistics for the DKS web dashboard."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -55,17 +55,17 @@ class WebServerStats(commands.Cog):
             invites={},          # {code: {"uses": int, "inviter_id": int}}
             invite_daily={},     # {daykey: {code: joins}}
             invite_logs=[],      # [{"date","user_id","username","code"}]
-            invite_members={},   # {member_id: count}  (Beigetretene je Einlader-Mitglied)
-            commands={},         # {daykey: {command_name: count}} – Befehlsnutzung
-            command_errors={},   # {daykey: {command_name: count}} – Fehler je Befehl
+            invite_members={},   # {member_id: count}  (joined members per inviter member)
+            commands={},         # {daykey: {command_name: count}} – command usage
+            command_errors={},   # {daykey: {command_name: count}} – errors per command
         )
-        # Laufende Voice-Sessions: {(guild_id, member_id): (channel_id, start_dt)}
+        # Running voice sessions: {(guild_id, member_id): (channel_id, start_dt)}
         self._voice: Dict[Tuple[int, int], Tuple[int, datetime]] = {}
-        # PERFORMANCE: Nachrichten werden in-memory gezählt und nur periodisch
-        # geschrieben (statt 3 Config-Writes pro Nachricht).
+        # PERFORMANCE: messages are counted in-memory and written only periodically
+        # (instead of 3 config writes per message).
         # {(guild_id, daykey): {"messages": int, "channels": {cid: int}, "members": {mid: int}}}
         self._msg_buf: Dict[Tuple[int, str], Dict[str, Any]] = {}
-        # Befehlsnutzung: {(guild_id, daykey): {"cmds": {name: n}, "errs": {name: n}}}
+        # Command usage: {(guild_id, daykey): {"cmds": {name: n}, "errs": {name: n}}}
         self._cmd_buf: Dict[Tuple[int, str], Dict[str, Any]] = {}
         self._enabled_cache: Dict[int, bool] = {}
         self._snapshot_loop.start()
@@ -74,14 +74,14 @@ class WebServerStats(commands.Cog):
     def cog_unload(self) -> None:
         self._snapshot_loop.cancel()
         self._flush_loop.cancel()
-        # Gepufferte Zähler + offene Voice-Sessions noch wegschreiben (best effort).
+        # Write out buffered counters + open voice sessions (best effort).
         try:
             asyncio.create_task(self._final_flush())
         except Exception:
             pass
 
     # ------------------------------------------------------------------ #
-    # Schreib-Helfer
+    # Write helpers
     # ------------------------------------------------------------------ #
     async def _bump_day(self, guild: discord.Guild, field: str, amount: float = 1) -> None:
         key = _daykey()
@@ -102,14 +102,14 @@ class WebServerStats(commands.Cog):
             data[key] = day
 
     # ------------------------------------------------------------------ #
-    # Listener: Nachrichten
+    # Listener: messages
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
             return
         gid = message.guild.id
-        # Enabled-Status aus dem Cache (kein Config-Read auf dem Hot-Path).
+        # Enabled status from the cache (no config read on the hot path).
         if not self._enabled_cache.get(gid, True):
             return
         try:
@@ -127,7 +127,7 @@ class WebServerStats(commands.Cog):
             log.debug("on_message buffer failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # Listener: Befehlsnutzung (in-memory, mit dem Nachrichten-Flush gebündelt)
+    # Listener: command usage (in-memory, bundled with the message flush)
     # ------------------------------------------------------------------ #
     def _cmd_bump(self, guild, name: str, field: str) -> None:
         if guild is None or not name:
@@ -155,7 +155,7 @@ class WebServerStats(commands.Cog):
             pass
 
     async def _flush(self) -> None:
-        """Schreibt gepufferte Nachrichten- und Befehls-Zähler gebündelt in die Config."""
+        """Writes buffered message and command counters to the config in a batch."""
         if not self._msg_buf and not self._cmd_buf:
             return
         buf = self._msg_buf
@@ -192,7 +192,7 @@ class WebServerStats(commands.Cog):
             except Exception:
                 log.debug("flush failed for guild %s", gid, exc_info=True)
 
-        # Befehls-Zähler bündeln (eigener Puffer; Guild kann Befehle ohne Nachrichten haben).
+        # Batch command counters (separate buffer; a guild can have commands without messages).
         if self._cmd_buf:
             cbuf = self._cmd_buf
             self._cmd_buf = {}
@@ -234,7 +234,7 @@ class WebServerStats(commands.Cog):
                     pass
 
     # ------------------------------------------------------------------ #
-    # Listener: Mitglieder
+    # Listener: members
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
@@ -260,7 +260,7 @@ class WebServerStats(commands.Cog):
             log.debug("on_member_remove stats failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
-    # Listener: Voice
+    # Listener: voice
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_voice_state_update(
@@ -276,10 +276,10 @@ class WebServerStats(commands.Cog):
             after_ch = after.channel.id if after.channel else None
             if before_ch == after_ch:
                 return
-            # Alte Session beenden + verbuchen.
+            # End the old session + record it.
             if before_ch is not None and key in self._voice:
                 await self._end_voice_session(member.guild, member.id, key)
-            # Neue Session starten.
+            # Start the new session.
             if after_ch is not None:
                 self._voice[key] = (after_ch, _utcnow())
         except Exception:
@@ -297,7 +297,7 @@ class WebServerStats(commands.Cog):
         await self._bump_nested(guild, "voice_members", str(member_id), minutes)
 
     # ------------------------------------------------------------------ #
-    # Listener: Einladungen
+    # Listener: invites
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite) -> None:
@@ -313,7 +313,7 @@ class WebServerStats(commands.Cog):
             log.debug("invite_create stats failed", exc_info=True)
 
     async def _track_invite_use(self, member: discord.Member) -> None:
-        """Vergleicht gespeicherte Invite-Uses mit den aktuellen, um den genutzten Code zu finden."""
+        """Compares stored invite uses with the current ones to find the code that was used."""
         guild = member.guild
         try:
             current = await guild.invites()
@@ -328,7 +328,7 @@ class WebServerStats(commands.Cog):
                 used_code = inv.code
                 inviter_id = inv.inviter.id if inv.inviter else 0
                 break
-        # Speicher aktualisieren.
+        # Update the store.
         async with self.config.guild(guild).invites() as inv_store:
             for inv in current:
                 inv_store[inv.code] = {
@@ -349,13 +349,13 @@ class WebServerStats(commands.Cog):
                 "username": member.name,
                 "code": used_code,
             })
-            del logs[:-500]  # nur die letzten 500 behalten
+            del logs[:-500]  # keep only the last 500
         if inviter_id:
             async with self.config.guild(guild).invite_members() as im:
                 im[str(inviter_id)] = im.get(str(inviter_id), 0) + 1
 
     # ------------------------------------------------------------------ #
-    # Periodischer Snapshot: Mitgliederzahl, Status, Activity
+    # Periodic snapshot: member count, status, activity
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -365,7 +365,7 @@ class WebServerStats(commands.Cog):
                 self._enabled_cache[guild.id] = enabled
                 if not enabled:
                     continue
-                # Invite-Cache initial befüllen.
+                # Populate the invite cache initially.
                 try:
                     current = await guild.invites()
                     async with self.config.guild(guild).invites() as inv_store:
@@ -376,8 +376,8 @@ class WebServerStats(commands.Cog):
                             }
                 except Exception:
                     pass
-                # Laufende Voice-Sessions nach (Re-)Start neu erfassen, damit nach einem
-                # Reload weiterhin gezählt wird und Leave-Events nicht ins Leere laufen.
+                # Re-capture running voice sessions after a (re)start so that counting
+                # continues after a reload and leave events do not run into nothing.
                 now = _utcnow()
                 for vc in guild.voice_channels:
                     for m in vc.members:
@@ -397,9 +397,9 @@ class WebServerStats(commands.Cog):
                 self._enabled_cache[guild.id] = enabled
                 if not enabled:
                     continue
-                # Mitgliederzahl (letzter Wert des Tages).
+                # Member count (last value of the day).
                 await self._set_day(guild, "members", guild.member_count or 0)
-                # Status-Zählung.
+                # Status count.
                 on = idle = dnd = off = 0
                 games: Dict[str, int] = defaultdict(int)
                 for m in guild.members:
@@ -429,7 +429,7 @@ class WebServerStats(commands.Cog):
                     async with self.config.guild(guild).activity() as act_store:
                         day = act_store.get(key) if isinstance(act_store.get(key), dict) else {}
                         for name, count in games.items():
-                            # Jeder Snapshot ≈ SAMPLE_MINUTES Spielzeit je spielendem Mitglied.
+                            # Each snapshot ≈ SAMPLE_MINUTES of play time per playing member.
                             day[name] = day.get(name, 0) + count * SAMPLE_MINUTES
                         act_store[key] = day
                 await self._prune(guild)
@@ -471,7 +471,7 @@ class WebServerStats(commands.Cog):
         await self.bot.wait_until_red_ready()
 
     # ================================================================== #
-    # Lese-API (vom WebDashboard-Gateway aufgerufen)
+    # Read API (called by the WebDashboard gateway)
     # ================================================================== #
     def _range_keys(self, days: int) -> List[str]:
         days = max(1, min(int(days or 30), RETENTION_DAYS))

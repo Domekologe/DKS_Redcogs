@@ -1,7 +1,7 @@
-"""Beispiel-Cog: zeigt die Integration ins DKS Web Dashboard.
+"""Example cog: shows integration into the DKS web dashboard.
 
-Demonstriert ein Widget (KPI), ein Panel (Formular mit Speichern) und die bedingte
-Registrierung. Funktioniert auch ohne installiertes WebDashboard.
+Demonstrates a widget (KPI), a panel (form with saving) and conditional
+registration. Also works without WebDashboard installed.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .dks_dashboard import (
 
 
 class DashboardExample(commands.Cog):
-    """Kleiner Beispiel-Cog für die Web-Dashboard-Integration."""
+    """Small example cog for the web dashboard integration."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -32,16 +32,16 @@ class DashboardExample(commands.Cog):
         )
 
     # ------------------------------------------------------------------ #
-    # Lifecycle – das "Extra": nur integrieren, wenn das Dashboard da ist
+    # Lifecycle – the "extra": only integrate when the dashboard is present
     # ------------------------------------------------------------------ #
     async def cog_load(self) -> None:
-        register_dashboard(self)  # No-op, falls WebDashboard nicht geladen
+        register_dashboard(self)  # No-op if WebDashboard is not loaded
 
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
     # ------------------------------------------------------------------ #
-    # Widget – erscheint als Kachel auf dem zentralen Board
+    # Widget – appears as a tile on the central board
     # ------------------------------------------------------------------ #
     @dashboard_widget(
         "member_count", "Mitglieder", size="sm", refresh=60, permission="guild_member"
@@ -53,7 +53,7 @@ class DashboardExample(commands.Cog):
         return WidgetData.kpi(value=guild.member_count, label="Mitglieder", icon="users")
 
     # ------------------------------------------------------------------ #
-    # Panel – kontextuelles Formular (eingebettet, keine eigene Seite)
+    # Panel – contextual form (embedded, not its own page)
     # ------------------------------------------------------------------ #
     @dashboard_panel(
         "greeting", "Begrüßung", mount="guild_settings", permission="guild_admin"
@@ -81,7 +81,7 @@ class DashboardExample(commands.Cog):
         return SubmitResult.ok("Begrüßung gespeichert.")
 
     # ------------------------------------------------------------------ #
-    # Owner-Command zum schnellen Prüfen
+    # Owner command for a quick check
     # ------------------------------------------------------------------ #
     @commands.is_owner()
     @commands.command(name="dashboardexample")

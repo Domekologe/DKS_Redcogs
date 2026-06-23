@@ -45,7 +45,7 @@ except Exception:
             return decorator
 
 class AdminUtils(commands.Cog):
-    """Admin-Utilities als Slash/Hybrid-Commands"""
+    """Admin utilities as slash/hybrid commands"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -61,7 +61,7 @@ class AdminUtils(commands.Cog):
         self._dashboard_attached = False
 
     async def cog_load(self) -> None:
-        # DKS WebDashboard zuerst & unabhängig registrieren (no-op, falls nicht geladen)
+        # Register DKS WebDashboard first & independently (no-op if not loaded)
         register_dashboard(self)
         dashboard = self.bot.get_cog("DKS-Dashboard") or self.bot.get_cog("Dashboard")
         if dashboard is None:
@@ -83,7 +83,7 @@ class AdminUtils(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="AdminUtils Templates")
 
-    # --- Guild-Panel: Moderations-Nachrichten anpassen ------------------- #
+    # --- Guild panel: customize moderation messages ------------------- #
     @dashboard_panel(
         "templates", "Moderations-Nachrichten", mount="guild_settings", permission="guild_admin"
     )
@@ -141,10 +141,10 @@ class AdminUtils(commands.Cog):
         except Exception:
             self._dashboard_attached = False
 
-    # kleiner Helper, damit ephemeral nur bei Slash benutzt wird
+    # small helper so ephemeral is only used for slash
     async def _reply(self, ctx: commands.Context, content: str, **kwargs):
         if getattr(ctx, "interaction", None) is not None:
-            # Slash/Hybrid via Interaction -> immer ephemeral
+            # Slash/Hybrid via Interaction -> always ephemeral
             await ctx.reply(content, ephemeral=True, **kwargs)
         else:
             await ctx.reply(content, **{k: v for k, v in kwargs.items() if k != "ephemeral"})
@@ -213,7 +213,7 @@ class AdminUtils(commands.Cog):
         self,
         ctx: commands.Context,
         member: discord.Member,
-        minutes: app_commands.Range[int, 1, 40320],  # bis 28 Tage
+        minutes: app_commands.Range[int, 1, 40320],  # up to 28 days
         *,
         reason: Optional[str] = None
     ):
@@ -230,7 +230,7 @@ class AdminUtils(commands.Cog):
         )
 
 
-    # ---- PURGE (mit Ausnahmen) ----
+    # ---- PURGE (with exceptions) ----
     @commands.hybrid_command(name="purge", description="Lösche X Nachrichten, optional mit Ausnahmen.")
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
@@ -245,16 +245,16 @@ class AdminUtils(commands.Cog):
         *,
         except_users: Optional[str] = None
     ):
-        # 0) Sofort defer für Slash/Hybrid, damit nichts „hängt“
+        # 0) Defer immediately for slash/hybrid so nothing "hangs"
         deferred = False
         if getattr(ctx, "interaction", None) is not None:
             try:
                 await ctx.interaction.response.defer(ephemeral=True, thinking=True)
                 deferred = True
             except discord.InteractionResponded:
-                pass  # schon deferred
+                pass  # already deferred
 
-        # 1) Ausnahme-IDs sammeln
+        # 1) Collect exception IDs
         except_ids: List[int] = []
         if except_users:
             for u in except_users.split():
@@ -267,20 +267,20 @@ class AdminUtils(commands.Cog):
                 elif u.isdigit():
                     uid = int(u)
                 else:
-                    # Versuche mehrere sinnvolle Matching-Varianten
+                    # Try several sensible matching variants
                     u_lower = u.lower()
 
-                    # 1) Display-Name exakte Übereinstimmung
+                    # 1) Display name exact match
                     m = discord.utils.find(lambda m: m.display_name.lower() == u_lower, ctx.guild.members)
                     if m:
                         uid = m.id
                     else:
-                        # 2) Username exakte Übereinstimmung
+                        # 2) Username exact match
                         m = discord.utils.find(lambda m: m.name.lower() == u_lower, ctx.guild.members)
                         if m:
                             uid = m.id
                         else:
-                            # 3) Display-Name contains (fuzzy)
+                            # 3) Display name contains (fuzzy)
                             m = discord.utils.find(lambda m: u_lower in m.display_name.lower(), ctx.guild.members)
                             if m:
                                 uid = m.id
@@ -308,21 +308,21 @@ class AdminUtils(commands.Cog):
             nonlocal progress_msg
             text = f"🧹 Lösche… {total_deleted}/{total_target} erledigt."
             if getattr(ctx, "interaction", None) is not None:
-                # Bei Hybrid/Slash: Folge-Nachricht (ephemeral) oder editieren
+                # For hybrid/slash: follow-up message (ephemeral) or edit
                 if progress_msg is None:
-                    progress_msg = await ctx.send(text)  # wird als Followup gesendet
+                    progress_msg = await ctx.send(text)  # sent as a followup
                 else:
                     try:
                         await progress_msg.edit(content=text)
                     except discord.HTTPException:
                         pass
             else:
-                # Bei Prefix: tippen anzeigen, nicht spammen
+                # For prefix: show typing, don't spam
                 await ctx.typing()
 
         await update_progress()
 
-        # 2) Schneller Bulk-Pass (nur <14 Tage)
+        # 2) Fast bulk pass (only <14 days)
         try:
             recent_deleted = await ctx.channel.purge(
                 limit=amount,
@@ -332,17 +332,17 @@ class AdminUtils(commands.Cog):
         except discord.Forbidden:
             return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
         except discord.HTTPException:
-            # Fallback: wenn purge scheitert, einfach weiter mit Einzel-Löschung
+            # Fallback: if purge fails, just continue with single deletion
             recent_deleted = []
 
         total_deleted += len(recent_deleted)
         await update_progress()
 
-        # 3) Falls noch nicht genug: ältere Nachrichten einzeln löschen
+        # 3) If not enough yet: delete older messages individually
         remaining = total_target - total_deleted
         if remaining > 0:
-            # Wir iterieren die letzten `amount * 3` Nachrichten (Heuristik),
-            # um genug ältere Kandidaten zu finden.
+            # We iterate the last `amount * 3` messages (heuristic)
+            # to find enough older candidates.
             scanned = 0
             async for msg in ctx.channel.history(limit=amount * 3, oldest_first=False):
                 if scanned >= amount:
@@ -352,7 +352,7 @@ class AdminUtils(commands.Cog):
                 if not _check(msg):
                     continue
 
-                # Alles, was purge NICHT erwischt (>=14 Tage), einzeln löschen
+                # Delete individually everything purge does NOT catch (>=14 days)
                 too_old = (discord.utils.utcnow() - msg.created_at) >= timedelta(days=14)
                 if too_old:
                     try:
@@ -362,7 +362,7 @@ class AdminUtils(commands.Cog):
                     except discord.HTTPException:
                         pass
 
-                    # Event-Loop freigeben & Fortschritt updaten
+                    # Release the event loop & update progress
                     if total_deleted % 25 == 0:
                         await update_progress()
                         await asyncio.sleep(0)
@@ -370,14 +370,14 @@ class AdminUtils(commands.Cog):
                     if remaining <= 0:
                         break
 
-        # 4) Abschluss
+        # 4) Completion
         if progress_msg is not None:
             try:
                 await progress_msg.edit(content=f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
             except discord.HTTPException:
                 pass
 
-        # Falls wir nie eine Followup-Msg geschickt haben (Prefix oder kein progress_msg):
+        # If we never sent a followup message (prefix or no progress_msg):
         if progress_msg is None:
             templates = await self.config.guild(ctx.guild).templates()
             await self._reply(
@@ -405,14 +405,14 @@ class AdminUtils(commands.Cog):
         *,
         except_users: Optional[str] = None
     ):
-        # Slash/Hybrid sofort defer, damit nichts „hängt“
+        # Defer slash/hybrid immediately so nothing "hangs"
         if getattr(ctx, "interaction", None) is not None:
             try:
                 await ctx.interaction.response.defer(ephemeral=True, thinking=True)
             except discord.InteractionResponded:
                 pass
 
-        # Ausnahme-IDs sammeln (gleiches Schema wie beim normalen purge)
+        # Collect exception IDs (same scheme as the normal purge)
         except_ids: List[int] = []
         if except_users:
             for u in except_users.split():
@@ -425,20 +425,20 @@ class AdminUtils(commands.Cog):
                 elif u.isdigit():
                     uid = int(u)
                 else:
-                    # Versuche mehrere sinnvolle Matching-Varianten
+                    # Try several sensible matching variants
                     u_lower = u.lower()
 
-                    # 1) Display-Name exakte Übereinstimmung
+                    # 1) Display name exact match
                     m = discord.utils.find(lambda m: m.display_name.lower() == u_lower, ctx.guild.members)
                     if m:
                         uid = m.id
                     else:
-                        # 2) Username exakte Übereinstimmung
+                        # 2) Username exact match
                         m = discord.utils.find(lambda m: m.name.lower() == u_lower, ctx.guild.members)
                         if m:
                             uid = m.id
                         else:
-                            # 3) Display-Name contains (fuzzy)
+                            # 3) Display name contains (fuzzy)
                             m = discord.utils.find(lambda m: u_lower in m.display_name.lower(), ctx.guild.members)
                             if m:
                                 uid = m.id
@@ -456,14 +456,14 @@ class AdminUtils(commands.Cog):
                 return False
             if m.author.id in except_ids:
                 return False
-            # WICHTIG: Bulk löscht nur Nachrichten <14 Tage – ältere werden von Discord ignoriert.
+            # IMPORTANT: Bulk only deletes messages <14 days - older ones are ignored by Discord.
             return True
 
         try:
             deleted = await ctx.channel.purge(
                 limit=amount,
                 check=_check,
-                bulk=True  # -> sehr schnell (aber nur ≤ 14 Tage)
+                bulk=True  # -> very fast (but only <= 14 days)
             )
         except discord.Forbidden:
             return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
@@ -475,7 +475,7 @@ class AdminUtils(commands.Cog):
             f"✅ {len(deleted)} Nachrichten (≤14 Tage) gelöscht. Ausnahmen: {len(except_ids)}"
         )
         
-    # ---- MESSAGE MOVE (kopieren + optional löschen) ----
+    # ---- MESSAGE MOVE (copy + optionally delete) ----
     @commands.hybrid_command(
         name="messagemove",
         description="Kopiert eine Nachricht in einen Ziel-Channel oder Thread und löscht das Original (optional)."
@@ -498,7 +498,7 @@ class AdminUtils(commands.Cog):
         if mid is None:
             return await self._reply(ctx, "❌ Ungültige Message-ID oder Message-Link.")
 
-        # Channel aus Message-Link ermitteln (oder Fallback: aktueller Channel)
+        # Determine channel from message link (or fallback: current channel)
         channel = ctx.channel
         try:
             msg = await channel.fetch_message(mid)
@@ -562,7 +562,7 @@ class AdminUtils(commands.Cog):
         if not ctx.interaction:
             return await self._reply(ctx, "❌ Dieses Kommando nur als Slash möglich.")
 
-        # sofort defer -> Discord zufrieden
+        # defer immediately -> Discord satisfied
         await ctx.interaction.response.defer(ephemeral=True, thinking=True)
 
         moved, failed = [], []
@@ -580,7 +580,7 @@ class AdminUtils(commands.Cog):
         await ctx.interaction.followup.send(msg, ephemeral=True)
 
 
-    # ---- MOVE MEMBER (Select Menü + Bestätigung) ----
+    # ---- MOVE MEMBER (select menu + confirmation) ----
     @commands.hybrid_command(
         name="move-member",
         description="Verschiebe ausgewählte Mitglieder aus einem VoiceChannel in einen anderen."
@@ -605,10 +605,10 @@ class AdminUtils(commands.Cog):
             await ctx.interaction.response.defer(ephemeral=True, thinking=True)
             return await ctx.interaction.followup.send("❌ Im Quellchannel sind keine Mitglieder.", ephemeral=True)
 
-        # sofort defer
+        # defer immediately
         await ctx.interaction.response.defer(ephemeral=True, thinking=True)
 
-        # Optionen (max. 25 wegen Discord-Limit)
+        # Options (max. 25 due to Discord limit)
         options = [
             discord.SelectOption(label=m.display_name, value=str(m.id))
             for m in members[:25]
@@ -621,7 +621,7 @@ class AdminUtils(commands.Cog):
                 self.selected: list[int] = []
                 self.confirmed = False
 
-                # Menü direkt hier hinzufügen (das reicht!)
+                # Add the menu directly here (that's enough!)
                 self.select_menu = discord.ui.Select(
                     placeholder="Wähle Mitglieder zum Verschieben",
                     options=options,
@@ -647,7 +647,7 @@ class AdminUtils(commands.Cog):
                 self.stop()
                 for child in self.children:
                     child.disabled = True
-                # Bei ephemeral Messages kein edit möglich, also einfach nur stoppen
+                # No edit possible on ephemeral messages, so just stop
                 try:
                     await interaction.message.edit(view=self)
                 except discord.NotFound:
@@ -663,7 +663,7 @@ class AdminUtils(commands.Cog):
                 self.stop()
                 for child in self.children:
                     child.disabled = True
-                # Bei ephemeral Messages kein edit möglich, also einfach nur stoppen
+                # No edit possible on ephemeral messages, so just stop
                 try:
                     await interaction.message.edit(view=self)
                 except discord.NotFound:
@@ -672,7 +672,7 @@ class AdminUtils(commands.Cog):
                 await interaction.response.send_message("❌ Abgebrochen.", ephemeral=True)
 
 
-        # View über followup schicken (da wir schon deferred haben)
+        # Send the view via followup (since we already deferred)
         view = MemberSelect(ctx, options)
         await ctx.interaction.followup.send(
             "➡️ Wähle die Mitglieder und bestätige oder breche ab:",
@@ -680,11 +680,11 @@ class AdminUtils(commands.Cog):
             ephemeral=True
         )
 
-        # auf Ergebnis warten
+        # wait for the result
         await view.wait()
 
         if not view.confirmed or not view.selected:
-            return  # Abbruch oder Timeout → schon ephemer gemeldet
+            return  # cancel or timeout -> already reported ephemerally
 
         moved, failed = [], []
         for mid in view.selected:

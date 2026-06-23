@@ -30,7 +30,7 @@ class ReactionRole(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=983472983472, force_registration=True)
         self.config.register_guild(
-            language="de-DE",  # pro-Guild Sprache dieses Cogs (de-DE | en-US)
+            language="de-DE",  # per-guild language of this cog (de-DE | en-US)
             reactionroles={},
             panels={},
             templates={
@@ -63,7 +63,7 @@ class ReactionRole(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="ReactionRoles")
 
-    # --- Guild-Panel: Erfolgs-Nachrichten anpassen ----------------------- #
+    # --- Guild panel: customize success messages ------------------------- #
     @dashboard_panel(
         "templates", "ReactionRole-Nachrichten", mount="guild_settings", permission="guild_admin"
     )
@@ -103,7 +103,7 @@ class ReactionRole(commands.Cog):
         await self.config.guild(ctx.guild).templates.set(cur)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Guild-Panel: ReactionRole direkt anlegen ------------------------ #
+    # --- Guild panel: create ReactionRole directly ----------------------- #
     @dashboard_panel(
         "create_rr", "ReactionRole anlegen", mount="guild_settings", permission="guild_admin"
     )
@@ -168,7 +168,7 @@ class ReactionRole(commands.Cog):
             }
         return SubmitResult.ok(f"ReactionRole angelegt (ID {rr_id}).")
 
-    # --- Guild-Liste: bestehende ReactionRoles ansehen/löschen ----------- #
+    # --- Guild list: view/delete existing ReactionRoles ------------------ #
     @dashboard_list(
         "rr_list", "Bestehende ReactionRoles", mount="guild_settings", permission="guild_admin",
         columns=[
@@ -204,7 +204,7 @@ class ReactionRole(commands.Cog):
             entry = d.pop(item_id, None)
         if entry is None:
             return SubmitResult.fail("Eintrag nicht gefunden.")
-        # Reaktion an der Nachricht aufräumen (best effort).
+        # Clean up the reaction on the message (best effort).
         try:
             ch = ctx.guild.get_channel(entry.get("channel_id"))
             if ch:
@@ -216,10 +216,10 @@ class ReactionRole(commands.Cog):
 
     @reactionrole_list.edit_form
     async def _edit_reactionrole_form(self, ctx, item_id):
-        """Bearbeiten: nur die zugewiesene Rolle ist sinnvoll änderbar.
+        """Edit: only the assigned role is sensibly changeable.
 
-        Kanal/Nachricht/Emoji bestimmen die Reaktion selbst – diese zu ändern
-        entspräche einem neuen Eintrag (dafür das Anlegen-Panel nutzen).
+        Channel/message/emoji define the reaction itself - changing those
+        would amount to a new entry (use the create panel for that).
         """
         data = await self.config.guild(ctx.guild).reactionroles()
         entry = (data or {}).get(item_id) or {}

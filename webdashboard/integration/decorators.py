@@ -1,7 +1,7 @@
-"""Decorators, mit denen Dritt-Cogs Beiträge zum Dashboard markieren.
+"""Decorators that third-party cogs use to mark their dashboard contributions.
 
-Beispiele siehe ARCHITECTURE.md §3. Die Decorators hängen nur Metadaten an die
-Methode an; das Einsammeln übernimmt die Registry beim Registrieren des Cogs.
+See ARCHITECTURE.md §3 for examples. The decorators only attach metadata to the
+method; collecting them is done by the registry when the cog is registered.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ LIST_ATTR = "__dashboard_list__"
 
 
 class _ContributionMeta:
-    """Gemeinsame Metadaten-Basis für alle Beitragstypen."""
+    """Shared metadata base for all contribution types."""
 
     def __init__(
         self,
@@ -35,9 +35,9 @@ class _ContributionMeta:
         self.description = description
         self.icon = icon
         self.extra = extra or {}
-        # wird bei Panels gesetzt
+        # set for panels
         self.submit_handler: Optional[Callable] = None
-        # wird bei Listen gesetzt
+        # set for lists
         self.delete_handler: Optional[Callable] = None
         self.edit_handler: Optional[Callable] = None
         self.edit_form_handler: Optional[Callable] = None
@@ -59,13 +59,13 @@ def dashboard_widget(
     name: str,
     *,
     size: str = "md",            # sm | md | lg
-    refresh: Optional[int] = None,  # Auto-Refresh in Sekunden
+    refresh: Optional[int] = None,  # auto-refresh in seconds
     permission: str = "authenticated",
     scope: str = "guild",        # guild | global
     description: Optional[str] = None,
     icon: Optional[str] = None,
 ) -> Callable:
-    """Registriert eine Methode als Board-Widget."""
+    """Registers a method as a board widget."""
 
     def decorator(func: Callable) -> Callable:
         meta = _ContributionMeta(
@@ -83,16 +83,16 @@ def dashboard_panel(
     identifier: str,
     name: str,
     *,
-    mount: str = "guild_settings",  # Einbettungsort im UI
+    mount: str = "guild_settings",  # embedding location in the UI
     permission: str = "guild_admin",
     scope: str = "guild",
     description: Optional[str] = None,
     icon: Optional[str] = None,
-    order: int = 100,  # Tab-Reihenfolge im Modul (kleiner = weiter links)
+    order: int = 100,  # tab order within the module (smaller = further left)
 ) -> Callable:
-    """Registriert eine Methode als kontextuelles Panel (Formular).
+    """Registers a method as a contextual panel (form).
 
-    Der zugehörige Speicher-Handler wird über ``@<panel>.on_submit`` gesetzt.
+    The associated save handler is set via ``@<panel>.on_submit``.
     """
 
     def decorator(func: Callable) -> Callable:
@@ -124,12 +124,12 @@ def dashboard_list(
     scope: str = "guild",
     description: Optional[str] = None,
     icon: Optional[str] = None,
-    order: int = 100,  # Tab-Reihenfolge im Modul (kleiner = weiter links)
+    order: int = 100,  # tab order within the module (smaller = further left)
 ) -> Callable:
-    """Registriert eine Methode als verwaltbare Liste (Tabelle mit Löschen).
+    """Registers a method as a managed list (table with delete).
 
-    Die Methode liefert Zeilen ``[{"id": "...", "cells": {col_key: wert, ...}}]``.
-    Der Lösch-Handler wird über ``@<list>.on_delete`` gesetzt und erhält ``(ctx, id)``.
+    The method returns rows ``[{"id": "...", "cells": {col_key: value, ...}}]``.
+    The delete handler is set via ``@<list>.on_delete`` and receives ``(ctx, id)``.
     """
 
     def decorator(func: Callable) -> Callable:
@@ -145,12 +145,12 @@ def dashboard_list(
             return delete_func
 
         def edit_form(form_func: Callable) -> Callable:
-            """Liefert das Bearbeiten-Formular für eine Zeile: ``(ctx, id) -> PanelSchema``."""
+            """Returns the edit form for a row: ``(ctx, id) -> PanelSchema``."""
             meta.edit_form_handler = form_func
             return form_func
 
         def on_edit(edit_func: Callable) -> Callable:
-            """Speichert die Änderungen einer Zeile: ``(ctx, id, data) -> SubmitResult``."""
+            """Saves the changes of a row: ``(ctx, id, data) -> SubmitResult``."""
             meta.edit_handler = edit_func
             return edit_func
 
@@ -170,9 +170,9 @@ def dashboard_page(
     scope: str = "guild",
     description: Optional[str] = None,
     icon: Optional[str] = None,
-    nav: bool = True,  # in der Seitennavigation anzeigen?
+    nav: bool = True,  # show in the side navigation?
 ) -> Callable:
-    """Registriert eine Methode als vollwertige Seite (Komponentenbaum-Schema)."""
+    """Registers a method as a full standalone page (component-tree schema)."""
 
     def decorator(func: Callable) -> Callable:
         meta = _ContributionMeta(
@@ -187,7 +187,7 @@ def dashboard_page(
 
 
 def iter_contributions(cog: Any) -> List[tuple]:
-    """Liefert ``(attr, meta, bound_method)`` für alle dekorierten Methoden eines Cogs."""
+    """Returns ``(attr, meta, bound_method)`` for all decorated methods of a cog."""
     found = []
     for attr_name in dir(cog):
         try:

@@ -58,7 +58,7 @@ EVENTS = {
     "voice_switch": "Sprachkanal gewechselt"
 }
 
-# Gruppierung der Events in Kategorien (für übersichtliche Tabs im Dashboard).
+# Grouping of events into categories (for clear tabs in the dashboard).
 EVENT_CATEGORIES = {
     "messages": ("Nachrichten & Kanäle", [
         "message_edit", "message_delete",
@@ -97,7 +97,7 @@ def format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 class AdminProtocol(commands.Cog):
-    """Protokolliert administrative Aktionen und Benutzeraktivitäten auf dem Server."""
+    """Logs administrative actions and user activity on the server."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -135,7 +135,7 @@ class AdminProtocol(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Aktive Log-Events")
 
-    # --- Guild-Panels: Log-Events nach Kategorie (übersichtliche Tabs) ---- #
+    # --- Guild panels: log events by category (clear tabs) ---- #
     async def _ap_events_schema(self, ctx, keys):
         events = await self.config.guild(ctx.guild).events()
         if not isinstance(events, dict):
@@ -202,15 +202,15 @@ class AdminProtocol(commands.Cog):
     async def _ap_save_voice(self, ctx, data):
         return await self._ap_events_save(ctx, data, EVENT_CATEGORIES["voice"][1])
 
-    # --- Guild-Panel: Ausnahmen je (aktivem) Event ----------------------- #
+    # --- Guild panel: exceptions per (active) event ----------------------- #
     @dashboard_panel(
         "events_exceptions", "Ausnahmen", mount="guild_settings", permission="guild_admin", order=5
     )
     async def adminprotocol_exceptions_panel(self, ctx):
-        """Ignorierte Kanäle/Rollen/User pro aktivem Log-Event.
+        """Ignored channels/roles/users per active log event.
 
-        Es werden nur AKTIVE Events angezeigt, damit das Formular übersichtlich
-        bleibt. Kanäle/Rollen als Mehrfachauswahl, User als ID-Liste (Komma).
+        Only ACTIVE events are shown so that the form stays clear and concise.
+        Channels/roles as multi-select, users as an ID list (comma-separated).
         """
         events = await self.config.guild(ctx.guild).events()
         if not isinstance(events, dict):
@@ -626,7 +626,7 @@ class AdminProtocol(commands.Cog):
             entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_update, target_id=after.id)
             # Check if updated by someone else
             if entry and entry.user and entry.user.id != after.id:
-                # Nickname verändert (Fremd)
+                # Nickname changed (by someone else)
                 embed = discord.Embed(
                     color=0xf1c40f,
                     title="🏷️ Nickname verändert (Fremd)",
@@ -640,7 +640,7 @@ class AdminProtocol(commands.Cog):
                 embed.set_footer(text="adminprotocol")
                 await self._post_embed(guild, "nickname_change_other", embed, member=after, actor=entry.user)
             else:
-                # Nickname geändert (Selbst)
+                # Nickname changed (by self)
                 embed = discord.Embed(
                     color=0xf1c40f,
                     title="🏷️ Nickname geändert (Selbst)",
@@ -936,7 +936,7 @@ class AdminProtocol(commands.Cog):
                 embed.set_footer(text=f"ID: {member.id}")
                 await self._post_embed(guild, "voice_switch", embed, channel=after.channel, member=member)
 
-        # 4. Voice status changed (stummschaltung)
+        # 4. Voice status changed (mute/deafen)
         status_changes = []
         if before.self_mute != after.self_mute:
             status_changes.append(f"Mute (Selbst): `{'Aktiv' if after.self_mute else 'Inaktiv'}`")

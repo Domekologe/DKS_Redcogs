@@ -66,14 +66,14 @@ class Neko(commands.Cog):
         return embed
 
     # ------------------------------------------------------------------
-    # Prefix Command: !neko → nur Kategorie "neko"
-    # Prefix Command: !neko <category> → jede Kategorie
+    # Prefix command: !neko → only category "neko"
+    # Prefix command: !neko <category> → any category
     # ------------------------------------------------------------------
     @commands.command(name="neko")
     async def neko_prefix(self, ctx, category: str = None):
         """Zeigt ein Neko oder aus der Kategorie ein Bild/GIF."""
 
-        # Kein Parameter → immer Kategorie "neko"
+        # No parameter → always category "neko"
         if category is None:
             embed = await self.fetch_and_build_embed("neko")
             return await ctx.send(embed=embed)
@@ -90,7 +90,7 @@ class Neko(commands.Cog):
 
 
     # ------------------------------------------------------------------
-    # Autocomplete Funktion
+    # Autocomplete function
     # ------------------------------------------------------------------
     async def neko_autocomplete(self, interaction: discord.Interaction, current: str):
         current = current.lower()
@@ -104,7 +104,7 @@ class Neko(commands.Cog):
         return suggestions[:25]
 
     # ------------------------------------------------------------------
-    # Slash Command: /neko → nur Kategorie "neko"
+    # Slash command: /neko → only category "neko"
     # ------------------------------------------------------------------
     @app_commands.command(name="neko", description="Zeigt ein Neko-Bild.")
     async def neko_slash(self, interaction: discord.Interaction):
@@ -113,7 +113,7 @@ class Neko(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     # ------------------------------------------------------------------
-    # Slash Command: /neko-cat <category> → jede Kategorie
+    # Slash command: /neko-cat <category> → any category
     # ------------------------------------------------------------------
     @app_commands.command(
         name="neko-cat",

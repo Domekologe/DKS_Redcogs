@@ -1,4 +1,4 @@
-"""Laufzeit-Kontext, der jedem Widget-/Panel-/Page-Handler übergeben wird."""
+"""Runtime context passed to every widget/panel/page handler."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,11 +11,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class DashboardContext:
-    """Sicherer Kontext für einen einzelnen Dashboard-Aufruf.
+    """Safe context for a single dashboard call.
 
-    Wird vom Gateway erzeugt, nachdem die Identität (Discord-User) und die Rechte
-    serverseitig validiert wurden. Handler dürfen sich darauf verlassen, dass der
-    Zugriff bereits autorisiert ist.
+    Created by the gateway after the identity (Discord user) and the permissions
+    have been validated server-side. Handlers may rely on access already being
+    authorized.
     """
 
     bot: "Red"
@@ -23,7 +23,7 @@ class DashboardContext:
     guild: Optional["discord.Guild"] = None
     member: Optional["discord.Member"] = None
     locale: str = "en-US"
-    # rohe, vom BFF gelieferte Request-Parameter (bereits typvalidiert)
+    # raw request parameters provided by the BFF (already type-validated)
     params: Optional[dict] = None
 
     @property

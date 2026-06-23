@@ -36,12 +36,12 @@ ADMIN_PANEL_INTRO = (
 )
 
 LINKED_PAGE_SIZE = 24
-# Discord: Nachrichten-Content max. 2000 Zeichen — sonst schlägt edit_message fehl („Interaktion fehlgeschlagen“).
+# Discord: message content max. 2000 characters — otherwise edit_message fails ("Interaction failed").
 PANEL_MESSAGE_CONTENT_LIMIT = 2000
 
 
 def _truncate_for_message(body: str, footer: str, limit: int = PANEL_MESSAGE_CONTENT_LIMIT) -> str:
-    """body + footer ≤ limit (footer bleibt erhalten)."""
+    """body + footer ≤ limit (footer is preserved)."""
     max_body = limit - len(footer)
     if max_body < 80:
         return (body[: max(40, limit - 40)] + "…")[:limit]
@@ -1029,7 +1029,7 @@ class OfficerUserPickView(discord.ui.View):
 
 
 class WowAdminCharPanelView(discord.ui.View):
-    """Ein Panel: Mitglied wählen + Listen — ersetzt mehrere /wow-admin-Unteraktionen."""
+    """One panel: pick a member + lists — replaces several /wow-admin sub-actions."""
 
     def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
         super().__init__(timeout=600)
@@ -1091,7 +1091,7 @@ class WowAdminCharPanelView(discord.ui.View):
 
 
 class SlashWowAdminSyncAllConfirmView(discord.ui.View):
-    """Bestätigung per Dropdown vor Bulk-Rang-Sync."""
+    """Dropdown confirmation before bulk rank sync."""
 
     def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
         super().__init__(timeout=120)
@@ -1122,7 +1122,7 @@ class SlashWowAdminSyncAllConfirmView(discord.ui.View):
 
 
 def attach_officer_extras_if_needed(view: CharMainMenuView) -> None:
-    """Zusatz-Buttons, wenn ein Offizier ein anderes Mitglied bearbeitet."""
+    """Extra buttons when an officer edits another member."""
     if view.actor.id == view.member.id:
         return
 

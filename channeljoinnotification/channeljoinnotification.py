@@ -201,7 +201,7 @@ class JoinNotificationSetupView(discord.ui.View):
 
 
 class ChannelJoinNotification(commands.Cog):
-    """Benachrichtigt User per DM beim Join bestimmter Voice-/Stage-Channels."""
+    """Notifies users via DM when they join certain voice/stage channels."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
@@ -298,7 +298,7 @@ class ChannelJoinNotification(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Join-Notify Channels")
 
-    # --- Guild-Panel: pro Sprachkanal DM aktivieren + Text --------------- #
+    # --- Guild panel: enable DM per voice channel + text ---------------- #
     @dashboard_panel(
         "notifications", "Join-Benachrichtigungen", mount="guild_settings", permission="guild_admin"
     )
@@ -337,7 +337,7 @@ class ChannelJoinNotification(commands.Cog):
         await self.config.guild(ctx.guild).notifications.set(notifications)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Guild-Liste: konfigurierte Join-Benachrichtigungen -------------- #
+    # --- Guild list: configured join notifications ---------------------- #
     @dashboard_list(
         "cjn_list", "Konfigurierte Benachrichtigungen", mount="guild_settings",
         permission="guild_admin",
@@ -353,7 +353,7 @@ class ChannelJoinNotification(commands.Cog):
         for cid, e in (data or {}).items():
             if not isinstance(e, dict):
                 continue
-            # Nur Einträge zeigen, die wirklich konfiguriert sind.
+            # Only show entries that are actually configured.
             if not (e.get("enabled") or e.get("text")):
                 continue
             ch = ctx.guild.get_channel(int(cid)) if str(cid).isdigit() else None

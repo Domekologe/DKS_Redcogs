@@ -118,7 +118,7 @@ def mains_from_member_data(payload: Dict[str, Any]) -> Dict[str, Optional[Dict[s
 
 
 async def _load_main_characters_raw(member_group: Config) -> Dict[str, Any]:
-    """Liest main_characters — ohne Daten zu löschen (kein automatisches clear bei Typfehlern)."""
+    """Reads main_characters — without deleting data (no automatic clear on type errors)."""
     try:
         raw = await member_group.main_characters()
     except TypeError:
@@ -129,7 +129,7 @@ async def _load_main_characters_raw(member_group: Config) -> Dict[str, Any]:
 
 
 def _pack_mains_for_storage(mains: Dict[str, Optional[Dict[str, str]]]) -> Dict[str, Dict[str, str]]:
-    """Nur gesetzte Mains speichern — keine None-Einträge (vermeidet Red-Config-Fehler)."""
+    """Only store set mains — no None entries (avoids Red config errors)."""
     out: Dict[str, Dict[str, str]] = {}
     for g in SUPPORTED_GAMES:
         v = mains.get(g)
@@ -283,7 +283,7 @@ def format_mains_summary(mains: Dict[str, Optional[Dict[str, str]]]) -> str:
 
 
 def format_rank_sync_summary(guild: Optional[discord.Guild], rank_sync_by_game: Any) -> str:
-    """Kurzinfo aus gespeichertem Rang-Sync-Zustand (für Listen)."""
+    """Short info from the stored rank-sync state (for lists)."""
     if not isinstance(rank_sync_by_game, dict):
         return ""
     parts: List[str] = []

@@ -10,7 +10,7 @@ from redbot.core import commands
 from .dks_dashboard import register_dashboard, unregister_dashboard
 
 
-# ---- kleine Helper: REST-Call für Voter holen (paged) ----
+# ---- small helper: fetch voters via REST call (paged) ----
 async def fetch_answer_voters(
     client: discord.Client, channel_id: int, message_id: int, answer_id: int, limit: int = 1000
 ) -> List[int]:
@@ -66,9 +66,9 @@ class GuildToolsPollExport(commands.Cog):
     def cog_unload(self) -> None:
         unregister_dashboard(self)
 
-    # ---------- Helper innerhalb der Klasse ----------
+    # ---------- helpers within the class ----------
     def _ans_id(self, ans) -> int:
-        # verschiedene discord.py-Versionen: mal .id, mal .answer_id
+        # different discord.py versions: sometimes .id, sometimes .answer_id
         val = getattr(ans, "answer_id", None)
         if val is None:
             val = getattr(ans, "id", None)
@@ -77,7 +77,7 @@ class GuildToolsPollExport(commands.Cog):
         return int(val)
 
     def _ans_text(self, ans) -> str:
-        # bevorzugt Klartext; sonst evtl. über poll_media; sonst str(ans)
+        # prefer plain text; otherwise maybe via poll_media; otherwise str(ans)
         txt = getattr(ans, "text", None)
         if not txt:
             pm = getattr(ans, "poll_media", None)
@@ -86,7 +86,7 @@ class GuildToolsPollExport(commands.Cog):
 
     @staticmethod
     def parse_message_ref(text: str, fallback_channel_id: int) -> Tuple[int, int]:
-        """Parst Nachricht-ID oder -Link. Gibt (channel_id, message_id) zurück."""
+        """Parses a message ID or link. Returns (channel_id, message_id)."""
         m = re.search(r"/channels/\d+/(\d+)/(\d+)", text or "")
         if m:
             return int(m.group(1)), int(m.group(2))
@@ -96,11 +96,11 @@ class GuildToolsPollExport(commands.Cog):
     def _user_name(self, guild: discord.Guild, user_id: int) -> str:
         member = guild.get_member(user_id)
         if member:
-            return member.display_name  # Server-spezifisch
+            return member.display_name  # server-specific
         user = self.bot.get_user(user_id)
         if user:
-            return user.name  # globaler Discord-Name
-        return str(user_id)  # Fallback, falls komplett unbekannt
+            return user.name  # global Discord name
+        return str(user_id)  # fallback if completely unknown
 
     # ---------- Slash-Command ----------
     @app_commands.describe(
@@ -119,13 +119,13 @@ class GuildToolsPollExport(commands.Cog):
     async def export_poll(self, interaction: discord.Interaction, poll: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True, ephemeral=True)
 
-        # ID oder Link parsen
+        # parse ID or link
         try:
             chan_id, message_id = self.parse_message_ref(poll, interaction.channel.id)
         except Exception:
             return await interaction.followup.send("❌ Ungültige Umfrage-Auswahl.", ephemeral=True)
 
-        # Channel holen (kann ein anderer Channel/Thread sein)
+        # fetch channel (may be a different channel/thread)
         ch = interaction.guild.get_channel(chan_id)
         if ch is None:
             try:
@@ -136,7 +136,7 @@ class GuildToolsPollExport(commands.Cog):
         if not isinstance(ch, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
             return await interaction.followup.send("❌ Dieser Befehl funktioniert nur in Textchannels/Threads.", ephemeral=True)
 
-        # Nachricht laden
+        # load message
         try:
             msg = await ch.fetch_message(message_id)
         except discord.NotFound:
@@ -152,14 +152,14 @@ class GuildToolsPollExport(commands.Cog):
         if not answers:
             return await interaction.followup.send("❌ Keine Antworten gefunden.", ephemeral=True)
 
-        # --- Voter je Antwort sammeln ---
+        # --- collect voters per answer ---
         answer_to_voters: Dict[int, List[int]] = {}
         for ans in answers:
             ans_id = self._ans_id(ans)
             voters = await fetch_answer_voters(self.bot, msg.channel.id, msg.id, ans_id)
             answer_to_voters[ans_id] = voters
 
-        # --- CSV bauen ---
+        # --- build CSV ---
         question_text = getattr(poll_obj.question, "text", str(poll_obj.question))
         answers_list: List[Tuple[int, str]] = [(self._ans_id(a), self._ans_text(a)) for a in answers]
 
@@ -225,7 +225,7 @@ class GuildToolsPollExport(commands.Cog):
 
         return choices[:25]
 
-    # ---- CSV-Erzeugung ----
+    # ---- CSV generation ----
     def _build_csv(
         self,
         guild: discord.Guild,

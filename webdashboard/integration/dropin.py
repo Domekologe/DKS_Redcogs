@@ -1,24 +1,24 @@
-"""Drop-in-Hook für Dritt-Cogs (Referenz-Implementierung).
+"""Drop-in hook for third-party cogs (reference implementation).
 
-Kopiere diese Datei als ``dks_dashboard.py`` in deinen Cog ODER importiere sie direkt
-(``from webdashboard.integration.dropin import ...``), wenn WebDashboard ohnehin als
-Cog im selben Bot installiert ist.
+Copy this file as ``dks_dashboard.py`` into your cog OR import it directly
+(``from webdashboard.integration.dropin import ...``) when WebDashboard is already
+installed as a cog in the same bot.
 
-Eigenschaften:
-* **Keine harte Abhängigkeit** – funktioniert auch, wenn ``webdashboard`` nicht
-  installiert ist (Decorators werden dann zu No-ops).
-* **Opt-in zur Laufzeit** – ``register_dashboard`` integriert nur, wenn der
-  ``WebDashboard``-Cog tatsächlich geladen ist; sonst passiert nichts.
-* **AAA3A-kompatibel** – kollidiert nicht mit AAA3As ``DashboardIntegration`` /
-  ``@dashboard_page``; beide Dashboards können gleichzeitig laufen. Importiere bei
-  Bedarf unter Alias (siehe INTEGRATION.md).
+Properties:
+* **No hard dependency** - works even when ``webdashboard`` is not installed
+  (the decorators then become no-ops).
+* **Opt-in at runtime** - ``register_dashboard`` only integrates when the
+  ``WebDashboard`` cog is actually loaded; otherwise nothing happens.
+* **AAA3A-compatible** - does not collide with AAA3A's ``DashboardIntegration`` /
+  ``@dashboard_page``; both dashboards can run at the same time. Import under an
+  alias if needed (see INTEGRATION.md).
 """
 from __future__ import annotations
 
 try:
-    # Aus den Submodulen importieren, damit dies sowohl als interner Import
-    # (innerhalb des webdashboard-Pakets) als auch als kopierte Datei in einem
-    # fremden Cog funktioniert.
+    # Import from the submodules so that this works both as an internal import
+    # (within the webdashboard package) and as a file copied into a
+    # third-party cog.
     try:
         from .context import DashboardContext  # type: ignore  # noqa: F401
         from .decorators import (  # type: ignore  # noqa: F401
@@ -35,7 +35,7 @@ try:
             WidgetData,
         )
     except ImportError:
-        # als kopierte Datei (kein Paketkontext): absoluter Import
+        # as a copied file (no package context): absolute import
         from webdashboard.integration.context import DashboardContext  # type: ignore  # noqa: F401,E501
         from webdashboard.integration.decorators import (  # type: ignore  # noqa: F401
             dashboard_page,
@@ -52,7 +52,7 @@ try:
         )
 
     DASHBOARD_AVAILABLE = True
-except Exception:  # pragma: no cover - webdashboard nicht installiert
+except Exception:  # pragma: no cover - webdashboard not installed
     DASHBOARD_AVAILABLE = False
 
     def _noop_decorator(*_args, **_kwargs):
@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - webdashboard nicht installiert
 
         return deco
 
-    # Decorators werden zu No-ops; markierte Methoden bleiben normale Methoden.
+    # Decorators become no-ops; marked methods stay normal methods.
     def _noop_panel(*_args, **_kwargs):
         def deco(func):
             def on_submit(sub):
@@ -76,7 +76,7 @@ except Exception:  # pragma: no cover - webdashboard nicht installiert
     dashboard_panel = _noop_panel  # type: ignore
 
     class _Stub:
-        """Platzhalter, falls die Datenklassen ohne geladenes Dashboard genutzt werden."""
+        """Placeholder for when the data classes are used without a loaded dashboard."""
 
         def __init__(self, *_a, **_k):
             ...
@@ -88,7 +88,7 @@ except Exception:  # pragma: no cover - webdashboard nicht installiert
         def _factory(cls, *_a, **_k):
             return cls()
 
-        # gängige Konstruktoren
+        # common constructors
         kpi = list = chart = status = markdown = ok = fail = _factory  # type: ignore
 
     WidgetData = PanelSchema = PageSchema = Field = Component = SubmitResult = _Stub  # type: ignore
@@ -96,9 +96,9 @@ except Exception:  # pragma: no cover - webdashboard nicht installiert
 
 
 def register_dashboard(cog) -> bool:
-    """In ``cog_load`` aufrufen. Integriert NUR, wenn WebDashboard geladen ist.
+    """Call this in ``cog_load``. Integrates ONLY when WebDashboard is loaded.
 
-    Liefert ``True``, wenn registriert wurde, sonst ``False``.
+    Returns ``True`` if registration happened, otherwise ``False``.
     """
     dashboard = cog.bot.get_cog("WebDashboard")
     if dashboard is None:
@@ -108,7 +108,7 @@ def register_dashboard(cog) -> bool:
 
 
 def unregister_dashboard(cog) -> None:
-    """In ``cog_unload`` aufrufen (sicher, auch wenn nichts registriert war)."""
+    """Call this in ``cog_unload`` (safe even if nothing was registered)."""
     dashboard = cog.bot.get_cog("WebDashboard")
     if dashboard is not None:
         try:

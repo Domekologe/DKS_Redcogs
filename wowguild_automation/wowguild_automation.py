@@ -151,7 +151,7 @@ I18N = {
 class WowGuildAutomation(commands.Cog):
     """WoW guild onboarding and role automation for Red."""
 
-    # Mindestabstand zwischen Offiziers-Hinweisen bei gesperrtem Ingame-Rang (Auto-Sync).
+    # Minimum interval between officer notices for a locked in-game rank (auto-sync).
     RANK_LOCK_NOTICE_COOLDOWN_SEC = 6 * 3600
 
     def __init__(self, bot: Red) -> None:
@@ -230,7 +230,7 @@ class WowGuildAutomation(commands.Cog):
             chars=[],
             linked_characters=[],
             main_character=None,
-            # Nur echte Dict-Einträge persistieren — Red nested_update bricht bei None-Blättern ab.
+            # Only persist real dict entries — Red nested_update fails on None leaves.
             main_characters={},
             ready_times={},
             onboarding_language="de-DE",
@@ -297,7 +297,7 @@ class WowGuildAutomation(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Onboarding")
 
-    # --- Globales Panel (Bot-Owner): Blizzard-API & Defaults --------------- #
+    # --- Global panel (bot owner): Blizzard API & defaults ---------------- #
     @dashboard_panel(
         "blizzard_api", "Blizzard API & Defaults",
         scope="global", mount="bot_settings", permission="bot_owner",
@@ -337,7 +337,7 @@ class WowGuildAutomation(commands.Cog):
             pass
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Guild-Panel: Verbündete Gilde hinzufügen ------------------------ #
+    # --- Guild panel: add allied guild ----------------------------------- #
     @dashboard_panel(
         "allied_add", "Verbündete Gilde hinzufügen", mount="guild_settings", permission="guild_admin",
     )
@@ -359,7 +359,7 @@ class WowGuildAutomation(commands.Cog):
             gl.append(name)
         return SubmitResult.ok("Gilde hinzugefügt.")
 
-    # --- Guild-Liste: Verbündete Gilden (ansehen/löschen) ---------------- #
+    # --- Guild list: allied guilds (view/delete) ------------------------- #
     @dashboard_list(
         "allied_guilds", "Verbündete Gilden", mount="guild_settings", permission="guild_admin",
         columns=[{"key": "guild", "label": "Gilde"}],
@@ -379,7 +379,7 @@ class WowGuildAutomation(commands.Cog):
                 gl.remove(g)
         return SubmitResult.ok("Verbündete Gilde entfernt.")
 
-    # --- Dashboard-Helfer: Channel-/Rollen-Optionen ---------------------- #
+    # --- Dashboard helper: channel/role options -------------------------- #
     def _wga_channel_options(self, ctx, *, with_none: bool = True) -> List[Dict[str, str]]:
         opts: List[Dict[str, str]] = []
         if with_none:
@@ -411,7 +411,7 @@ class WowGuildAutomation(commands.Cog):
             prof = ""
         return str(prof or "retail")
 
-    # --- Guild-Panel: Profil --------------------------------------------- #
+    # --- Guild panel: profile -------------------------------------------- #
     @dashboard_panel(
         "wga_profile", "Profil", mount="guild_settings", permission="guild_admin", order=1,
     )
@@ -474,19 +474,19 @@ class WowGuildAutomation(commands.Cog):
             if not isinstance(profiles, dict):
                 profiles.clear()
             if new_key:
-                # Neues Profil anlegen + aktiv schalten.
+                # Create new profile + set active.
                 profiles[new_key] = {
                     "region": region or "eu", "version": version, "realm": realm, "guild_name": guild_name,
                 }
                 active_key = new_key
                 msg = f"Profil '{new_key}' angelegt und aktiviert."
             elif selected and selected != current:
-                # Reines Umschalten: die Felder gehören noch zum ALTEN Profil –
-                # NICHT überschreiben, nur aktiv wechseln (lädt beim nächsten Öffnen).
+                # Pure switch: the fields still belong to the OLD profile –
+                # do NOT overwrite, only switch active (loads on next open).
                 active_key = selected
                 msg = f"Profil '{selected}' geladen."
             else:
-                # Gleiches Profil bearbeiten.
+                # Edit the same profile.
                 active_key = current
                 entry = profiles.get(active_key)
                 if not isinstance(entry, dict):
@@ -498,7 +498,7 @@ class WowGuildAutomation(commands.Cog):
         await self.config.guild(ctx.guild).active_profile_key.set(active_key)
         return SubmitResult.ok(msg)
 
-    # --- Guild-Liste: WoW-Profile (alle ansehen/bearbeiten/löschen) ------ #
+    # --- Guild list: WoW profiles (view/edit/delete all) ----------------- #
     @dashboard_list(
         "wga_profiles", "Profile", mount="guild_settings", permission="guild_admin", order=2,
         columns=[
@@ -576,7 +576,7 @@ class WowGuildAutomation(commands.Cog):
             if len(profiles) <= 1:
                 return SubmitResult.fail("Das letzte Profil kann nicht gelöscht werden.")
             profiles.pop(key, None)
-        # Falls das aktive Profil gelöscht wurde, auf ein anderes umschalten.
+        # If the active profile was deleted, switch to another one.
         active = await self._wga_active_profile(ctx)
         if active == key:
             remaining = await self.config.guild(ctx.guild).wow_profiles()
@@ -584,7 +584,7 @@ class WowGuildAutomation(commands.Cog):
                 await self.config.guild(ctx.guild).active_profile_key.set(next(iter(remaining.keys())))
         return SubmitResult.ok("Profil gelöscht.")
 
-    # --- Guild-Panel: Onboarding ----------------------------------------- #
+    # --- Guild panel: onboarding ----------------------------------------- #
     @dashboard_panel(
         "wga_onboarding_cfg", "Onboarding", mount="guild_settings", permission="guild_admin",
     )
@@ -656,7 +656,7 @@ class WowGuildAutomation(commands.Cog):
             ft["onboarding"] = bool(data.get("feature_onboarding", False))
         return SubmitResult.ok("Onboarding-Einstellungen gespeichert.")
 
-    # --- Guild-Panel: Rules ---------------------------------------------- #
+    # --- Guild panel: rules ---------------------------------------------- #
     @dashboard_panel(
         "wga_rules", "Rules", mount="guild_settings", permission="guild_admin",
     )
@@ -686,7 +686,7 @@ class WowGuildAutomation(commands.Cog):
             rules["rule_emoji"] = emoji or "✅"
         return SubmitResult.ok("Regel-Einstellungen gespeichert.")
 
-    # --- Guild-Panel: Rollen --------------------------------------------- #
+    # --- Guild panel: roles ---------------------------------------------- #
     @dashboard_panel(
         "wga_roles", "Rollen", mount="guild_settings", permission="guild_admin",
     )
@@ -748,7 +748,7 @@ class WowGuildAutomation(commands.Cog):
             ft["ready_times"] = bool(data.get("feature_ready_times", False))
         return SubmitResult.ok("Rollen & Features gespeichert.")
 
-    # --- Guild-Panel: Channels ------------------------------------------- #
+    # --- Guild panel: channels ------------------------------------------- #
     @dashboard_panel(
         "wga_channels", "Channels", mount="guild_settings", permission="guild_admin",
     )
@@ -804,7 +804,7 @@ class WowGuildAutomation(commands.Cog):
                 ch[cfg_key] = int(v) if v else 0
         return SubmitResult.ok("Channels gespeichert.")
 
-    # --- Guild-Panel: Texte (Templates) ---------------------------------- #
+    # --- Guild panel: texts (templates) ---------------------------------- #
     @dashboard_panel(
         "wga_templates", "Texte", mount="guild_settings", permission="guild_admin",
     )
@@ -875,7 +875,7 @@ class WowGuildAutomation(commands.Cog):
                     tpl[k] = str(data.get(k, ""))
         return SubmitResult.ok("Texte gespeichert.")
 
-    # --- Guild-Liste: Rank-Mapping --------------------------------------- #
+    # --- Guild list: rank mapping ---------------------------------------- #
     @dashboard_list(
         "wga_rank_mapping", "Rank-Mapping", mount="guild_settings", permission="guild_admin",
         columns=[
@@ -961,7 +961,7 @@ class WowGuildAutomation(commands.Cog):
             prof_map = mapping_by.get(prof)
             if not isinstance(prof_map, dict):
                 prof_map = {}
-            # Veraltete Zuordnung des alten Titels entfernen, sofern Titel sich änderte.
+            # Remove the stale mapping of the old title if the title changed.
             if old_title != new_title and old_title in prof_map:
                 prof_map.pop(old_title, None)
             if role_id:
@@ -990,7 +990,7 @@ class WowGuildAutomation(commands.Cog):
                     mapping_by[prof] = prof_map
         return SubmitResult.ok("Rank-Eintrag zurückgesetzt.")
 
-    # --- Guild-Panel: Protected & Rank-Lock ------------------------------ #
+    # --- Guild panel: protected & rank-lock ------------------------------ #
     @dashboard_panel(
         "wga_protected_lock", "Protected & Rank-Lock", mount="guild_settings", permission="guild_admin",
     )
@@ -1033,7 +1033,7 @@ class WowGuildAutomation(commands.Cog):
             lb[prof] = locked
         return SubmitResult.ok("Geschützte & gesperrte Ränge gespeichert.")
 
-    # --- Guild-Liste: Registrierungen ------------------------------------ #
+    # --- Guild list: registrations --------------------------------------- #
     @dashboard_list(
         "wga_registrations", "Registrierungen", mount="guild_settings", permission="guild_admin",
         columns=[{"key": "member", "label": "Mitglied"}],

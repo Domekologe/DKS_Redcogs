@@ -1,6 +1,6 @@
-"""Öffentliche Integrations-API des DKS Web Dashboards.
+"""Public integration API of the DKS Web Dashboard.
 
-Dritt-Cogs importieren von hier::
+Third-party cogs import from here::
 
     from webdashboard.integration import (
         DashboardIntegration, dashboard_widget, dashboard_panel, dashboard_page,

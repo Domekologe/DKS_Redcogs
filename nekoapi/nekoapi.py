@@ -37,7 +37,7 @@ class NekoAPI(commands.Cog):
                 if not data:
                     return None
 
-                return data[0]  # Object enthält id, url, rating
+                return data[0]  # Object contains id, url, rating
 
     async def build_embed(self, info: dict):
         embed = discord.Embed(
@@ -62,7 +62,7 @@ class NekoAPI(commands.Cog):
                 f"❌ Ungültiges Rating!\nErlaubt: {', '.join(VALID_RATINGS)}"
             )
 
-        # NSFW-Check für explicit
+        # NSFW check for explicit
         if rating == "explicit" and not ctx.channel.is_nsfw():
             return await ctx.send("❌ `explicit` ist nur in NSFW-Channels erlaubt.")
 
@@ -91,7 +91,7 @@ class NekoAPI(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     # ------------------------------------------------------------------
-    # Autocomplete für Rating
+    # Autocomplete for rating
     # ------------------------------------------------------------------
     async def rating_autocomplete(self, interaction: discord.Interaction, current: str):
         current = current.lower()
@@ -120,7 +120,7 @@ class NekoAPI(commands.Cog):
                 f"❌ Ungültiges Rating! Erlaubt: {', '.join(VALID_RATINGS)}"
             )
 
-        # NSFW-Check für explicit
+        # NSFW check for explicit
         if rating == "explicit" and not interaction.channel.is_nsfw():
             return await interaction.followup.send(
                 "❌ `explicit` ist nur in NSFW-Channels erlaubt."

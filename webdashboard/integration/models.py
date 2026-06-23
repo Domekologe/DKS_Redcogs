@@ -1,8 +1,8 @@
-"""Deklarative Datenmodelle für den Dashboard-Integrations-Contract.
+"""Declarative data models for the dashboard integration contract.
 
-Dritt-Cogs liefern ausschließlich diese Schemas zurück – niemals rohes HTML.
-Das Frontend rendert sie mit themebaren shadcn-svelte-Komponenten. Dadurch gibt es
-keine XSS-Angriffsfläche durch Cog-Inhalte.
+Third-party cogs return only these schemas - never raw HTML.
+The frontend renders them with themeable shadcn-svelte components. This means
+cog content cannot introduce an XSS attack surface.
 """
 from __future__ import annotations
 
@@ -12,19 +12,19 @@ from typing import Any, Dict, List, Optional, Union
 
 
 # --------------------------------------------------------------------------- #
-# Widgets (Kacheln auf dem zentralen Board)
+# Widgets (tiles on the central board)
 # --------------------------------------------------------------------------- #
 class WidgetKind(str, Enum):
-    KPI = "kpi"          # einzelne Kennzahl
-    LIST = "list"        # Liste aus Einträgen
-    CHART = "chart"      # Mini-Diagramm
-    STATUS = "status"    # Statusanzeige (ok/warn/error)
-    MARKDOWN = "markdown"  # sicher gerenderter Markdown-Text
+    KPI = "kpi"          # single metric
+    LIST = "list"        # list of entries
+    CHART = "chart"      # mini chart
+    STATUS = "status"    # status indicator (ok/warn/error)
+    MARKDOWN = "markdown"  # safely rendered Markdown text
 
 
 @dataclass
 class WidgetData:
-    """Daten, die ein Widget an das Frontend liefert."""
+    """Data that a widget returns to the frontend."""
 
     kind: WidgetKind
     payload: Dict[str, Any] = field(default_factory=dict)
@@ -32,7 +32,7 @@ class WidgetData:
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind.value, "payload": self.payload}
 
-    # --- bequeme Konstruktoren ------------------------------------------- #
+    # --- convenience constructors ---------------------------------------- #
     @classmethod
     def kpi(
         cls,
@@ -72,7 +72,7 @@ class WidgetData:
 
 
 # --------------------------------------------------------------------------- #
-# Panels (kontextuelle Formulare, eingebettet in bestehende Seiten)
+# Panels (contextual forms embedded into existing pages)
 # --------------------------------------------------------------------------- #
 class FieldType(str, Enum):
     TEXT = "text"
@@ -95,15 +95,15 @@ class Field:
     value: Any = None
     description: Optional[str] = None
     required: bool = False
-    options: Optional[List[Dict[str, Any]]] = None  # für SELECT/MULTISELECT
+    options: Optional[List[Dict[str, Any]]] = None  # for SELECT/MULTISELECT
     min: Optional[float] = None
     max: Optional[float] = None
     max_length: Optional[int] = None
     placeholder: Optional[str] = None
-    # Optionale Variablen-Buttons für TEXTAREA: [{"token": "{member}", "desc": "Mitglied"}]
+    # Optional variable buttons for TEXTAREA: [{"token": "{member}", "desc": "Mitglied"}]
     variables: Optional[List[Dict[str, Any]]] = None
-    # Bei SELECT: löst beim Ändern sofort ein Speichern + Neuladen des Panels aus
-    # (z. B. Profil wechseln → Felder laden neu).
+    # For SELECT: changing the value immediately triggers a save + reload of the panel
+    # (e.g. switch profile -> fields reload).
     reload_on_change: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -124,7 +124,7 @@ class Field:
         }
         return {k: v for k, v in d.items() if v is not None}
 
-    # --- Convenience-Builder --------------------------------------------- #
+    # --- convenience builders -------------------------------------------- #
     @classmethod
     def text(cls, key, label, *, value="", **kw):
         return cls(key, FieldType.TEXT, label, value, **kw)
@@ -176,7 +176,7 @@ class PanelSchema:
 class SubmitResult:
     success: bool
     message: Optional[str] = None
-    errors: Optional[Dict[str, str]] = None  # feldspezifische Fehler
+    errors: Optional[Dict[str, str]] = None  # field-specific errors
 
     def to_dict(self) -> Dict[str, Any]:
         return {"success": self.success, "message": self.message, "errors": self.errors}
@@ -191,11 +191,11 @@ class SubmitResult:
 
 
 # --------------------------------------------------------------------------- #
-# Pages (vollwertige eigene Ansicht – optional, Komponentenbaum-Schema)
+# Pages (full standalone view - optional, component-tree schema)
 # --------------------------------------------------------------------------- #
 @dataclass
 class Component:
-    """Ein deklarativer UI-Baustein für Pages (kein rohes HTML)."""
+    """A declarative UI building block for pages (no raw HTML)."""
 
     type: str  # heading | text | table | chart | panel_ref | divider | grid
     props: Dict[str, Any] = field(default_factory=dict)

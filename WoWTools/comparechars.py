@@ -178,7 +178,7 @@ def _build_gear_compare_lines(eq1: dict, eq2: dict, ilvls1: Dict[int, Optional[i
     all_slots = sorted(set(list(s1.keys()) + list(s2.keys())), key=lambda x: x.lower())
     lines: List[str] = []
 
-    # Durchschnitt
+    # average
     avg1 = _avg_ilvl(list(s1.values()))
     avg2 = _avg_ilvl(list(s2.values()))
     if avg1 is not None or avg2 is not None:
@@ -211,7 +211,7 @@ def _build_info_compare_lines(js1: dict, js2: dict) -> List[str]:
 
     lines.append(f"**Health:** {health1:,}  ⟷  {health2:,}" if isinstance(health1, int) and isinstance(health2, int) else f"**Health:** {health1}  ⟷  {health2}")
     if ptype1 == ptype2 and ptype1:
-        # gleicher Power-Typ
+        # same power type
         if isinstance(power1, int) and isinstance(power2, int):
             lines.append(f"**{ptype1}:** {power1:,}  ⟷  {power2:,}")
         else:
@@ -220,7 +220,7 @@ def _build_info_compare_lines(js1: dict, js2: dict) -> List[str]:
         lines.append(f"**Power:** {power1} ({ptype1})  ⟷  {power2} ({ptype2})")
 
     lines.append("")
-    # Primärwerte
+    # primary stats
     for k in ("strength", "agility", "intellect", "stamina"):
         v1 = (js1.get(k) or {}).get("effective")
         v2 = (js2.get(k) or {}).get("effective")
@@ -275,7 +275,7 @@ def _build_charstats_compare_lines_en(js1_en: dict, js2_en: dict) -> list[str]:
     by_id_1 = {st["id"]: st for st in all1 if "id" in st}
     by_id_2 = {st["id"]: st for st in all2 if "id" in st}
 
-    # Definitionen (engl. Muster -> Label in der Ausgabe)
+    # Definitions (English pattern -> label in the output)
     defs = [
         ("Total kills", "Total kills"),
         ("Total deaths", "Total deaths"),
@@ -319,7 +319,7 @@ def _build_charstats_compare_lines_en(js1_en: dict, js2_en: dict) -> list[str]:
         if pattern == "SEP":
             lines.append("—" * 27)
             continue
-        # gleiche ID in beiden suchen – wir matchen anhand von char1 (robust genug)
+        # look up the same ID in both – we match based on char1 (robust enough)
         stat_id = _find_stat_id_by_en_name(all1, pattern)
         if not stat_id:
             continue
@@ -328,7 +328,7 @@ def _build_charstats_compare_lines_en(js1_en: dict, js2_en: dict) -> list[str]:
         if not n1 or not n2:
             continue
         q1, q2 = n1.get("quantity"), n2.get("quantity")
-        # Zahl hübsch formatieren
+        # format number nicely
         def fmt(x):
             if isinstance(x, (int, float)):
                 if isinstance(x, float) and x.is_integer():
@@ -366,7 +366,7 @@ class CompareChars(commands.Cog):
         type=[
             app_commands.Choice(name="Gear", value="gear"),
             app_commands.Choice(name="Info", value="info"),
-            app_commands.Choice(name="CharStats (en_US)", value="charstats"),  # NEU
+            app_commands.Choice(name="CharStats (en_US)", value="charstats"),  # NEW
         ],
     )
     async def comparechars(
@@ -393,7 +393,7 @@ class CompareChars(commands.Cog):
         char1_slug = name_char1.lower()
         char2_slug = name_char2.lower()
 
-        # Slash: direkt korrekt defern (ephemeral vorher setzen!)
+        # Slash: defer correctly right away (set ephemeral beforehand!)
         if ctx.interaction:
             try:
                 await ctx.defer(ephemeral=private)
@@ -402,12 +402,12 @@ class CompareChars(commands.Cog):
 
         try:
             if type == "gear":
-                # Fetch Equip beider Chars
+                # Fetch equipment of both chars
                 eq1, eq2 = await asyncio.gather(
                     _fetch_equipment(self, region=region, realm_slug=realm1_slug, char_slug=char1_slug, game=game, locale=locale),
                     _fetch_equipment(self, region=region, realm_slug=realm2_slug, char_slug=char2_slug, game=game, locale=locale),
                 )
-                # Itemlevel nachladen
+                # Reload item levels
                 ids1 = [it.get("item", {}).get("id") for it in (eq1.get("equipped_items") or []) if it.get("item")]
                 ids2 = [it.get("item", {}).get("id") for it in (eq2.get("equipped_items") or []) if it.get("item")]
                 il1, il2 = await asyncio.gather(
@@ -441,7 +441,7 @@ class CompareChars(commands.Cog):
         except Exception as e:
             return await ctx.send(f"Fehler beim Abruf: {e}", ephemeral=(private if ctx.interaction else False))
 
-        # Embed bauen
+        # Build embed
         title = f"{name_char1.title()} @ {server_char1.title()}  ⟷  {name_char2.title()} @ {server_char2.title()}"
         embed = discord.Embed(
             title=f"{title} – {region.upper()} [{game.capitalize()}] ({title_mid})",
@@ -455,7 +455,7 @@ class CompareChars(commands.Cog):
     async def ac_region(self, interaction: discord.Interaction, current: str):
         cur = (current or "").lower()
         opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
-        # startswith priorisieren
+        # prioritize startswith
         def prio(t):
             name, val = t
             return (0 if val.startswith(cur) or name.lower().startswith(cur) else 1, val)
@@ -476,7 +476,7 @@ class CompareChars(commands.Cog):
 
     @comparechars.autocomplete("server_char2")
     async def ac_realm2(self, interaction: discord.Interaction, current: str):
-        # gleiche Region wie oben
+        # same region as above
         sel_region = (getattr(interaction.namespace, "region", "") or "").upper()
         cur = (current or "").lower()
         out: List[str] = []

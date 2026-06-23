@@ -44,14 +44,14 @@ def _rank_matches_normalized_entries(
 
 @dataclass(frozen=True)
 class RankSyncPlan:
-    """Ergebnis der API-/Mapping-Auswertung (ohne Rollenänderung)."""
+    """Result of the API/mapping evaluation (without role change)."""
 
     rank_title: Optional[str]
     target_role_id: int
     mapped_role_ids: FrozenSet[int]
-    # True: keine Discord-Rolle (Rank-Lock-Liste, Protected-Liste oder kein Mapping).
+    # True: no Discord role (rank-lock list, protected list, or no mapping).
     protected_skip: bool = False
-    # "rank_locked" | "protected" wenn protected_skip und bewusst übersprungen.
+    # "rank_locked" | "protected" when protected_skip and deliberately skipped.
     skip_reason: Optional[str] = None
 
 
@@ -78,7 +78,7 @@ class RankSyncService:
         rank_index: int,
         api_rank_name: str,
     ) -> bool:
-        """Gilden-„Rank-Lock“-Liste: Bot weist für diese Ingame-Ränge keine Discord-Rolle zu."""
+        """Guild "rank-lock" list: bot assigns no Discord role for these in-game ranks."""
         raw = guild_config.get("locked_rank_titles_by_profile") or {}
         norm = _normalize_rank_entry_list(raw.get(profile_key))
         return _rank_matches_normalized_entries(norm, rank_title, rank_index, api_rank_name)
@@ -173,8 +173,8 @@ class RankSyncService:
         previous_bot_role_id: int = 0,
     ) -> Tuple[bool, str]:
         """
-        Wendet den Plan an. Es wird nur die zuletzt vom Bot gesetzte Rang-Rolle entfernt
-        (previous_bot_role_id), nicht andere gemappte Rollen — manuelle Zuweisungen bleiben.
+        Applies the plan. Only the rank role last set by the bot is removed
+        (previous_bot_role_id), not other mapped roles — manual assignments remain.
         """
         if not plan.rank_title:
             return False, "not_found"
@@ -220,8 +220,8 @@ class RankSyncService:
         previous_bot_role_id: int = 0,
     ) -> Tuple[Optional[str], str, int]:
         """
-        Plan + Apply in einem Schritt.
-        Returns (rank_title_or_none, reason, applied_role_id bei Erfolg sonst 0).
+        Plan + apply in one step.
+        Returns (rank_title_or_none, reason, applied_role_id on success else 0).
         """
         plan = await self.plan_sync(guild_config, main_char, profile_key)
         if plan.protected_skip:

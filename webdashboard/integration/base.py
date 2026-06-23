@@ -1,9 +1,9 @@
-"""``DashboardIntegration`` – Mixin, von dem Dritt-Cogs erben.
+"""``DashboardIntegration`` - mixin that third-party cogs inherit from.
 
-Verwendung in einem Cog::
+Usage in a cog::
 
     from redbot.core import commands
-    # Pfad ggf. an die eigene Installation anpassen:
+    # adjust the path to your own installation if needed:
     from webdashboard.integration import (
         DashboardIntegration, dashboard_widget, dashboard_panel,
         WidgetData, PanelSchema, Field, SubmitResult,
@@ -17,8 +17,8 @@ Verwendung in einem Cog::
         async def hello_widget(self, ctx):
             return WidgetData.kpi(value=42, label="Antwort")
 
-Der Mixin meldet den Cog beim ``WebDashboard``-Cog an, sobald dieser verfügbar ist –
-auch wenn das Dashboard erst nach dem Dritt-Cog geladen wird.
+The mixin registers the cog with the ``WebDashboard`` cog as soon as it becomes
+available - even if the dashboard is loaded after the third-party cog.
 """
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ log = logging.getLogger("red.dks.webdashboard.integration")
 
 
 class DashboardIntegration:
-    """Mixin für Dritt-Cogs, die sich ins DKS Web Dashboard integrieren."""
+    """Mixin for third-party cogs that integrate into the DKS Web Dashboard."""
 
-    bot: Any  # von der Cog-Klasse bereitgestellt
+    bot: Any  # provided by the cog class
 
     async def cog_load(self) -> None:  # type: ignore[override]
-        # eigene cog_load-Logik der Unterklasse zuerst ausführen
+        # run the subclass's own cog_load logic first
         parent_load = getattr(super(), "cog_load", None)
         if parent_load is not None:
             await parent_load()
@@ -54,7 +54,7 @@ class DashboardIntegration:
     def _register_with_dashboard(self) -> None:
         dashboard = self.bot.get_cog("WebDashboard")
         if dashboard is None:
-            # Dashboard noch nicht geladen – es holt uns nach, sobald es lädt.
+            # Dashboard not loaded yet - it will pick us up once it loads.
             log.debug("WebDashboard noch nicht geladen; Registrierung wird nachgeholt.")
             return
         try:

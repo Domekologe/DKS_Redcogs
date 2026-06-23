@@ -1,7 +1,7 @@
-"""DKS Web Dashboard – Companion-Cog.
+"""DKS Web Dashboard – companion cog.
 
-Stellt das RPC-Gateway bereit und verwaltet die Integrations-Registry, in die sich
-andere Cogs mit Widgets, Panels und Seiten eintragen.
+Provides the RPC gateway and manages the integration registry into which
+other cogs register their widgets, panels and pages.
 """
 from __future__ import annotations
 
@@ -28,10 +28,10 @@ DEFAULT_PORT = 6970
 
 @cog_i18n(_)
 class WebDashboard(commands.Cog):
-    """Eigenes, modulares Web-Dashboard-System für Red.
+    """Custom, modular web dashboard system for Red.
 
-    Cogs binden sich integriert ein (Widgets + kontextuelle Panels), statt eine
-    eigene Extra-Seite zu erzeugen.
+    Cogs hook in via integration (widgets + contextual panels) instead of
+    creating their own separate page.
     """
 
     def __init__(self, bot: Red) -> None:
@@ -51,11 +51,11 @@ class WebDashboard(commands.Cog):
                 "color": "indigo",
                 "theme": "dark",
             },
-            # Overview / Sicherheit
+            # Overview / security
             locked=False,
             session_epoch=0,
             custom_pages=[],  # [{slug, title, html, nav}]
-            audit_log=[],     # [{action, user, guild, detail, time}] – letzte 1000
+            audit_log=[],     # [{action, user, guild, detail, time}] – last 1000
         )
         self.registry = Registry()
         self.gateway: Optional[Gateway] = None
@@ -64,9 +64,9 @@ class WebDashboard(commands.Cog):
     # Lifecycle
     # ------------------------------------------------------------------ #
     async def cog_load(self) -> None:
-        # Bereits geladene Dritt-Cogs einsammeln – unabhängig davon, ob sie das
-        # DashboardIntegration-Mixin nutzen oder nur Methoden dekoriert + sich später
-        # registriert hätten. So funktioniert jede Lade-Reihenfolge.
+        # Collect already-loaded third-party cogs – regardless of whether they use
+        # the DashboardIntegration mixin or merely decorated methods and would have
+        # registered later. This way any load order works.
         from .integration.decorators import iter_contributions
         for cog in self.bot.cogs.values():
             if isinstance(cog, DashboardIntegration) or iter_contributions(cog):
@@ -103,26 +103,26 @@ class WebDashboard(commands.Cog):
             self.gateway = None
 
     # ------------------------------------------------------------------ #
-    # Öffentliche Integrations-API (von DashboardIntegration genutzt)
+    # Public integration API (used by DashboardIntegration)
     # ------------------------------------------------------------------ #
     async def _persist_audit(self, entry: dict) -> None:
-        """Audit-Sink: hängt jeden protokollierten Vorgang an das Audit-Log an (gekappt)."""
+        """Audit sink: appends each logged operation to the audit log (capped)."""
         try:
             async with self.config.audit_log() as logs:
                 logs.append(entry)
-                del logs[:-1000]  # nur die letzten 1000 Einträge behalten
+                del logs[:-1000]  # keep only the last 1000 entries
         except Exception:
             log.debug("Audit-Persistierung fehlgeschlagen", exc_info=True)
 
     def register_third_party(self, cog: Any) -> int:
-        """Registriert die Dashboard-Beiträge eines Dritt-Cogs."""
+        """Registers the dashboard contributions of a third-party cog."""
         return self.registry.register_cog(cog)
 
     def unregister_third_party(self, cog: Any) -> None:
         self.registry.unregister_cog(cog)
 
     # ------------------------------------------------------------------ #
-    # Commands (nur Bot-Owner)
+    # Commands (bot owner only)
     # ------------------------------------------------------------------ #
     @commands.is_owner()
     @commands.group(name="dksdashboard", aliases=["dksdash"])

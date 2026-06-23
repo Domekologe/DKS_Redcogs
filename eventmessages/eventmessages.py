@@ -84,7 +84,7 @@ class EventMessages(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Aktive Events")
 
-    # --- Guild-Panel: pro Event aktivieren, Kanal & Nachricht ------------ #
+    # --- Guild panel: enable per event, channel & message ------------ #
     @dashboard_panel(
         "events", "Event-Nachrichten", mount="guild_settings", permission="guild_admin"
     )
@@ -147,7 +147,7 @@ class EventMessages(commands.Cog):
     # ------------------------------------------------------------
 
     async def event_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Autocomplete für Eventnamen."""
+        """Autocomplete for event names."""
         suggestions = [
             app_commands.Choice(name=ev, value=ev)
             for ev in EVENTS
@@ -172,14 +172,14 @@ class EventMessages(commands.Cog):
     async def em_enabled(
         self,
         interaction: discord.Interaction,
-        event: str,                # <-- jetzt Pflichtfeld
-        value: bool                # <-- jetzt Pflichtfeld
+        event: str,                # <-- now required
+        value: bool                # <-- now required
     ):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
 
-        # Validierung
+        # Validation
         if event not in EVENTS:
             await interaction.followup.send(
                 f"Ungültiges Event. Verwendet werden kann: `{', '.join(EVENTS)}`",
@@ -187,7 +187,7 @@ class EventMessages(commands.Cog):
             )
             return
 
-        # Setzen
+        # Set
         await self.config.guild(guild).events.set_raw(
             event, "enabled", value=value
         )
@@ -214,8 +214,8 @@ class EventMessages(commands.Cog):
     async def em_channel(
         self,
         interaction: discord.Interaction,
-        event: str,                    # <-- jetzt Pflichtfeld
-        channel: discord.TextChannel   # <-- Pflichtfeld
+        event: str,                    # <-- now required
+        channel: discord.TextChannel   # <-- required
     ):
         await interaction.response.defer(ephemeral=True)
 
@@ -309,16 +309,16 @@ class EventMessages(commands.Cog):
     async def on_member_remove(self, member: discord.Member):
         guild = member.guild
 
-        # Audit Log prüfen: wurde der User gekickt?
+        # Check audit log: was the user kicked?
         entry = None
         async for log in guild.audit_logs(limit=5, action=discord.AuditLogAction.kick):
-            # Discord-Audit-Logs sind etwas verzögert, daher checken wir 5 Einträge
+            # Discord audit logs are slightly delayed, so we check 5 entries
             if log.target.id == member.id:
                 entry = log
                 break
 
         if entry:
-            # → Das war ein Kick
+            # → This was a kick
             moderator = entry.user.mention
             reason = entry.reason or "Kein Grund angegeben"
 
@@ -336,7 +336,7 @@ class EventMessages(commands.Cog):
             )
             return
 
-        # Wenn kein Kick → normales Leave
+        # If not a kick → normal leave
         await self._post(
             guild,
             "leave",
@@ -390,7 +390,7 @@ class EventMessages(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        # Timeout gesetzt?
+        # Timeout set?
         if before.timed_out_until != after.timed_out_until:
             # Timeout END
             if before.timed_out_until and after.timed_out_until is None:
@@ -408,7 +408,7 @@ class EventMessages(commands.Cog):
 
             # Timeout START
             if after.timed_out_until:
-                # Audit Log ziehen
+                # Fetch audit log
                 entry = None
                 async for log in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.member_update):
                     entry = log

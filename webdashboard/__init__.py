@@ -2,7 +2,7 @@ from redbot.core.bot import Red
 
 from .webdashboard import WebDashboard
 
-# Öffentliche Integrations-API auch über das Cog-Paket erreichbar:
+# Public integration API, also reachable via the cog package:
 from .integration import (  # noqa: F401
     DashboardContext,
     DashboardIntegration,

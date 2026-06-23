@@ -1,22 +1,22 @@
 """
-DashboardTemplate — Referenz-/Vorlage-Cog für die DKS-Web-Dashboard-Integration.
+DashboardTemplate — reference/template cog for the DKS web dashboard integration.
 
-Dieses Cog macht nichts Sinnvolles; es ist eine kommentierte Vorlage, an der du
-zeigst/abschaust, wie man einen bestehenden Cog ans Web-Dashboard anbindet
-(„migriert"). Es demonstriert:
+This cog does nothing useful; it is an annotated template you use to show/copy
+how to wire an existing cog into the web dashboard ("migrate" it). It
+demonstrates:
 
-  1) Den Drop-in-Import (keine harte Abhängigkeit, AAA3A-koexistent).
-  2) Bedingte Registrierung in cog_load / cog_unload.
-  3) Ein Widget (Kachel auf dem Board).
-  4) Ein Guild-Panel mit allen praktisch nutzbaren Feldtypen + Speichern.
-  5) Ein globales Panel (nur Bot-Owner), z. B. für API-Keys.
+  1) The drop-in import (no hard dependency, coexists with AAA3A).
+  2) Conditional registration in cog_load / cog_unload.
+  3) A widget (tile on the board).
+  4) A guild panel with all practically usable field types + saving.
+  5) A global panel (bot owner only), e.g. for API keys.
 
-Migrations-Kurzfassung (von AAA3As @dashboard_page):
-  - AAA3A: eine Methode liefert rohes HTML/Jinja je Cog -> eigene Seite.
-  - DKS:   du lieferst deklarative Schemas (PanelSchema/Field) -> wird in ein
-           gemeinsames, themebares UI gerendert. Pro Einstellung ein Field,
-           gespeichert über @<panel>.on_submit. Kein HTML, keine XSS-Fläche.
-Beide können gleichzeitig im selben Cog existieren (siehe README.md).
+Migration in brief (from AAA3A's @dashboard_page):
+  - AAA3A: one method returns raw HTML/Jinja per cog -> its own page.
+  - DKS:   you return declarative schemas (PanelSchema/Field) -> rendered into a
+           shared, themeable UI. One Field per setting, saved via
+           @<panel>.on_submit. No HTML, no XSS surface.
+Both can exist at the same time in the same cog (see README.md).
 """
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ import discord
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 
-# ---- 1) Drop-in-Import -------------------------------------------------------
-# `dks_dashboard.py` liegt im selben Cog-Ordner. Bei nicht installiertem
-# webdashboard sind das No-ops -> der Cog lädt trotzdem ganz normal.
+# ---- 1) Drop-in import -------------------------------------------------------
+# `dks_dashboard.py` lives in the same cog folder. When webdashboard is not
+# installed these are no-ops -> the cog still loads normally.
 from .dks_dashboard import (
     dashboard_widget,
     dashboard_panel,
@@ -43,43 +43,43 @@ from .dks_dashboard import (
 
 
 class DashboardTemplate(commands.Cog):
-    """Vorlage: zeigt Widget + Guild-Panel + globales Panel."""
+    """Template: shows widget + guild panel + global panel."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
         self.config = Config.get_conf(self, identifier=0x7E5701E1, force_registration=True)
 
-        # Pro-Guild-Einstellungen (werden im Guild-Panel bearbeitet).
+        # Per-guild settings (edited in the guild panel).
         self.config.register_guild(
-            language="de-DE",   # pro-Guild Sprache dieses Cogs (de-DE | en-US)
+            language="de-DE",   # per-guild language of this cog (de-DE | en-US)
             enabled=False,
             greeting="Willkommen, {member}!",
             max_warns=3,
             mode="soft",
-            log_channel=None,   # speichert eine Channel-ID (oder None)
-            staff_role=None,    # speichert eine Rollen-ID (oder None)
-            items={},           # Beispiel-Sammlung: {id: {"name", "note"}} – für die Liste
+            log_channel=None,   # stores a channel ID (or None)
+            staff_role=None,    # stores a role ID (or None)
+            items={},           # example collection: {id: {"name", "note"}} – for the list
         )
-        # Globale Einstellungen (werden im globalen Panel bearbeitet, Owner-only).
+        # Global settings (edited in the global panel, owner-only).
         self.config.register_global(
             api_key="",
             region="eu",
         )
 
-    # ---- 2) Lifecycle: bedingt registrieren ---------------------------------
+    # ---- 2) Lifecycle: register conditionally -------------------------------
     async def cog_load(self) -> None:
-        # WICHTIG: register_dashboard als erste relevante Zeile. Tut nichts,
-        # wenn das Dashboard nicht geladen ist; integriert sonst diesen Cog.
+        # IMPORTANT: register_dashboard as the first relevant line. Does nothing
+        # if the dashboard is not loaded; otherwise integrates this cog.
         register_dashboard(self)
-        # ... hier ggf. deine eigene Lade-Logik ...
+        # ... your own load logic here if needed ...
 
     def cog_unload(self) -> None:
         unregister_dashboard(self)
-        # ... hier ggf. dein eigenes Aufräumen ...
+        # ... your own cleanup here if needed ...
 
-    # ---- 3) Widget: Kachel auf dem zentralen Board --------------------------
-    # Erscheint auf der Server-Detailseite unter „Übersicht".
-    # size: sm | md | lg ; refresh: Auto-Refresh in Sekunden (optional).
+    # ---- 3) Widget: tile on the central board -------------------------------
+    # Appears on the server detail page under the "Overview" tab.
+    # size: sm | md | lg ; refresh: auto-refresh in seconds (optional).
     # permission: authenticated | guild_member | guild_mod | guild_admin |
     #             guild_owner | bot_owner
     @dashboard_widget("status", "Vorlage-Status", size="sm", refresh=60, permission="guild_member")
@@ -95,16 +95,16 @@ class DashboardTemplate(commands.Cog):
         except Exception:
             return WidgetData.status(state="error", label="Fehler")
 
-    # ---- 4) Guild-Panel: alle nützlichen Feldtypen --------------------------
-    # mount="guild_settings" -> erscheint auf der Server-Detailseite unter
-    # „Einstellungen" (aufklappbar). permission="guild_admin" empfohlen.
-    # order=10 -> Reihenfolge der Tabs im Modul (kleiner = weiter links).
+    # ---- 4) Guild panel: all useful field types -----------------------------
+    # mount="guild_settings" -> appears on the server detail page under
+    # „Einstellungen" (collapsible). permission="guild_admin" recommended.
+    # order=10 -> tab order within the module (smaller = further left).
     @dashboard_panel("settings", "Vorlage-Einstellungen", mount="guild_settings", permission="guild_admin", order=10)
     async def settings_panel(self, ctx):
         cfg = await self.config.guild(ctx.guild).all()
 
-        # Channel-/Rollen-Auswahl: das Frontend hat (noch) keinen eigenen
-        # Channel-/Rollen-Picker -> als SELECT mit Optionen liefern.
+        # Channel/role selection: the frontend has no dedicated channel/role
+        # picker (yet) -> provide it as a SELECT with options.
         channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
@@ -118,18 +118,18 @@ class DashboardTemplate(commands.Cog):
             description="Beispiel-Panel mit allen praktisch nutzbaren Feldtypen.",
             submit_label="Speichern",
             fields=[
-                # Sprache dieses Moduls (pro Guild) – DE/EN-Umschaltung.
-                # reload_on_change=True: beim Ändern wird sofort gespeichert UND das Panel
-                # neu geladen (praktisch, wenn andere Felder von der Auswahl abhängen).
+                # Language of this module (per guild) – DE/EN toggle.
+                # reload_on_change=True: on change it is saved immediately AND the panel
+                # is reloaded (handy when other fields depend on the selection).
                 Field.select(
                     "language", "Sprache (dieses Modul)",
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
                     value=cfg["language"],
                     reload_on_change=True,
                 ),
-                # Schalter (bool)
+                # Switch (bool)
                 Field.switch("enabled", "Modul aktiviert", value=bool(cfg["enabled"])),
-                # Mehrzeiliger Text mit Variablen-Buttons (fügen Tokens an Cursor ein)
+                # Multi-line text with variable buttons (insert tokens at the cursor)
                 Field.textarea(
                     "greeting", "Begrüßung", value=cfg["greeting"], max_length=500,
                     variables=[
@@ -137,24 +137,24 @@ class DashboardTemplate(commands.Cog):
                         {"token": "{server}", "desc": "Server"},
                     ],
                 ),
-                # Zahl mit Grenzen
+                # Number with bounds
                 Field.number("max_warns", "Max. Verwarnungen", value=cfg["max_warns"], min=0, max=10),
-                # Auswahl (fixe Optionen)
+                # Selection (fixed options)
                 Field.select(
                     "mode", "Modus",
                     [{"value": "soft", "label": "Soft"}, {"value": "hard", "label": "Hart"}],
                     value=cfg["mode"],
                 ),
-                # Kanal-Auswahl (als Select mit Channel-Optionen)
+                # Channel selection (as a select with channel options)
                 Field.select("log_channel", "Log-Kanal", channel_options, value=str(cfg["log_channel"] or "")),
-                # Rollen-Auswahl (als Select mit Rollen-Optionen)
+                # Role selection (as a select with role options)
                 Field.select("staff_role", "Staff-Rolle", role_options, value=str(cfg["staff_role"] or "")),
-                # Einfaches Textfeld
+                # Simple text field
                 # Field.text("note", "Notiz", value=""),
             ],
         )
 
-    # Speicher-Handler. `data` ist ein flaches Dict {field_key: wert}.
+    # Save handler. `data` is a flat dict {field_key: value}.
     @settings_panel.on_submit
     async def save_settings(self, ctx, data):
         g = self.config.guild(ctx.guild)
@@ -172,7 +172,7 @@ class DashboardTemplate(commands.Cog):
                                          errors={"max_warns": "Ungültige Zahl"})
         if "mode" in data:
             await g.mode.set("hard" if data["mode"] == "hard" else "soft")
-        # Channel-/Rollen-IDs: leeres Feld -> None, sonst int.
+        # Channel/role IDs: empty field -> None, otherwise int.
         if "log_channel" in data:
             v = data["log_channel"]
             await g.log_channel.set(int(v) if v else None)
@@ -181,12 +181,12 @@ class DashboardTemplate(commands.Cog):
             await g.staff_role.set(int(v) if v else None)
         return SubmitResult.ok("Einstellungen gespeichert.")
 
-    # ---- 5) Globales Panel: nur Bot-Owner (z. B. API-Keys) ------------------
-    # scope="global" + mount="bot_settings" -> erscheint auf /settings unter
+    # ---- 5) Global panel: bot owner only (e.g. API keys) --------------------
+    # scope="global" + mount="bot_settings" -> appears on /settings under
     # „Modul-Einstellungen (global)". permission="bot_owner".
     @dashboard_panel("api", "Vorlage API & Global", scope="global", mount="bot_settings", permission="bot_owner")
     async def global_panel(self, ctx):
-        # ctx.guild ist hier None (globaler Kontext) -> NICHT auf ctx.guild zugreifen.
+        # ctx.guild is None here (global context) -> do NOT access ctx.guild.
         return PanelSchema(
             description="Globale Einstellungen dieses Moduls (Owner-only).",
             fields=[
@@ -207,10 +207,10 @@ class DashboardTemplate(commands.Cog):
             await self.config.region.set("us" if data["region"] == "us" else "eu")
         return SubmitResult.ok("Global gespeichert.")
 
-    # ---- 6) Liste: anlegen / ansehen / bearbeiten / löschen -----------------
-    # @dashboard_list rendert eine Tabelle mit Aktionen. Die Methode liefert Zeilen
-    # [{"id": ..., "cells": {spalten_key: wert}}]. Optional: @<list>.on_delete /
-    # @<list>.edit_form (liefert ein PanelSchema) / @<list>.on_edit (speichert).
+    # ---- 6) List: create / view / edit / delete -----------------------------
+    # @dashboard_list renders a table with actions. The method returns rows
+    # [{"id": ..., "cells": {column_key: value}}]. Optional: @<list>.on_delete /
+    # @<list>.edit_form (returns a PanelSchema) / @<list>.on_edit (saves).
     @dashboard_list(
         "items", "Vorlage-Liste", mount="guild_settings", permission="guild_admin", order=30,
         columns=[{"key": "name", "label": "Name"}, {"key": "note", "label": "Notiz"}],
@@ -250,7 +250,7 @@ class DashboardTemplate(commands.Cog):
                 return SubmitResult.fail("Eintrag nicht gefunden.")
         return SubmitResult.ok("Eintrag gelöscht.")
 
-    # Anlegen-Panel (order=25 -> Tab links neben der Liste bei order=30).
+    # Create panel (order=25 -> tab to the left of the list at order=30).
     @dashboard_panel("item_add", "Eintrag anlegen", mount="guild_settings", permission="guild_admin", order=25)
     async def item_add_panel(self, ctx):
         return PanelSchema(
@@ -272,7 +272,7 @@ class DashboardTemplate(commands.Cog):
             items[uuid.uuid4().hex[:8]] = {"name": name, "note": str(data.get("note", ""))}
         return SubmitResult.ok("Eintrag angelegt.")
 
-    # ---- Owner-Command zum schnellen Prüfen ---------------------------------
+    # ---- Owner command for a quick check ------------------------------------
     @commands.is_owner()
     @commands.command(name="dashboardtemplate")
     async def _status(self, ctx: commands.Context) -> None:

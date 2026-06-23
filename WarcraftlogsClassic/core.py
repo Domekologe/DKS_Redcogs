@@ -94,7 +94,7 @@ class WarcraftLogsClassic(commands.Cog):
         except Exception:
             return WidgetData.kpi(value="–", label="Benachrichtigungskanal")
 
-    # --- Guild-Panel: Benachrichtigungskanal ----------------------------- #
+    # --- Guild panel: notification channel ------------------------------- #
     @dashboard_panel("wcl_guild", "WarcraftLogs", mount="guild_settings", permission="guild_admin")
     async def wcl_guild_panel(self, ctx):
         current = await self.config.guild(ctx.guild).notification_channel()
@@ -117,7 +117,7 @@ class WarcraftLogsClassic(commands.Cog):
             await self.config.guild(ctx.guild).notification_channel.set(int(v) if v else None)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Guild-Panel (pro Nutzer): WCL-Charakter ------------------------- #
+    # --- Guild panel (per user): WCL character --------------------------- #
     @dashboard_panel("wcl_char", "Mein WCL-Charakter", mount="guild_settings", permission="guild_member")
     async def wcl_char_panel(self, ctx):
         u = self.config.user_from_id(int(ctx.user.id))
@@ -147,7 +147,7 @@ class WarcraftLogsClassic(commands.Cog):
             await u.region.set(v or None)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Globales Panel (Bot-Owner): WarcraftLogs API -------------------- #
+    # --- Global panel (bot owner): WarcraftLogs API ---------------------- #
     @dashboard_panel("wcl_api", "WarcraftLogs API", scope="global", mount="bot_settings", permission="bot_owner")
     async def wcl_api_panel(self, ctx):
         tokens = await self.bot.get_shared_api_tokens("warcraftlogs")
@@ -296,11 +296,11 @@ class WarcraftLogsClassic(commands.Cog):
         item_count = 0
 
         for idx, item in enumerate(gear):
-            # Slot-Name anhand Index bestimmen
+            # Determine slot name based on index
             slot_name = SLOT_ORDER_MOP[idx] if idx < len(SLOT_ORDER_MOP) else f"Slot {idx}"
 
             if not item or item.get("id", 0) == 0:
-                # leeres/fehlendes Item (z.B. keine Schultern getragen)
+                # empty/missing item (e.g. no shoulders worn)
                 item_list.append(f"{slot_name}: <kein Item>")
                 continue
 

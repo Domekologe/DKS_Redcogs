@@ -67,7 +67,7 @@ class GuildTools(commands.Cog):
             blizz_token_expires_at=0
         )
         self._abs_lock = asyncio.Lock()
-        # In-Memory Token Cache (prozesslokal)
+        # In-memory token cache (process-local)
         self._token_mem = ""
         self._token_mem_exp = 0
 
@@ -248,7 +248,7 @@ class GuildTools(commands.Cog):
         await self.config.blizz_client_secret.set(client_secret)
         await self.config.blizz_token.set("")
         await self.config.blizz_token_expires_at.set(0)
-        # In-Memory ebenfalls leeren
+        # Clear in-memory cache as well
         self._token_mem = ""
         self._token_mem_exp = 0
         await ctx.tick()
@@ -278,11 +278,11 @@ class GuildTools(commands.Cog):
         await interaction.response.send_message(f"✅ Defaults gesetzt: Region **{region}**, Realm **{realm.strip()}**", ephemeral=True)
 
     async def _get_token(self) -> str:
-        """ENV-first Tokenbeschaffung. Wenn ENV genutzt wird, Token nur im Speicher; sonst zusätzlich in Config."""
+        """ENV-first token acquisition. If ENV is used, token is kept only in memory; otherwise also in Config."""
         if aiohttp is None:
             raise RuntimeError("aiohttp nicht installiert.")
 
-        # 1) ENV zuerst
+        # 1) ENV first
         env_id = os.getenv("BLIZZARD_CLIENT_ID") or ""
         env_secret = os.getenv("BLIZZARD_CLIENT_SECRET") or ""
         use_env = bool(env_id and env_secret)
@@ -295,11 +295,11 @@ class GuildTools(commands.Cog):
                 raise RuntimeError("Blizzard API Credentials fehlen. Setze ENV oder nutze `[p]setblizzard <id> <secret>`.")
 
         now = int(datetime.now(timezone.utc).timestamp())
-        # In-Memory Cache reicht meist
+        # In-memory cache is usually sufficient
         if self._token_mem and now < self._token_mem_exp - 60:
             return self._token_mem
 
-        # Wenn Config-Creds verwendet werden, schauen wir zusätzlich nach einem noch gültigen Token in der Config
+        # When config credentials are used, also check for a still-valid token in the config
         if not use_env:
             cfg_token = await self.config.blizz_token()
             cfg_exp = await self.config.blizz_token_expires_at()
@@ -308,7 +308,7 @@ class GuildTools(commands.Cog):
                 self._token_mem_exp = cfg_exp
                 return cfg_token
 
-        # Neues Token holen
+        # Fetch a new token
         token_url = "https://oauth.battle.net/token"
         data = {"grant_type": "client_credentials"}
 
@@ -323,10 +323,10 @@ class GuildTools(commands.Cog):
         expires_in = int(js.get("expires_in", 0))
         exp = now + max(0, expires_in)
 
-        # Cache immer in Memory …
+        # Always cache in memory ...
         self._token_mem = token
         self._token_mem_exp = exp
-        # … und nur bei Config-Creds zusätzlich persistent speichern
+        # ... and only persist additionally when using config credentials
         if not use_env:
             await self.config.blizz_token.set(token)
             await self.config.blizz_token_expires_at.set(exp)

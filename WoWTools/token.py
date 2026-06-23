@@ -17,7 +17,7 @@ _ = Translator("WoWTools", __file__)
 VALID_REGIONS = ["eu", "us", "kr", "tw"]
 #VALID_REGIONS = ["eu"]
 
-# Mapping für API- und Auth-Hosts
+# Mapping for API and auth hosts
 _API_HOST = {
     "eu": "eu.api.blizzard.com",
     "us": "us.api.blizzard.com",
@@ -33,7 +33,7 @@ _AUTH_HOST = {
 
 
 async def _get_access_token_cached(self, region: str) -> str:
-    """Holt oder cached den Access Token für die Blizzard API"""
+    """Fetches or caches the access token for the Blizzard API"""
     if not hasattr(self, "_wowtoken_lock"):
         self._wowtoken_lock = asyncio.Lock()
     if not hasattr(self, "_wowtoken_tok"):
@@ -48,7 +48,7 @@ async def _get_access_token_cached(self, region: str) -> str:
         if tok and exp and now < exp:
             return tok
 
-        # API Keys aus Red holen
+        # get API keys from Red
         api_tokens = await self.bot.get_shared_api_tokens("blizzard")
         cid, secret = api_tokens.get("client_id"), api_tokens.get("client_secret")
         if not cid or not secret:
@@ -70,14 +70,14 @@ async def _get_access_token_cached(self, region: str) -> str:
                     raise RuntimeError(f"Auth {resp.status}: {js}")
         token = js["access_token"]
         expires_in = int(js.get("expires_in", 3600))
-        # 30 Sekunden Puffer
+        # 30 seconds buffer
         self._wowtoken_tok[region] = token
         self._wowtoken_exp[region] = now + timedelta(seconds=expires_in - 30)
         return token
 
 
 async def _fetch_token_price(self, region: str, game: str = "classic", locale: str = "en_US") -> dict:
-    """Fragt den Tokenpreis von der Blizzard-API ab"""
+    """Queries the token price from the Blizzard API"""
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     namespace = f"dynamic-{region}" if game == "retail" else f"dynamic-classic-{region}"
     url = f"https://{host}/data/wow/token/index"
@@ -99,7 +99,7 @@ class Token:
     async def wowtoken(self, ctx: commands.Context, region: str = "eu"):
         """Check price of WoW token in a region"""
         if ctx.interaction:
-            # Workaround für Red-Locale bei Interactions
+            # Workaround for Red locale on interactions
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
         region = region.lower()
@@ -117,7 +117,7 @@ class Token:
                 )
                 return
 
-            # Classic als Standard (wie vorher in deiner Datei)
+            # Classic as default (as before in your file)
             data = await _fetch_token_price(self, region=region, game="classic", locale="en_US")
             price_copper = int(data.get("price", 0))
 

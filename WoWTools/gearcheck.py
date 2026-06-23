@@ -17,10 +17,10 @@ def _resolve_locale(lang_or_locale: str) -> str:
     if not lang_or_locale:
         return "en_US"
     key = lang_or_locale.lower()
-    return _LANG_CODES.get(key, lang_or_locale)  # "de" -> "de_DE", passt volle Locales durch
+    return _LANG_CODES.get(key, lang_or_locale)  # "de" -> "de_DE", passes full locales through
 
 def _wowhead_url(item_id: int, game: Literal["classic", "retail"]) -> str:
-    # MoP Classic hat eigenen Pfad
+    # MoP Classic has its own path
     return f"https://wowhead.com/mop-classic/item={item_id}" if game == "classic" else f"https://wowhead.com/item={item_id}"
 
 def _quality_emoji(quality_type: str) -> str:
@@ -35,8 +35,8 @@ def _quality_emoji(quality_type: str) -> str:
 
 def _is_socket_enchant(ench: dict) -> bool:
     """
-    Heuristik: Edelstein-Sockets haben meist source_item (der Gem) und Slot-IDs 1..4.
-    BONUS_SOCKETS (id: 6) ist nur ein zusätzlicher Sockel, kein Edelstein selbst.
+    Heuristic: gem sockets usually have source_item (the gem) and slot IDs 1..4.
+    BONUS_SOCKETS (id: 6) is just an extra socket, not a gem itself.
     """
     if not ench:
         return False
@@ -83,7 +83,7 @@ async def _get_access_token_cached_gear(self, region: str) -> str:
                     raise RuntimeError(f"Auth {resp.status}: {js}")
         token = js["access_token"]
         expires_in = int(js.get("expires_in", 3600))
-        # kleiner Puffer
+        # small buffer
         self._gear_tok[region] = token
         self._gear_exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
         return token
@@ -147,7 +147,7 @@ class GearCheck(commands.Cog):
                         raise RuntimeError(f"Auth {resp.status}: {js}")
             token = js["access_token"]
             expires_in = int(js.get("expires_in", 3600))
-            # kleiner Puffer
+            # small buffer
             self._tok[region] = token
             self._exp[region] = now + timedelta(seconds=max(30, expires_in - 30))
             return token
@@ -191,8 +191,8 @@ class GearCheck(commands.Cog):
         concurrency: int = 5,
     ) -> Dict[int, Optional[int]]:
         """
-        Holt das Itemlevel pro Item-ID aus /data/wow/item/{id}.
-        Gibt Dict {item_id: level or None} zurück.
+        Fetches the item level per item ID from /data/wow/item/{id}.
+        Returns Dict {item_id: level or None}.
         """
         host = _API_HOST.get(region, "eu.api.blizzard.com")
         token = await _get_access_token_cached_gear(self, region)
@@ -252,7 +252,7 @@ class GearCheck(commands.Cog):
         except Exception:
             pass
 
-        # 1) Equipment laden
+        # 1) Load equipment
         try:
             data = await _fetch_equipment_blizzard(
                 self, region=region.lower(), realm=realm.lower(), character=character.lower(),
@@ -265,13 +265,13 @@ class GearCheck(commands.Cog):
         if not equipped:
             return await ctx.send(_("No gear found."))
 
-        # 2) Itemlevel je Item nachladen
+        # 2) Reload item level per item
         item_ids = [it.get("item", {}).get("id") for it in equipped if it.get("item")]
         ilvls_by_id = await self._fetch_item_levels(
             region=region, game=game, locale=locale, item_ids=item_ids
         )
 
-        # 3) Ausgabe bauen (2000-Char-Limit beachten)
+        # 3) Build output (mind the 2000-char limit)
         lines: List[str] = []
         hidden_count = 0
 
@@ -304,10 +304,10 @@ class GearCheck(commands.Cog):
                         lines.append(f"`└──` **Enchant:** {d}")
 
             except Exception:
-                # Defensive: Einzelne kaputte Items nicht alles killen
+                # Defensive: a single broken item shouldn't kill everything
                 continue
 
-            # Soft-Limit, damit wir unter 2000 Zeichen bleiben
+            # Soft limit so we stay under 2000 characters
             if sum(len(x) + 1 for x in lines) > 1800:
                 hidden_count = max(0, len(equipped) - len(lines))
                 break
@@ -336,13 +336,13 @@ class GearCheck(commands.Cog):
     async def ac_realm(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
-        # bereits gewählte Region (command option) lesen
+        # read the already-selected region (command option)
         sel_region = (getattr(interaction.namespace, "region", "eu") or "eu").upper()
         cur = (current or "").lower()
 
         suggestions: List[str] = []
         for realm_name, realm_regions in AC_REALMS.items():
-            # Wenn Region gesetzt, nur diese Realms
+            # if region is set, only those realms
             if sel_region and sel_region not in realm_regions:
                 continue
             if cur in realm_name.lower():
@@ -357,7 +357,7 @@ class GearCheck(commands.Cog):
     ) -> List[app_commands.Choice[str]]:
         cur = (current or "").lower()
 
-        # Baue Vorschläge: ("Deutsch (de_DE)", "de_DE") + ("Deutsch (de)", "de")
+        # Build suggestions: ("Deutsch (de_DE)", "de_DE") + ("Deutsch (de)", "de")
         display_map = {
             "de": "Deutsch", "en": "English", "fr": "Français", "es": "Español",
             "it": "Italiano", "pt": "Português", "ru": "Русский",
@@ -366,12 +366,12 @@ class GearCheck(commands.Cog):
         pairs: List[tuple[str, str]] = []
         for short, full in AC_LANG_CODES.items():
             label_base = display_map.get(short, short)
-            # volle Locale
+            # full locale
             pairs.append((f"{label_base} ({full})", full))
-            # Kurzcode
+            # short code
             pairs.append((f"{label_base} ({short})", short))
 
-        # filtern
+        # filter
         out = [
             app_commands.Choice(name=label, value=val)
             for (label, val) in pairs

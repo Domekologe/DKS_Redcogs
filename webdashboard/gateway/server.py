@@ -1,11 +1,11 @@
-"""aiohttp-basiertes RPC-Gateway.
+"""aiohttp-based RPC gateway.
 
-- WebSocket ``/rpc``  : JSON-RPC 2.0 (Request/Response + Server-Push für Streams)
-- REST ``/api/health``: Liveness ohne Auth
-- REST ``/api/manifest``: bequemer GET-Spiegel von ``manifest.get``
+- WebSocket ``/rpc``  : JSON-RPC 2.0 (request/response + server push for streams)
+- REST ``/api/health``: liveness without auth
+- REST ``/api/manifest``: convenient GET mirror of ``manifest.get``
 
-Auth zwischen BFF und Gateway über ein geteiltes Secret (konstant-Zeit-Vergleich).
-Standardbindung: 127.0.0.1 (nur localhost).
+Auth between BFF and gateway via a shared secret (constant-time comparison).
+Default binding: 127.0.0.1 (localhost only).
 """
 from __future__ import annotations
 
@@ -38,13 +38,13 @@ class Gateway:
         self.app.add_routes([
             web.get("/api/health", self._health),
             web.get("/api/manifest", self._manifest_rest),
-            web.post("/rpc", self._rpc_post),   # Request/Response (BFF)
-            web.get("/rpc", self._ws_handler),  # Streams/Push (Live-Logs, Stats)
+            web.post("/rpc", self._rpc_post),   # request/response (BFF)
+            web.get("/rpc", self._ws_handler),  # streams/push (live logs, stats)
         ])
         self._runner: Optional[web.AppRunner] = None
         self.started_at: Optional[float] = None
         self._ws_clients: Set[web.WebSocketResponse] = set()
-        # Channel-Abos: channel -> set(ws)
+        # Channel subscriptions: channel -> set(ws)
         self._subscriptions: Dict[str, Set[web.WebSocketResponse]] = {}
 
     # ------------------------------------------------------------------ #
@@ -80,8 +80,8 @@ class Gateway:
     async def _auth_middleware(self, request: web.Request, handler):
         if request.path == "/api/health":
             return await handler(request)
-        # NUR der WebSocket-Upgrade (GET /rpc) authentifiziert sich im
-        # connection_init-Frame. POST /rpc (Request/Response) MUSS das Token tragen.
+        # ONLY the WebSocket upgrade (GET /rpc) authenticates in the
+        # connection_init frame. POST /rpc (request/response) MUST carry the token.
         if request.path == "/rpc" and request.method == "GET":
             return await handler(request)
         if not self._check_token(request.headers.get("X-Dashboard-Token")):
@@ -99,7 +99,7 @@ class Gateway:
         })
 
     async def _manifest_rest(self, request: web.Request) -> web.Response:
-        # auth bereits via Middleware; User-Kontext über Query/Header
+        # auth already handled via middleware; user context via query/header
         user_id = request.headers.get("X-User-Id")
         guild_id = request.headers.get("X-Guild-Id")
         params = {"auth": {"user_id": user_id, "guild_id": guild_id}}
@@ -109,9 +109,9 @@ class Gateway:
         return web.json_response(result)
 
     async def _rpc_post(self, request: web.Request) -> web.Response:
-        """HTTP-Variante des JSON-RPC-Dispatchers (Request/Response).
+        """HTTP variant of the JSON-RPC dispatcher (request/response).
 
-        Erwartet einen einzelnen JSON-RPC-2.0-Request im Body. Auth via Middleware.
+        Expects a single JSON-RPC 2.0 request in the body. Auth via middleware.
         """
         try:
             data = await request.json()
@@ -146,7 +146,7 @@ class Gateway:
                                         "error": {"code": -32700, "message": "parse error"}})
                     continue
 
-                # erster Frame muss connection_init mit Token sein
+                # first frame must be connection_init with token
                 if not authenticated:
                     if data.get("method") == "connection_init" and \
                             self._check_token((data.get("params") or {}).get("token")):
@@ -159,7 +159,7 @@ class Gateway:
                     await ws.close()
                     break
 
-                # Abo-Steuerung für Push-Streams
+                # subscription control for push streams
                 method = data.get("method")
                 if method == "subscribe":
                     channel = (data.get("params") or {}).get("channel")
@@ -184,10 +184,10 @@ class Gateway:
         return ws
 
     # ------------------------------------------------------------------ #
-    # Push / Streams (z. B. Live-Logs, Stats)
+    # Push / streams (e.g. live logs, stats)
     # ------------------------------------------------------------------ #
     async def publish(self, channel: str, payload: Any) -> None:
-        """Sendet eine Notification an alle Abonnenten eines Channels."""
+        """Sends a notification to all subscribers of a channel."""
         subs = self._subscriptions.get(channel)
         if not subs:
             return

@@ -284,7 +284,7 @@ class OnboardingSetupModal(discord.ui.Modal, title="Onboarding: Kanal & Rollen")
 
 
 class AdminPickOneMemberView(discord.ui.View):
-    """Ein Mitglied wählen — z. B. Simulate-Join, Reg löschen, Einzel-Rang-Sync."""
+    """Pick a single member — e.g. simulate-join, delete registration, single rank sync."""
 
     def __init__(
         self,

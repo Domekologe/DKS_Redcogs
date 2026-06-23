@@ -55,7 +55,7 @@ def _rank_lock_notify_channel_id(guild_config: Dict[str, Any]) -> int:
 
 
 def _apply_template_placeholders(tpl: str, mapping: Dict[str, str]) -> str:
-    """Ersetzt {key}-Platzhalter; unbekannte {…} bleiben stehen (kein str.format-KeyError)."""
+    """Replaces {key} placeholders; unknown {…} are left in place (no str.format KeyError)."""
     out = tpl
     for key, val in mapping.items():
         out = out.replace("{" + key + "}", val)

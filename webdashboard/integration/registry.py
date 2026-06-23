@@ -1,4 +1,4 @@
-"""Zentrale Sammelstelle für alle Dashboard-Beiträge der registrierten Cogs."""
+"""Central collection point for all dashboard contributions of the registered cogs."""
 from __future__ import annotations
 
 import logging
@@ -17,11 +17,11 @@ class Contribution:
     kind: str            # widget | panel | page
     identifier: str
     meta: Any            # _ContributionMeta
-    handler: Callable    # gebundene Methode (liefert Daten/Schema/Zeilen)
-    submit: Optional[Callable] = None  # nur Panels
-    delete: Optional[Callable] = None  # nur Listen
-    edit: Optional[Callable] = None        # nur Listen (Speichern)
-    edit_form: Optional[Callable] = None   # nur Listen (Formular)
+    handler: Callable    # bound method (returns data/schema/rows)
+    submit: Optional[Callable] = None  # panels only
+    delete: Optional[Callable] = None  # lists only
+    edit: Optional[Callable] = None        # lists only (save)
+    edit_form: Optional[Callable] = None   # lists only (form)
 
     @property
     def key(self) -> str:
@@ -41,15 +41,15 @@ class Contribution:
 class Registry:
     _contribs: Dict[str, Contribution] = field(default_factory=dict)
 
-    # --- Registrierung ---------------------------------------------------- #
+    # --- registration ----------------------------------------------------- #
     def register_cog(self, cog: Any) -> int:
-        """Scannt einen Cog nach dekorierten Methoden und nimmt sie auf."""
+        """Scans a cog for decorated methods and registers them."""
         cog_name = type(cog).__name__
         count = 0
         for _attr, meta, bound in iter_contributions(cog):
             submit = None
             if meta.kind == "panel" and meta.submit_handler is not None:
-                # gebundenen Submit-Handler am Cog auflösen
+                # resolve the bound submit handler on the cog
                 submit = getattr(cog, meta.submit_handler.__name__, None)
             delete = edit = edit_form = None
             if meta.kind == "list":
@@ -82,7 +82,7 @@ class Registry:
             del self._contribs[key]
         log.info("Beiträge von Cog %s entfernt", cog_name)
 
-    # --- Abfrage ---------------------------------------------------------- #
+    # --- query ------------------------------------------------------------ #
     def get(self, key: str) -> Optional[Contribution]:
         return self._contribs.get(key)
 

@@ -1,8 +1,7 @@
-"""Minimaler, abhängigkeitsfreier JSON-RPC-2.0-Dispatcher für das Gateway.
+"""Minimal, dependency-free JSON-RPC 2.0 dispatcher for the gateway.
 
-Unterstützt Request/Response sowie serverseitige Notifications (für Push-Streams
-wie Live-Logs). Methoden werden als ``async def handler(gateway, ctx, params)``
-registriert.
+Supports request/response as well as server-side notifications (for push streams
+such as live logs). Methods are registered as ``async def handler(gateway, ctx, params)``.
 """
 from __future__ import annotations
 
@@ -11,13 +10,13 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 log = logging.getLogger("red.dks.webdashboard.rpc")
 
-# Standard-JSON-RPC-Fehlercodes
+# Standard JSON-RPC error codes
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
-# anwendungsspezifisch
+# application-specific
 UNAUTHORIZED = -32000
 FORBIDDEN = -32001
 
@@ -46,7 +45,7 @@ class Dispatcher:
         self._methods[name] = func
 
     async def dispatch(self, gateway: Any, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Verarbeitet eine einzelne JSON-RPC-Nachricht und liefert die Antwort."""
+        """Processes a single JSON-RPC message and returns the response."""
         req_id = message.get("id")
         is_notification = "id" not in message
 
@@ -64,7 +63,7 @@ class Dispatcher:
         except RpcError as e:
             log.debug("RPC-Fehler bei %s: %s", method_name, e.message)
             return _error(req_id, e.code, e.message, e.data)
-        except Exception as e:  # pragma: no cover - defensiv
+        except Exception as e:  # pragma: no cover - defensive
             log.exception("Interner Fehler bei Methode %s", method_name)
             return _error(req_id, INTERNAL_ERROR, str(e))
 
