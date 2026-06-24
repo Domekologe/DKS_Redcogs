@@ -1346,7 +1346,11 @@ async def _do_cog_uninstall(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> D
     if hasattr(dl, "_delete_cog"):
         base = None
         try:
-            base = dl.cog_install_path() if hasattr(dl, "cog_install_path") else None
+            if hasattr(dl, "cog_install_path"):
+                base = dl.cog_install_path()
+                # cog_install_path() is a coroutine in current Red versions -> await it.
+                if hasattr(base, "__await__"):
+                    base = await base
         except Exception:
             base = None
         for m in target:
