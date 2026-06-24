@@ -26,6 +26,24 @@ try:
     )
 
     DASHBOARD_AVAILABLE = True
+
+    # Guarantee `.on_submit` exists even if the *installed* webdashboard is older
+    # than this drop-in (older builds did not attach the helper). Keeps the cog
+    # loadable regardless of the running webdashboard version.
+    _real_dashboard_panel = dashboard_panel  # type: ignore[has-type]
+
+    def dashboard_panel(*_a, **_k):  # type: ignore[no-redef]
+        _deco = _real_dashboard_panel(*_a, **_k)
+
+        def _wrap(func):
+            func = _deco(func)
+            if not hasattr(func, "on_submit"):
+                def on_submit(_sub):
+                    return _sub
+                func.on_submit = on_submit  # type: ignore[attr-defined]
+            return func
+
+        return _wrap
 except Exception:  # webdashboard not installed or mid-reload
     DASHBOARD_AVAILABLE = False
 
@@ -81,13 +99,3 @@ def register_dashboard(cog) -> bool:
         return False
     dashboard.register_third_party(cog)
     return True
-
-
-def unregister_dashboard(cog) -> None:
-    """Call in ``cog_unload`` (always safe)."""
-    dashboard = cog.bot.get_cog("WebDashboard")
-    if dashboard is not None:
-        try:
-            dashboard.unregister_third_party(cog)
-        except Exception:
-            pass

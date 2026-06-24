@@ -121,7 +121,7 @@ class CVarDocs:
     """WoW CVar documentation"""
 
     @app_commands.command(
-        name="cvar",
+        name="wowt-cvar",
         description="Get information about a WoW CVar",
     )
     @app_commands.allowed_installs(guilds=True, users=True)
