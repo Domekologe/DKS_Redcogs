@@ -682,6 +682,28 @@ async def _resolve_cog_name(bot: Any, name: str) -> str:
     return name
 
 
+def _purge_pkg_modules(pkg: str) -> None:
+    """Drop a package and all its submodules from ``sys.modules`` so the next
+    import reads fresh files from disk.
+
+    discord.py's ``unload_extension`` only removes the top-level extension
+    module, leaving submodules such as ``neko.dks_dashboard`` cached. A later
+    ``from .dks_dashboard import ...`` would then silently re-use the stale
+    in-memory copy and ignore updated files on disk – which is exactly why web
+    reloads/updates kept running old code while Red's native ``[p]reload``
+    (which purges these) worked. Mirrors Red's ``_cleanup_and_refresh_modules``.
+    """
+    import sys
+    import importlib
+
+    for mod in [m for m in list(sys.modules) if m == pkg or m.startswith(pkg + ".")]:
+        try:
+            del sys.modules[mod]
+        except KeyError:
+            pass
+    importlib.invalidate_caches()
+
+
 @dispatcher.method("cogs.set")
 async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """Load/unload/reload a cog (owner). action: load | unload | reload."""
@@ -711,6 +733,8 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         # discord.py 2.x: load/unload/reload_extension are coroutines → await them!
         if pkg in bot.extensions:
             await bot.unload_extension(pkg)
+        # Purge cached submodules so updated files on disk are actually re-read.
+        _purge_pkg_modules(pkg)
         spec = await bot._cog_mgr.find_cog(pkg)
         if spec is None:
             raise RpcError(INVALID_PARAMS, f"Cog '{pkg}' nicht gefunden")
@@ -740,6 +764,8 @@ async def cogs_set(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         if action == "load":
+            # Purge stale cached submodules (e.g. from an earlier failed load).
+            _purge_pkg_modules(name)
             spec = await bot._cog_mgr.find_cog(name)
             if spec is None:
                 raise RpcError(INVALID_PARAMS, f"Cog '{name}' nicht gefunden")
@@ -1248,6 +1274,8 @@ async def _do_cog_update(
     if pkg in bot.extensions and pkg.lower() != own_pkg:
         try:
             await bot.unload_extension(pkg)
+            # Purge cached submodules so the freshly updated files are re-read.
+            _purge_pkg_modules(pkg)
             spec = await bot._cog_mgr.find_cog(pkg)
             if spec is not None:
                 await bot.load_extension(spec)
