@@ -139,16 +139,6 @@ class Token:
             ephemeral = getattr(ctx, "interaction", None) is not None
             await ctx.send(_("Command failed successfully. {e}").format(e=e), ephemeral=ephemeral)
 
-    @wowtoken.autocomplete("region")
-    async def wowtoken_region_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> List[app_commands.Choice[str]]:
-        return [
-            app_commands.Choice(name=region, value=region)
-            for region in ["All"] + VALID_REGIONS
-            if current.lower() in region.lower()
-        ]
-
     async def priceall(self, ctx: commands.Context):
         """Check price of the WoW token in all supported regions"""
         try:

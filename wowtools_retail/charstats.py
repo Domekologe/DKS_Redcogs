@@ -13,6 +13,7 @@ from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_g
 from .autocomplete import (
     REGIONS,
     REALMS as AC_REALMS,
+    fetch_realm_names,
     _LANG_CODES as AC_LANG_CODES,
     _API_HOST,
     _AUTH_HOST,
@@ -226,22 +227,12 @@ class CharStats(commands.Cog):
         await ctx.send(embed=embed, ephemeral=ephemeral)
 
     # ---------- Autocomplete ----------
-    @charstats.autocomplete("region")
-    async def ac_region(self, interaction: discord.Interaction, current: str):
-        cur = (current or "").lower()
-        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
-        return [app_commands.Choice(name=name, value=val) for name, val in opts if cur in val][:25]
-
     @charstats.autocomplete("realm")
     async def ac_realm(self, interaction: discord.Interaction, current: str):
-        sel_region = (getattr(interaction.namespace, "region", "") or "").upper()
+        sel_region = getattr(interaction.namespace, "region", "") or "eu"
         cur = (current or "").lower()
-        out: List[str] = []
-        for realm_name, realm_regions in AC_REALMS.items():
-            if sel_region and sel_region not in realm_regions:
-                continue
-            if cur in realm_name.lower():
-                out.append(realm_name)
+        names = await fetch_realm_names(lambda r: _get_access_token(self, r), sel_region)
+        out = [n for n in names if not cur or cur in n.lower()]
         return [app_commands.Choice(name=r, value=r) for r in out[:25]]
 
     #@charstats.autocomplete("locale")

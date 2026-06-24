@@ -9,7 +9,7 @@ from discord import app_commands
 from redbot.core import commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n, set_contextual_locales_from_guild
-from .autocomplete import REALMS as AC_REALMS, REGIONS as AC_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST
+from .autocomplete import REALMS as AC_REALMS, REGIONS as AC_REGIONS, _LANG_CODES, _API_HOST, _AUTH_HOST, fetch_realm_names
 from .dks_dashboard import tr_lang
 
 _ = Translator("WoWTools", __file__)
@@ -331,31 +331,15 @@ class GearCheck(commands.Cog):
         await ctx.send(embed=embed, ephemeral=private)
 
     # --------- Autocomplete ---------
-    @gearcheck.autocomplete("region")
-    async def ac_region(self, interaction: discord.Interaction, current: str):
-        cur = (current or "").lower()
-        opts = [(r, r.lower()) for r in REGIONS if r.lower() in {"eu", "us", "kr", "tw"}]
-        return [app_commands.Choice(name=name, value=val) for name, val in opts if cur in val][:25]
-
-
     @gearcheck.autocomplete("realm")
     async def ac_realm(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
-        # read the already-selected region (command option)
-        sel_region = (getattr(interaction.namespace, "region", "eu") or "eu").upper()
+        sel_region = getattr(interaction.namespace, "region", "") or "eu"
         cur = (current or "").lower()
-
-        suggestions: List[str] = []
-        for realm_name, realm_regions in AC_REALMS.items():
-            # if region is set, only those realms
-            if sel_region and sel_region not in realm_regions:
-                continue
-            if cur in realm_name.lower():
-                suggestions.append(realm_name)
-
-        suggestions = suggestions[:25]
-        return [app_commands.Choice(name=r, value=r) for r in suggestions]
+        names = await fetch_realm_names(lambda r: _get_access_token_cached_gear(self, r), sel_region)
+        out = [n for n in names if not cur or cur in n.lower()]
+        return [app_commands.Choice(name=r, value=r) for r in out[:25]]
 
     @gearcheck.autocomplete("locale")
     async def ac_locale(
