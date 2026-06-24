@@ -39,7 +39,14 @@ class Misc(commands.Cog):
             await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
         return SubmitResult.ok()
 
-    @app_commands.command(name="ping", description="Check if the bot is responsive.")
+    @app_commands.command(
+        name="ping",
+        description="Check if the bot is responsive.",
+        extras={"i18n_desc": {
+            "de-DE": "Prüft, ob der Bot reagiert.",
+            "en-US": "Check if the bot is responsive.",
+        }},
+    )
     async def ping(self, interaction: discord.Interaction):
         lang = await self.config.guild(interaction.guild).language() if interaction.guild else "en-US"
         await interaction.response.send_message(tr_lang(lang, "Pong!", "Pong!"), ephemeral=True)

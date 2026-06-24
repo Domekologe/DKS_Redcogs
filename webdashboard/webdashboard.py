@@ -126,14 +126,26 @@ class WebDashboard(commands.Cog):
     # Commands (bot owner only)
     # ------------------------------------------------------------------ #
     @commands.is_owner()
-    @commands.hybrid_group(name="dksdashboard", aliases=["dksdash"], description="Manage the DKS web dashboard.")
+    @commands.hybrid_group(
+        name="dksdashboard", aliases=["dksdash"], description="Manage the DKS web dashboard.",
+        extras={"i18n_desc": {
+            "de-DE": "Verwaltet das DKS-Web-Dashboard.",
+            "en-US": "Manage the DKS web dashboard.",
+        }},
+    )
     async def dashboard_group(self, ctx: commands.Context) -> None:
         """Manage the DKS web dashboard.
 
         Note: Uses its own command name so it can run alongside AAA3A's `[p]dashboard`.
         """
 
-    @dashboard_group.command(name="status", description="Show the current status of the gateway.")
+    @dashboard_group.command(
+        name="status", description="Show the current status of the gateway.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt den aktuellen Status des Gateways.",
+            "en-US": "Show the current status of the gateway.",
+        }},
+    )
     async def dashboard_status(self, ctx: commands.Context) -> None:
         """Show the current status of the gateway."""
         running = self.gateway is not None
@@ -148,7 +160,13 @@ class WebDashboard(commands.Cog):
         ]
         await ctx.send(box("\n".join(lines)))
 
-    @dashboard_group.command(name="start", description="Start the gateway.")
+    @dashboard_group.command(
+        name="start", description="Start the gateway.",
+        extras={"i18n_desc": {
+            "de-DE": "Startet das Gateway.",
+            "en-US": "Start the gateway.",
+        }},
+    )
     async def dashboard_start(self, ctx: commands.Context) -> None:
         """Start the gateway."""
         try:
@@ -158,13 +176,25 @@ class WebDashboard(commands.Cog):
             return
         await ctx.send(_("Gateway gestartet."))
 
-    @dashboard_group.command(name="stop", description="Stop the gateway.")
+    @dashboard_group.command(
+        name="stop", description="Stop the gateway.",
+        extras={"i18n_desc": {
+            "de-DE": "Stoppt das Gateway.",
+            "en-US": "Stop the gateway.",
+        }},
+    )
     async def dashboard_stop(self, ctx: commands.Context) -> None:
         """Stop the gateway."""
         await self._stop_gateway()
         await ctx.send(_("Gateway gestoppt."))
 
-    @dashboard_group.command(name="bind", description="Set the gateway host and port (restart required).")
+    @dashboard_group.command(
+        name="bind", description="Set the gateway host and port (restart required).",
+        extras={"i18n_desc": {
+            "de-DE": "Setzt Host und Port des Gateways (Neustart erforderlich).",
+            "en-US": "Set the gateway host and port (restart required).",
+        }},
+    )
     @app_commands.describe(host="Listen address (e.g. 127.0.0.1)", port="Listen port (e.g. 6970)")
     async def dashboard_bind(self, ctx: commands.Context, host: str, port: int) -> None:
         """Set the host and port (restart required).
@@ -176,7 +206,13 @@ class WebDashboard(commands.Cog):
         await self.config.port.set(port)
         await ctx.send(_("Gespeichert: {host}:{port}. Bitte neu starten.").format(host=host, port=port))
 
-    @dashboard_group.command(name="token", description="Send the gateway token via DM (for configuring the web app).")
+    @dashboard_group.command(
+        name="token", description="Send the gateway token via DM (for configuring the web app).",
+        extras={"i18n_desc": {
+            "de-DE": "Sendet das Gateway-Token per DM (zur Einrichtung der Web-App).",
+            "en-US": "Send the gateway token via DM (for configuring the web app).",
+        }},
+    )
     async def dashboard_token(self, ctx: commands.Context) -> None:
         """Send the gateway token via DM (for configuring the web app)."""
         token = await self.config.token()
@@ -189,7 +225,13 @@ class WebDashboard(commands.Cog):
         except discord.Forbidden:
             await ctx.send(_("Ich konnte dir keine DM senden. Bitte DMs aktivieren."))
 
-    @dashboard_group.command(name="regen", description="Generate a new gateway token (the web app must be updated).")
+    @dashboard_group.command(
+        name="regen", description="Generate a new gateway token (the web app must be updated).",
+        extras={"i18n_desc": {
+            "de-DE": "Erzeugt ein neues Gateway-Token (die Web-App muss aktualisiert werden).",
+            "en-US": "Generate a new gateway token (the web app must be updated).",
+        }},
+    )
     async def dashboard_regen(self, ctx: commands.Context) -> None:
         """Generate a new gateway token (the web app must be updated)."""
         token = secrets.token_urlsafe(48)

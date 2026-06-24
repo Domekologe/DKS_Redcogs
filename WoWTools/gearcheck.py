@@ -224,7 +224,14 @@ class GearCheck(commands.Cog):
         return results
 
     # --------------- Command ---------------
-    @commands.hybrid_command(name="gearcheck")
+    @commands.hybrid_command(
+        name="gearcheck",
+        description="Show a character's equipped gear with item level, sockets and enchants.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt die angelegte Ausrüstung eines Charakters mit Itemlevel, Sockeln und Verzauberungen.",
+            "en-US": "Show a character's equipped gear with item level, sockets and enchants.",
+        }},
+    )
     @app_commands.describe(
         region="Region (eu/us/kr)",
         realm="Realm (use a hyphen instead of spaces)",

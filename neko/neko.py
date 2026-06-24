@@ -112,7 +112,13 @@ class Neko(commands.Cog):
     # Prefix command: !neko → only category "neko"
     # Prefix command: !neko <category> → any category
     # ------------------------------------------------------------------
-    @commands.command(name="neko")
+    @commands.command(
+        name="neko",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Neko-Bild oder ein Bild/GIF aus der angegebenen Kategorie.",
+            "en-US": "Show a neko or an image/GIF from the given category.",
+        }},
+    )
     async def neko_prefix(self, ctx, category: str = None):
         """Show a neko or an image/GIF from the given category."""
 
@@ -155,7 +161,14 @@ class Neko(commands.Cog):
     # ------------------------------------------------------------------
     # Slash command: /neko → only category "neko"
     # ------------------------------------------------------------------
-    @app_commands.command(name="neko", description="Show a neko image.")
+    @app_commands.command(
+        name="neko",
+        description="Show a neko image.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Neko-Bild oder ein Bild/GIF aus der angegebenen Kategorie.",
+            "en-US": "Show a neko or an image/GIF from the given category.",
+        }},
+    )
     async def neko_slash(self, interaction: discord.Interaction):
         await interaction.response.defer()
         lang = await self._lang(interaction)
@@ -167,7 +180,11 @@ class Neko(commands.Cog):
     # ------------------------------------------------------------------
     @app_commands.command(
         name="neko-cat",
-        description="Show an image or GIF from a category."
+        description="Show an image or GIF from a category.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Bild oder GIF aus einer Kategorie.",
+            "en-US": "Show an image or GIF from a category.",
+        }},
     )
     @app_commands.describe(category="Choose a category")
     @app_commands.autocomplete(category=neko_autocomplete)

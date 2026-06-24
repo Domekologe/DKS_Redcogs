@@ -33,10 +33,13 @@ log = logging.getLogger("red.dks.webdashboard.methods")
 
 dispatcher = Dispatcher()
 
-# Serialises all Downloader-mutating operations (install/update/uninstall). The
-# Downloader is not safe for concurrent installs (Config writes + git state), and a
-# slash sync runs per update. With this lock, rapid/parallel clicks queue instead of
-# racing. asyncio.Lock is fair (FIFO) so requests run in click order.
+# Serialises all Downloader operations (install/update/uninstall AND the repo
+# listing read). The Downloader is not safe for concurrent access: an install
+# rewrites the repo working tree + Config, and reading repo.available_cogs /
+# _available_updates while that happens returns a PARTIAL scan (cogs/update flags
+# momentarily vanish). The read path therefore takes the same lock so a page
+# refresh never observes a mid-mutation state. asyncio.Lock is fair (FIFO) so
+# requests run in click order.
 _downloader_lock = asyncio.Lock()
 
 
@@ -238,23 +241,56 @@ def _repo_for_cog(cog_obj: Any, repo_map: Dict[str, str]) -> Optional[str]:
         return None
 
 
+def _i18n_desc(value: Any, locale: Any) -> Optional[str]:
+    """Resolve a bilingual command description from ``command.extras['i18n_desc']``.
+
+    ``value`` may be a ``{"de-DE": "...", "en-US": "..."}`` dict. Returns the entry
+    matching ``locale`` (exact, then by language prefix), else None so the caller
+    can fall back to the plain Discord description/short_doc.
+    """
+    if not isinstance(value, dict):
+        return None
+    loc = str(locale or "en-US")
+    if loc in value:
+        return value[loc]
+    lang = loc.split("-")[0].lower()
+    for k, v in value.items():
+        if str(k).split("-")[0].lower() == lang:
+            return v
+    return next(iter(value.values()), None)
+
+
 @dispatcher.method("core.commands")
 async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """List of active text and slash commands. Public (without user context).
 
-    Only visible, enabled commands are returned (no hidden ones).
+    Only visible, enabled commands are returned (no hidden ones). Descriptions
+    follow the dashboard language via ``params['locale']`` when a command provides
+    a bilingual ``extras['i18n_desc']``; otherwise the plain description is used.
     """
     bot = gateway.bot
     repo_map = await _repo_map(bot)
+    locale = params.get("locale") or "en-US"
+
+    # qualified_name -> bilingual i18n_desc dict, collected from the text/hybrid
+    # side so the slash list can reuse it (hybrid app-commands don't reliably carry
+    # the parent's extras).
+    i18n_by_name: Dict[str, Any] = {}
 
     prefix: list = []
     try:
         for c in bot.walk_commands():
             if getattr(c, "hidden", False) or not getattr(c, "enabled", True):
                 continue
+            bi = (getattr(c, "extras", None) or {}).get("i18n_desc")
+            if isinstance(bi, dict):
+                i18n_by_name[c.qualified_name] = bi
+            desc = _i18n_desc(bi, locale)
+            if desc is None:
+                desc = (getattr(c, "short_doc", "") or "").strip()
             prefix.append({
                 "name": c.qualified_name,
-                "description": (getattr(c, "short_doc", "") or "").strip(),
+                "description": desc,
                 "cog": c.cog_name or "—",
                 "repo": _repo_for_cog(getattr(c, "cog", None), repo_map),
             })
@@ -271,9 +307,13 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 if not isinstance(c, app_commands.Command):
                     continue  # skip groups without their own callback
                 binding = getattr(c, "binding", None)
+                bi = (getattr(c, "extras", None) or {}).get("i18n_desc") or i18n_by_name.get(c.qualified_name)
+                desc = _i18n_desc(bi, locale)
+                if desc is None:
+                    desc = (getattr(c, "description", "") or "").strip()
                 slash.append({
                     "name": c.qualified_name,
-                    "description": (getattr(c, "description", "") or "").strip(),
+                    "description": desc,
                     "cog": type(binding).__name__ if binding is not None else "—",
                     "repo": _repo_for_cog(binding, repo_map),
                 })
@@ -876,31 +916,34 @@ async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, An
     dl = _downloader(gateway)
     if dl is None:
         return {"available": False, "repos": []}
+    # Take the Downloader lock so the listing is never read mid-install/-update
+    # (which would yield a partial scan: missing cogs / wrong update flags).
     try:
-        installed = await _installed_cogs(dl)
-        update_names = await _cogs_with_updates(dl, installed)
-        by_repo: Dict[str, list] = {}
-        for m in installed:
-            by_repo.setdefault(getattr(m, "repo_name", "?"), []).append({
-                "name": m.name, "commit": getattr(m, "commit", None),
-                "update_available": m.name in update_names,
-            })
-        repos = []
-        for repo in _iter_repos(dl):
-            avail = [
-                {"name": inst.name, "description": (getattr(inst, "short", "") or "").strip()}
-                for inst in getattr(repo, "available_cogs", [])
-                if not getattr(inst, "hidden", False)
-            ]
-            repos.append({
-                "name": repo.name,
-                "url": getattr(repo, "url", None),
-                "branch": getattr(repo, "branch", None),
-                "commit": getattr(repo, "commit", None),
-                "installed": sorted(by_repo.get(repo.name, []), key=lambda x: x["name"]),
-                "available_cogs": sorted(avail, key=lambda x: x["name"]),
-            })
-        repos.sort(key=lambda r: r["name"])
+        async with _downloader_lock:
+            installed = await _installed_cogs(dl)
+            update_names = await _cogs_with_updates(dl, installed)
+            by_repo: Dict[str, list] = {}
+            for m in installed:
+                by_repo.setdefault(getattr(m, "repo_name", "?"), []).append({
+                    "name": m.name, "commit": getattr(m, "commit", None),
+                    "update_available": m.name in update_names,
+                })
+            repos = []
+            for repo in _iter_repos(dl):
+                avail = [
+                    {"name": inst.name, "description": (getattr(inst, "short", "") or "").strip()}
+                    for inst in getattr(repo, "available_cogs", [])
+                    if not getattr(inst, "hidden", False)
+                ]
+                repos.append({
+                    "name": repo.name,
+                    "url": getattr(repo, "url", None),
+                    "branch": getattr(repo, "branch", None),
+                    "commit": getattr(repo, "commit", None),
+                    "installed": sorted(by_repo.get(repo.name, []), key=lambda x: x["name"]),
+                    "available_cogs": sorted(avail, key=lambda x: x["name"]),
+                })
+            repos.sort(key=lambda r: r["name"])
         return {"available": True, "repos": repos}
     except Exception as e:
         raise RpcError(INTERNAL_ERROR, f"Repo-Liste fehlgeschlagen: {e}")

@@ -1869,7 +1869,14 @@ class WowGuildAutomation(commands.Cog):
         await self._run_onboarding_flow(member, simulated=False)
 
 
-    @app_commands.command(name="wow-user", description="WoW: panel, characters, rank sync, ready times.")
+    @app_commands.command(
+        name="wow-user",
+        description="WoW: panel, characters, rank sync, ready times.",
+        extras={"i18n_desc": {
+            "de-DE": "WoW: Panel, Charaktere, Rang-Sync, Bereitschaftszeiten.",
+            "en-US": "WoW: panel, characters, rank sync, ready times.",
+        }},
+    )
     @app_commands.guild_only()
     @app_commands.describe(action="Action")
     @app_commands.choices(
@@ -1921,6 +1928,10 @@ class WowGuildAutomation(commands.Cog):
     @app_commands.command(
         name="wow-admin",
         description="Officer: character panel, rank sync, guild info, onboarding data (Manage Server).",
+        extras={"i18n_desc": {
+            "de-DE": "Offizier: Charakter-Panel, Rang-Sync, Gildeninfo, Onboarding-Daten (Server verwalten).",
+            "en-US": "Officer: character panel, rank sync, guild info, onboarding data (Manage Server).",
+        }},
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -2036,6 +2047,10 @@ class WowGuildAutomation(commands.Cog):
     @app_commands.command(
         name="wow-masteradmin",
         description="Advanced: onboarding, Blizzard API, rank mapping, auto sync, per-member rank lock.",
+        extras={"i18n_desc": {
+            "de-DE": "Erweitert: Onboarding, Blizzard-API, Rang-Mapping, Auto-Sync, Rang-Sperre pro Mitglied.",
+            "en-US": "Advanced: onboarding, Blizzard API, rank mapping, auto sync, per-member rank lock.",
+        }},
     )
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)

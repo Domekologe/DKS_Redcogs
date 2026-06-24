@@ -177,7 +177,7 @@ class ReadyTimes(commands.Cog):
     # Slash: /set-readytimes (ephemeral UI)
     # ------------------------------
 
-    @app_commands.command(name="set-readytimes", description="Set/manage your raid availability privately.")
+    @app_commands.command(name="set-readytimes", description="Set/manage your raid availability privately.", extras={"i18n_desc": {"de-DE": "Deine Raid-Verfügbarkeit privat festlegen/verwalten.", "en-US": "Set/manage your raid availability privately."}})
     async def set_readytimes(self, interaction: discord.Interaction):
         lang = await self._lang(interaction.guild)
         if not interaction.guild or not isinstance(interaction.user, (discord.Member,)):
@@ -201,7 +201,7 @@ class ReadyTimes(commands.Cog):
     # Slash: /get-readytimes [day] [start] [end]
     # ------------------------------
 
-    @app_commands.command(name="get-readytimes", description="Query who is available and when (reply is private).")
+    @app_commands.command(name="get-readytimes", description="Query who is available and when (reply is private).", extras={"i18n_desc": {"de-DE": "Abfragen, wer wann verfügbar ist (Antwort privat).", "en-US": "Query who is available and when (reply is private)."}})
     @app_commands.describe(day="Optional: weekday", start="Optional: start time HH:MM", end="Optional: end time HH:MM",user="Optional: user (shows only their times)")
     async def get_readytimes(
         self,

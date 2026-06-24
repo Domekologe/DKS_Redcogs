@@ -110,7 +110,14 @@ class CharStats(commands.Cog):
     def __init__(self, bot: Red) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="charstats")
+    @commands.hybrid_command(
+        name="charstats",
+        description="Show achievement statistics highlights (kills, deaths, quests, instances, records).",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt Highlights der Erfolgs-Statistiken (Kills, Tode, Quests, Instanzen, Rekorde).",
+            "en-US": "Show achievement statistics highlights (kills, deaths, quests, instances, records).",
+        }},
+    )
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
         realm="Realm (use a hyphen instead of spaces)",

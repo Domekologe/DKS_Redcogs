@@ -302,7 +302,14 @@ class DashboardTemplate(commands.Cog):
     # PER-GUILD `language` setting (chosen in the "Template settings" panel) —
     # not the website language. Fetch the guild language, then wrap each string.
     @commands.is_owner()
-    @commands.hybrid_command(name="dashboardtemplate", description="Show whether the WebDashboard cog is loaded (template self-check).")
+    @commands.hybrid_command(
+        name="dashboardtemplate",
+        description="Show whether the WebDashboard cog is loaded (template self-check).",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt, ob das WebDashboard-Cog geladen ist (Vorlagen-Selbsttest).",
+            "en-US": "Show whether the WebDashboard cog is loaded (template self-check).",
+        }},
+    )
     async def _status(self, ctx: commands.Context) -> None:
         """Show whether the WebDashboard cog is loaded (template self-check)."""
         lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"

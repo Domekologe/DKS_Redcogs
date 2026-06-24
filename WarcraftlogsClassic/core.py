@@ -197,7 +197,14 @@ class WarcraftLogsClassic(commands.Cog):
     ):
         await self.config.user_from_id(user_id).clear()
 
-    @commands.hybrid_group(aliases=["wcl"])
+    @commands.hybrid_group(
+        aliases=["wcl"],
+        description="Retrieve World of Warcraft character information from WarcraftLogs.",
+        extras={"i18n_desc": {
+            "de-DE": "World-of-Warcraft-Charakterinformationen von WarcraftLogs abrufen.",
+            "en-US": "Retrieve World of Warcraft character information from WarcraftLogs.",
+        }},
+    )
     async def warcraftlogs(self, ctx: commands.Context):
         """Retrieve World of Warcraft character information from WarcraftLogs."""
         pass
@@ -207,7 +214,13 @@ class WarcraftLogsClassic(commands.Cog):
         name="Character name",
         realm="Name of the realm",
     )
-    @warcraftlogs.command()
+    @warcraftlogs.command(
+        description="Fetch a character's gear from the latest log entry that includes gear data.",
+        extras={"i18n_desc": {
+            "de-DE": "Die Ausrüstung eines Charakters aus dem letzten Log mit Ausrüstungsdaten abrufen.",
+            "en-US": "Fetch a character's gear from the latest log entry that includes gear data.",
+        }},
+    )
     async def gear(self, ctx, name: str, *, realm: str):
         """
         Fetch a character's gear.
@@ -418,7 +431,13 @@ class WarcraftLogsClassic(commands.Cog):
         return realms[:25]
 
     @commands.bot_has_permissions(embed_links=True)
-    @warcraftlogs.command()
+    @warcraftlogs.command(
+        description="Show a character's raid rank overview (best/median performance per encounter).",
+        extras={"i18n_desc": {
+            "de-DE": "Rang-Übersicht eines Charakters anzeigen (beste/mittlere Leistung pro Encounter).",
+            "en-US": "Show a character's raid rank overview (best/median performance per encounter).",
+        }},
+    )
     @app_commands.choices(
         zone=[
             app_commands.Choice(name=zone[0], value=short_name)
@@ -677,12 +696,25 @@ class WarcraftLogsClassic(commands.Cog):
         else:
             return str(dps)
 
-    @commands.hybrid_group(description="Commands for setting up WCL settings.")
+    @commands.hybrid_group(
+        description="Commands for setting up WCL settings.",
+        extras={"i18n_desc": {
+            "de-DE": "Befehle zum Einrichten der WCL-Einstellungen.",
+            "en-US": "Commands for setting up WCL settings.",
+        }},
+    )
     async def wclset(self, ctx: commands.Context):
         """Commands for setting up WCL settings."""
         pass
 
-    @wclset.command(name="charname", description="Set your character's name.")
+    @wclset.command(
+        name="charname",
+        description="Set your character's name.",
+        extras={"i18n_desc": {
+            "de-DE": "Den Namen deines Charakters festlegen.",
+            "en-US": "Set your character's name.",
+        }},
+    )
     @app_commands.describe(charname="Your character's name")
     async def wclset_charname(self, ctx, charname: str):
         """Set your character's name."""
@@ -691,7 +723,14 @@ class WarcraftLogsClassic(commands.Cog):
             _("Your character name was set to {charname}.").format(charname=charname.title())
         )
 
-    @wclset.command(name="realm", description="Set your realm.")
+    @wclset.command(
+        name="realm",
+        description="Set your realm.",
+        extras={"i18n_desc": {
+            "de-DE": "Deinen Realm festlegen.",
+            "en-US": "Set your realm.",
+        }},
+    )
     @app_commands.describe(realm="Your realm name")
     async def wclset_realm(self, ctx, *, realm: str):
         """Set your realm."""
@@ -699,7 +738,14 @@ class WarcraftLogsClassic(commands.Cog):
         await self.config.user(ctx.author).realm.set(realmname)
         await ctx.send(_("Your realm was set to {realm}.").format(realm=realm.title()))
 
-    @wclset.command(name="region", description="Set your region.")
+    @wclset.command(
+        name="region",
+        description="Set your region.",
+        extras={"i18n_desc": {
+            "de-DE": "Deine Region festlegen.",
+            "en-US": "Set your region.",
+        }},
+    )
     @app_commands.describe(region="Your region (EU or US)")
     async def wclset_region(self, ctx, region: str):
         """Set your region."""
@@ -713,7 +759,15 @@ class WarcraftLogsClassic(commands.Cog):
         await self.config.user(ctx.author).region.set(region)
         await ctx.send(_("Your realm's region was set to {region}.").format(region=region.upper()))
 
-    @wclset.command(name="channel", hidden=True, description="Set the channel where WCL updates will be sent.")
+    @wclset.command(
+        name="channel",
+        hidden=True,
+        description="Set the channel where WCL updates will be sent.",
+        extras={"i18n_desc": {
+            "de-DE": "Den Kanal festlegen, in den WCL-Updates gesendet werden.",
+            "en-US": "Set the channel where WCL updates will be sent.",
+        }},
+    )
     @commands.guild_only()
     @commands.mod_or_permissions(manage_channels=True)
     @app_commands.describe(channel="The channel where WCL updates will be sent")
@@ -724,7 +778,14 @@ class WarcraftLogsClassic(commands.Cog):
             _("WCL updates will now be sent to {channel}.").format(channel=channel.mention)
         )
 
-    @wclset.command(name="settings", description="Show your current settings.")
+    @wclset.command(
+        name="settings",
+        description="Show your current settings.",
+        extras={"i18n_desc": {
+            "de-DE": "Deine aktuellen Einstellungen anzeigen.",
+            "en-US": "Show your current settings.",
+        }},
+    )
     @commands.guild_only()
     @app_commands.describe(user="The user whose settings to show (defaults to yourself)")
     async def wclset_settings(self, ctx, user: discord.User = None):
@@ -757,7 +818,14 @@ class WarcraftLogsClassic(commands.Cog):
 
         await ctx.send(box(msg, lang="ini"))
 
-    @wclset.command(name="apikey", description="Instructions for setting the API key.")
+    @wclset.command(
+        name="apikey",
+        description="Instructions for setting the API key.",
+        extras={"i18n_desc": {
+            "de-DE": "Anleitung zum Festlegen des API-Schlüssels.",
+            "en-US": "Instructions for setting the API key.",
+        }},
+    )
     @checks.is_owner()
     async def wclset_apikey(self, ctx):
         """Instructions for setting the api key."""

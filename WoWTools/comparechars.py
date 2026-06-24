@@ -348,7 +348,14 @@ class CompareChars(commands.Cog):
     def __init__(self, bot: Red) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="comparechars")
+    @commands.hybrid_command(
+        name="comparechars",
+        description="Compare two characters by gear (item level per slot), info or statistics.",
+        extras={"i18n_desc": {
+            "de-DE": "Vergleicht zwei Charaktere nach Ausrüstung (Itemlevel pro Slot), Werten oder Statistiken.",
+            "en-US": "Compare two characters by gear (item level per slot), info or statistics.",
+        }},
+    )
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
         server_char1="Realm/server of character 1",

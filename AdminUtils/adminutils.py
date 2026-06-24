@@ -158,7 +158,7 @@ class AdminUtils(commands.Cog):
             await ctx.reply(content, **{k: v for k, v in kwargs.items() if k != "ephemeral"})
 
     # ---- KICK ----
-    @commands.hybrid_command(name="kick", description="Kick a member.")
+    @commands.hybrid_command(name="kick", description="Kick a member.", extras={"i18n_desc": {"de-DE": "Ein Mitglied kicken.", "en-US": "Kick a member."}})
     @commands.bot_has_guild_permissions(kick_members=True)
     @has_perms(kick_members=True)
     @app_commands.describe(member="Member to kick", reason="Reason")
@@ -177,7 +177,7 @@ class AdminUtils(commands.Cog):
         )
 
     # ---- BAN ----
-    @commands.hybrid_command(name="ban", description="Ban a member.")
+    @commands.hybrid_command(name="ban", description="Ban a member.", extras={"i18n_desc": {"de-DE": "Ein Mitglied bannen.", "en-US": "Ban a member."}})
     @commands.bot_has_guild_permissions(ban_members=True)
     @has_perms(ban_members=True)
     @app_commands.describe(
@@ -189,9 +189,9 @@ class AdminUtils(commands.Cog):
         self,
         ctx: commands.Context,
         member: discord.Member,
+        delete_message_days: app_commands.Range[int, 0, 7] = 0,
         *,
-        reason: Optional[str] = None,
-        delete_message_days: app_commands.Range[int, 0, 7] = 0
+        reason: Optional[str] = None
     ):
         await ctx.guild.ban(
             member,
@@ -209,7 +209,7 @@ class AdminUtils(commands.Cog):
         )
 
     # ---- TIMEOUT ----
-    @commands.hybrid_command(name="timeout", description="Time out a member (in minutes).")
+    @commands.hybrid_command(name="timeout", description="Time out a member (in minutes).", extras={"i18n_desc": {"de-DE": "Ein Mitglied stummschalten (in Minuten).", "en-US": "Time out a member (in minutes)."}})
     @commands.bot_has_guild_permissions(moderate_members=True)
     @has_perms(moderate_members=True)
     @app_commands.describe(
@@ -239,7 +239,7 @@ class AdminUtils(commands.Cog):
 
 
     # ---- PURGE (with exceptions) ----
-    @commands.hybrid_command(name="purge", description="Delete X messages, optionally with exceptions.")
+    @commands.hybrid_command(name="purge", description="Delete X messages, optionally with exceptions.", extras={"i18n_desc": {"de-DE": "X Nachrichten löschen, optional mit Ausnahmen.", "en-US": "Delete X messages, optionally with exceptions."}})
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
     @app_commands.describe(
@@ -399,7 +399,8 @@ class AdminUtils(commands.Cog):
     # ---- Fast Purge (instant Purge but only for the last 14 days) ----
     @commands.hybrid_command(
         name="purgefast",
-        description="Quickly deletes messages from the last 14 days (bulk)."
+        description="Quickly deletes messages from the last 14 days (bulk).",
+        extras={"i18n_desc": {"de-DE": "Löscht schnell Nachrichten der letzten 14 Tage (Bulk).", "en-US": "Quickly deletes messages from the last 14 days (bulk)."}}
     )
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
@@ -488,7 +489,8 @@ class AdminUtils(commands.Cog):
     # ---- MESSAGE MOVE (copy + optionally delete) ----
     @commands.hybrid_command(
         name="messagemove",
-        description="Copies a message to a target channel or thread and optionally deletes the original."
+        description="Copies a message to a channel/thread and optionally deletes the original.",
+        extras={"i18n_desc": {"de-DE": "Kopiert eine Nachricht in einen Ziel-Channel/Thread, optional Original löschen.", "en-US": "Copies a message to a channel/thread and optionally deletes the original."}}
     )
     @commands.bot_has_guild_permissions(manage_messages=True, read_message_history=True)
     @has_perms(manage_messages=True)
@@ -564,7 +566,8 @@ class AdminUtils(commands.Cog):
     # ---- MOVE MEMBER ALL ----
     @commands.hybrid_command(
         name="move-memberall",
-        description="Move all members from one voice channel to another."
+        description="Move all members from one voice channel to another.",
+        extras={"i18n_desc": {"de-DE": "Alle Mitglieder von einem Sprachkanal in einen anderen verschieben.", "en-US": "Move all members from one voice channel to another."}}
     )
     @commands.bot_has_guild_permissions(move_members=True)
     @has_perms(move_members=True)
@@ -603,7 +606,8 @@ class AdminUtils(commands.Cog):
     # ---- MOVE MEMBER (select menu + confirmation) ----
     @commands.hybrid_command(
         name="move-member",
-        description="Move selected members from one voice channel to another."
+        description="Move selected members from one voice channel to another.",
+        extras={"i18n_desc": {"de-DE": "Ausgewählte Mitglieder von einem Sprachkanal in einen anderen verschieben.", "en-US": "Move selected members from one voice channel to another."}}
     )
     @commands.bot_has_guild_permissions(move_members=True)
     @has_perms(move_members=True)
@@ -752,7 +756,8 @@ class AdminUtils(commands.Cog):
     # ---- COPY CHANNEL ROLE PERMISSIONS ----
     @app_commands.command(
         name="copy-channelrole",
-        description="Copy a role's channel permissions to another role."
+        description="Copy a role's channel permissions to another role.",
+        extras={"i18n_desc": {"de-DE": "Channel-Rechte einer Rolle auf eine andere Rolle kopieren.", "en-US": "Copy a role's channel permissions to another role."}}
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
     @has_perms(manage_roles=True)
@@ -799,7 +804,8 @@ class AdminUtils(commands.Cog):
     # ---- COPY GUILD ROLE ----
     @app_commands.command(
         name="copy-role",
-        description="Create a new role with all the server and channel permissions of an existing role."
+        description="Create a new role with all server and channel permissions of an existing role.",
+        extras={"i18n_desc": {"de-DE": "Neue Rolle mit allen Server- und Channel-Rechten einer Rolle erstellen.", "en-US": "Create a new role with all server and channel permissions of an existing role."}}
     )
     @commands.bot_has_guild_permissions(manage_roles=True)
     @has_perms(manage_roles=True)

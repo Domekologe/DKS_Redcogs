@@ -258,6 +258,10 @@ class ChannelJoinNotification(commands.Cog):
     @app_commands.command(
         name="join-notification",
         description="Setup: DM notification when users join certain voice/stage channels.",
+        extras={"i18n_desc": {
+            "de-DE": "Einrichtung: DM-Benachrichtigung beim Beitritt bestimmter Sprach-/Bühnenkanäle.",
+            "en-US": "Setup: DM notification when users join certain voice/stage channels.",
+        }},
     )
     @app_commands.guild_only()
     async def join_notification(self, interaction: discord.Interaction) -> None:

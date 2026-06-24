@@ -126,7 +126,8 @@ class GuildToolsPollExport(commands.Cog):
         ]
     )
     @app_commands.command(
-        name="export-poll", description="Export a native Discord poll as CSV (;-separated)."
+        name="export-poll", description="Export a native Discord poll as CSV (;-separated).",
+        extras={"i18n_desc": {"de-DE": "Native Discord-Umfrage als CSV exportieren (;-getrennt).", "en-US": "Export a native Discord poll as CSV (;-separated)."}}
     )
     async def export_poll(self, interaction: discord.Interaction, poll: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(thinking=True, ephemeral=True)

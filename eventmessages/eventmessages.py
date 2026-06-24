@@ -238,7 +238,11 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-enabled",
-        description="Enable or disable an event."
+        description="Enable or disable an event.",
+        extras={"i18n_desc": {
+            "de-DE": "Aktiviert oder deaktiviert ein Event.",
+            "en-US": "Enable or disable an event.",
+        }},
     )
     @app_commands.describe(
         event="Which event?",
@@ -281,7 +285,11 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-channel",
-        description="Sets the channel for an event."
+        description="Sets the channel for an event.",
+        extras={"i18n_desc": {
+            "de-DE": "Legt den Kanal für ein Event fest.",
+            "en-US": "Sets the channel for an event.",
+        }},
     )
     @app_commands.describe(
         event="Which event?",
@@ -320,7 +328,11 @@ class EventMessages(commands.Cog):
 
     @app_commands.command(
         name="em-status",
-        description="Shows the status of all events."
+        description="Shows the status of all events.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt den Status aller Events an.",
+            "en-US": "Shows the status of all events.",
+        }},
     )
     async def em_status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

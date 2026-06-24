@@ -107,7 +107,14 @@ class CharInfo(commands.Cog):
     def __init__(self, bot: Red) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="charinfo")
+    @commands.hybrid_command(
+        name="charinfo",
+        description="Show a character's core stats (HP, mana, primary stats, crit/haste/mastery).",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt die Kernwerte eines Charakters (HP, Mana, Primärwerte, Krit/Tempo/Meisterschaft).",
+            "en-US": "Show a character's core stats (HP, mana, primary stats, crit/haste/mastery).",
+        }},
+    )
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
         realm="Realm (use a hyphen instead of spaces)",

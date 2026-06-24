@@ -294,7 +294,14 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # SET
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-set", description="Add a reaction role: map an emoji on a message to a role.")
+    @commands.hybrid_command(
+        name="reactionrole-set",
+        description="Add a reaction role: map an emoji on a message to a role.",
+        extras={"i18n_desc": {
+            "de-DE": "Reaktionsrolle hinzufügen: Emoji einer Nachricht einer Rolle zuordnen.",
+            "en-US": "Add a reaction role: map an emoji on a message to a role.",
+        }},
+    )
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_set(
@@ -348,7 +355,14 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # REMOVE
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-remove", description="Remove a reaction role by its ID.")
+    @commands.hybrid_command(
+        name="reactionrole-remove",
+        description="Remove a reaction role by its ID.",
+        extras={"i18n_desc": {
+            "de-DE": "Entfernt eine Reaktionsrolle anhand ihrer ID.",
+            "en-US": "Remove a reaction role by its ID.",
+        }},
+    )
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_remove(self, ctx: commands.Context, rr_id: str):
@@ -365,7 +379,14 @@ class ReactionRole(commands.Cog):
     # -------------------------
     # GET
     # -------------------------
-    @commands.hybrid_command(name="reactionrole-get", description="List all configured reaction roles in this server.")
+    @commands.hybrid_command(
+        name="reactionrole-get",
+        description="List all configured reaction roles in this server.",
+        extras={"i18n_desc": {
+            "de-DE": "Listet alle konfigurierten Reaktionsrollen dieses Servers auf.",
+            "en-US": "List all configured reaction roles in this server.",
+        }},
+    )
     @commands.guild_only()
     async def reactionrole_get(self, ctx: commands.Context):
         lang = await self.config.guild(ctx.guild).language()
@@ -437,7 +458,14 @@ class ReactionRole(commands.Cog):
                     await member.remove_roles(role, reason="ReactionRole")
                 break
 
-    @commands.hybrid_command(name="reactionrole-sync", description="Re-apply reaction roles to users who already reacted.")
+    @commands.hybrid_command(
+        name="reactionrole-sync",
+        description="Re-apply reaction roles to users who already reacted.",
+        extras={"i18n_desc": {
+            "de-DE": "Wendet Reaktionsrollen erneut auf Nutzer an, die bereits reagiert haben.",
+            "en-US": "Re-apply reaction roles to users who already reacted.",
+        }},
+    )
     @commands.guild_only()
     @commands.has_permissions(manage_roles=True)
     async def reactionrole_sync(self, ctx: commands.Context):

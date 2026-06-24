@@ -140,7 +140,7 @@ class GuildTools(commands.Cog):
         await self.config.guild(after.guild).last_seen.set(data)
 
     # ---------- /export-userlist ----------
-    @app_commands.command(name="export-userlist", description="Export all users to a CSV.")
+    @app_commands.command(name="export-userlist", description="Export all users to a CSV.", extras={"i18n_desc": {"de-DE": "Alle Benutzer als CSV exportieren.", "en-US": "Export all users to a CSV."}})
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def export_userlist(self, interaction: discord.Interaction):
@@ -180,7 +180,7 @@ class GuildTools(commands.Cog):
         await interaction.followup.send(tr_lang(lang, "Hier ist dein Export (nur für dich sichtbar).", "Here is your export (only visible to you)."), file=file, ephemeral=True)
 
     # ---------- Abwesenheiten ----------
-    @app_commands.command(name="add-absence", description="Add an absence (DD-MM-YYYY / DD.MM.YYYY / DD/MM/YYYY).")
+    @app_commands.command(name="add-absence", description="Add an absence (DD-MM-YYYY / DD.MM.YYYY / DD/MM/YYYY).", extras={"i18n_desc": {"de-DE": "Abwesenheit eintragen (TT-MM-JJJJ / TT.MM.JJJJ / TT/MM/JJJJ).", "en-US": "Add an absence (DD-MM-YYYY / DD.MM.YYYY / DD/MM/YYYY)."}})
     @app_commands.describe(von="Start date", bis="End date")
     @app_commands.guild_only()
     async def add_absence(self, interaction: discord.Interaction, von: str, bis: str):
@@ -232,7 +232,7 @@ class GuildTools(commands.Cog):
             ),
         )
 
-    @app_commands.command(name="list-absence", description="Show your absences (ephemeral).")
+    @app_commands.command(name="list-absence", description="Show your absences (ephemeral).", extras={"i18n_desc": {"de-DE": "Deine Abwesenheiten anzeigen (ephemer).", "en-US": "Show your absences (ephemeral)."}})
     @app_commands.guild_only()
     async def list_absence(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -269,7 +269,7 @@ class GuildTools(commands.Cog):
         embed = discord.Embed(title=tr_lang(lang, "Deine Abwesenheiten", "Your absences"), description=desc, color=discord.Color.blurple())
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="get-absence", description="CSV with all absences (mods only).")
+    @app_commands.command(name="get-absence", description="CSV with all absences (mods only).", extras={"i18n_desc": {"de-DE": "CSV mit allen Abwesenheiten (nur Mods).", "en-US": "CSV with all absences (mods only)."}})
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def get_absence(self, interaction: discord.Interaction):
@@ -294,7 +294,7 @@ class GuildTools(commands.Cog):
         await interaction.followup.send(tr_lang(lang, "Hier ist die Abwesenheitsliste (nur für dich sichtbar).", "Here is the absence list (only visible to you)."), file=file, ephemeral=True)
 
     # ---------- Blizzard API: ENV-first Credentials ----------
-    @commands.hybrid_command(name="setblizzard", description="Owner-only: set the Blizzard API client ID/secret (ENV fallback).")
+    @commands.hybrid_command(name="setblizzard", description="Owner-only: set the Blizzard API client ID/secret (ENV fallback).", extras={"i18n_desc": {"de-DE": "Nur Owner: Blizzard-API Client-ID/Secret setzen (ENV-Fallback).", "en-US": "Owner-only: set the Blizzard API client ID/secret (ENV fallback)."}})
     @commands.is_owner()
     @app_commands.describe(client_id="Blizzard API client ID", client_secret="Blizzard API client secret")
     async def set_blizzard_credentials(self, ctx: commands.Context, client_id: str, client_secret: str):
@@ -308,7 +308,7 @@ class GuildTools(commands.Cog):
         self._token_mem_exp = 0
         await ctx.send(tr_lang(await self._lang(ctx.guild), "Blizzard-Zugangsdaten gespeichert.", "Blizzard credentials saved."), ephemeral=True)
 
-    @commands.hybrid_command(name="clearblizzard", description="Owner-only: remove the Blizzard API credentials from the config.")
+    @commands.hybrid_command(name="clearblizzard", description="Owner-only: remove the Blizzard API credentials from the config.", extras={"i18n_desc": {"de-DE": "Nur Owner: Blizzard-API-Zugangsdaten aus der Config entfernen.", "en-US": "Owner-only: remove the Blizzard API credentials from the config."}})
     @commands.is_owner()
     async def clear_blizzard_credentials(self, ctx: commands.Context):
         """Owner-only: Remove the Blizzard API credentials from the config."""
@@ -320,7 +320,7 @@ class GuildTools(commands.Cog):
         self._token_mem_exp = 0
         await ctx.send(tr_lang(await self._lang(ctx.guild), "Blizzard-Zugangsdaten entfernt.", "Blizzard credentials cleared."), ephemeral=True)
 
-    @app_commands.command(name="set-wow-defaults", description="Set the default region/realm for /whois.")
+    @app_commands.command(name="set-wow-defaults", description="Set the default region/realm for /whois.", extras={"i18n_desc": {"de-DE": "Standard-Region/-Realm für /whois festlegen.", "en-US": "Set the default region/realm for /whois."}})
     @app_commands.describe(region="eu/us/kr/tw", realm="Realm name (e.g. 'Blackmoore')")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
@@ -414,7 +414,7 @@ class GuildTools(commands.Cog):
         prof["_equipped_ilvl"] = ilvl
         return prof
 
-    @app_commands.command(name="whois", description="Show WoW character info (level, class, guild, iLvl if available).")
+    @app_commands.command(name="whois", description="Show WoW character info (level, class, guild, iLvl if available).", extras={"i18n_desc": {"de-DE": "WoW-Charakterinfo anzeigen (Level, Klasse, Gilde, iLvl falls verfügbar).", "en-US": "Show WoW character info (level, class, guild, iLvl if available)."}})
     @app_commands.describe(charname="Character name", realm="Optional realm (otherwise the guild default)")
     @app_commands.guild_only()
     async def whois(self, interaction: discord.Interaction, charname: str, realm: str | None = None):

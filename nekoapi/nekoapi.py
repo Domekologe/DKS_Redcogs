@@ -94,7 +94,13 @@ class NekoAPI(commands.Cog):
     # ------------------------------------------------------------------
     # Prefix Command
     # ------------------------------------------------------------------
-    @commands.command(name="nekoapi")
+    @commands.command(
+        name="nekoapi",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Bild nach Rating (Standard = safe).",
+            "en-US": "Show an image by rating (default = safe).",
+        }},
+    )
     async def nekoapi_prefix(self, ctx, rating: str = "safe"):
         """Show an image by rating (default = safe)."""
 
@@ -134,7 +140,11 @@ class NekoAPI(commands.Cog):
     # ------------------------------------------------------------------
     @app_commands.command(
         name="nekoapi",
-        description="Show a random image (rating = safe)."
+        description="Show a random image (rating = safe).",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Bild nach Rating (Standard = safe).",
+            "en-US": "Show an image by rating (default = safe).",
+        }},
     )
     async def nekoapi_slash_safe(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -165,7 +175,11 @@ class NekoAPI(commands.Cog):
     # ------------------------------------------------------------------
     @app_commands.command(
         name="nekoapi-rating",
-        description="Show an image with the selected rating."
+        description="Show an image with the selected rating.",
+        extras={"i18n_desc": {
+            "de-DE": "Zeigt ein Bild mit dem gewählten Rating.",
+            "en-US": "Show an image with the selected rating.",
+        }},
     )
     @app_commands.describe(rating="Choose a rating")
     @app_commands.autocomplete(rating=rating_autocomplete)
