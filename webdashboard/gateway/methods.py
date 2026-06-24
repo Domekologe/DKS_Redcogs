@@ -811,6 +811,16 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 elif hasattr(cog, "walk_app_commands"):
                     cmds = list(cog.walk_app_commands())
                 cmds += list(getattr(cog, "__cog_context_menus__", []) or [])
+                # Hybrid commands keep their app command on the TEXT command (not in
+                # get_app_commands()) -> collect them so DISABLED hybrids (e.g. ban,
+                # timeout) also show up and can be toggled.
+                try:
+                    for tc in cog.get_commands():
+                        ac = getattr(tc, "app_command", None)
+                        if ac is not None:
+                            cmds.append(ac)
+                except Exception:
+                    pass
                 for c in cmds:
                     _add(c, cog_name)
             except Exception:
@@ -825,7 +835,28 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    items.sort(key=lambda x: (x["cog"].lower(), x["name"]))
+    # 3) Discord registrations not backed by any loaded cog -> "(Not existent)"
+    # ghosts, so they are visible here and can be cleared via a sync.
+    try:
+        locale = params.get("locale") or "en-US"
+        ghost_label = "(Nicht existierend)" if str(locale).lower().startswith("de") else "(Not existent)"
+        present = {it["name"] for it in items}
+        for ac in await _fetch_registered_commands(bot):
+            if getattr(getattr(ac, "type", None), "value", 1) != 1:
+                continue  # chat-input only
+            if ac.name in present:
+                continue
+            items.append({
+                "name": ac.name,
+                "type": 1,
+                "cog": ghost_label,
+                "enabled": True,
+                "orphan": True,
+            })
+    except Exception:
+        log.exception("Fehler beim Abgleich der Discord-Registrierungen (slash.list)")
+
+    items.sort(key=lambda x: (bool(x.get("orphan")), x["cog"].lower(), x["name"]))
     return {"commands": items, "count": len(items), "managed": True}
 
 
