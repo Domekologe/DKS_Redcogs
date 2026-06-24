@@ -3,6 +3,7 @@ import unicodedata
 
 import dictdiffer
 import discord
+from discord import app_commands
 from discord.ext import tasks
 from rapidfuzz import fuzz, process
 from redbot.core import commands
@@ -17,15 +18,16 @@ log = logging.getLogger("red.karlo-cogs.wowtools")
 
 
 class GuildManage:
-    @commands.group()
+    @commands.hybrid_group(description="Configure guild management.")
     @commands.admin()
     @commands.guild_only()
     async def gmset(self, ctx: commands.Context):
         """Configure guild management."""
         pass
 
-    @gmset.command(name="rankstring")
+    @gmset.command(name="rankstring", description="Bind a rank to a string.")
     @commands.admin()
+    @app_commands.describe(rank="Rank number (1-10)", rank_string="The label to bind to the rank")
     async def gmset_rankstring(self, ctx: commands.Context, rank: int, *, rank_string: str):
         """Bind a rank to a string."""
         if rank not in range(1, 11):
@@ -38,8 +40,9 @@ class GuildManage:
             )
         )
 
-    @gmset.command(name="rankrole", hidden=True)
+    @gmset.command(name="rankrole", hidden=True, description="Bind a rank to a role.")
     @commands.admin()
+    @app_commands.describe(rank="Rank number (1-10)", role="The role to bind to the rank")
     async def gmset_rankrole(self, ctx: commands.Context, rank: int, role: discord.Role):
         """Bind a rank to a role."""
         if rank not in range(1, 11):
@@ -48,7 +51,7 @@ class GuildManage:
         await self.config.guild(ctx.guild).guild_rankroles.set_raw(rank, value=role.id)
         await ctx.send(_("**{role}** bound to **Rank {rank}**.").format(role=role.name, rank=rank))
 
-    @gmset.command(name="view")
+    @gmset.command(name="view", description="View guild rank settings.")
     @commands.admin()
     async def gmset_view(self, ctx: commands.Context):
         """View guild rank settings."""
@@ -77,8 +80,9 @@ class GuildManage:
         else:
             await ctx.send(f"Rank Settings:\n```{table}```")
 
-    @gmset.command()
+    @gmset.command(description="Set the in-game guild name for guild management.")
     @commands.admin()
+    @app_commands.describe(guild_name="The in-game guild name")
     async def guild_name(self, ctx: commands.Context, *, guild_name: str):
         """Set the guild name to be used in the guild management commands."""
         try:
@@ -93,8 +97,9 @@ class GuildManage:
         except Exception as e:
             await ctx.send(_("Command failed successfully. {e}").format(e=e))
 
-    @gmset.command()
+    @gmset.command(description="Set the realm of the guild.")
     @commands.admin()
+    @app_commands.describe(guild_realm="The realm of the guild (leave empty to clear)")
     async def guild_realm(self, ctx: commands.Context, guild_realm: str | None = None):
         """Set the realm of the guild."""
         try:
@@ -137,8 +142,9 @@ class GuildManage:
         }
         return roster
 
-    @gmset.command()
+    @gmset.command(description="Set the channel for guild join/leave/promotion logs.")
     @commands.guild_only()
+    @app_commands.describe(channel="The channel where guild logs will be sent")
     async def guildlog(self, ctx: commands.Context, channel: discord.TextChannel | discord.Thread):
         """Set the channel for guild logs.
 
@@ -160,8 +166,9 @@ class GuildManage:
         await self.config.guild(ctx.guild).guild_roster.set(guild_roster)
         await ctx.send(_("Guild log channel set to {channel}.").format(channel=channel.mention))
 
-    @gmset.command()
+    @gmset.command(description="Set the channel for welcoming new in-game guild members.")
     @commands.guild_only()
+    @app_commands.describe(channel="The channel where welcome messages will be sent")
     async def guildlog_welcome(
         self, ctx: commands.Context, channel: discord.TextChannel | discord.Thread
     ):
@@ -424,14 +431,15 @@ class GuildManage:
         rank_strings: dict = await self.config.guild(guild).guild_rankstrings()
         return rank_strings.get(str(rank), f"Rank {rank}")
 
-    @commands.group()
+    @commands.hybrid_group(description="Guild management commands.")
     @commands.guild_only()
     async def gmanage(self, ctx: commands.Context):
         """Guild management commands."""
         pass
 
-    @gmanage.command(name="find")
+    @gmanage.command(name="find", description="Find a member in the guild.")
     @commands.guild_only()
+    @app_commands.describe(member_name="The character or member name to search for")
     async def gmanage_find(self, ctx: commands.Context, member_name: str):
         """Find a member in the guild."""
         msg = ""

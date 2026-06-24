@@ -36,7 +36,7 @@ except Exception:
 
 
 DEFAULT_GUILD = {
-    "language": "de-DE",  # per-guild language of this cog (de-DE | en-US)
+    "language": "en-US",  # per-guild language of this cog (de-DE | en-US)
     "notifications": {
         # "<channel_id>": {"enabled": true, "text": "..."}
     },
@@ -56,7 +56,7 @@ def _is_voiceish(channel: discord.abc.GuildChannel) -> bool:
 
 
 class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text"):
-    def __init__(self, default_text: str = "", lang: str = "de-DE") -> None:
+    def __init__(self, default_text: str = "", lang: str = "en-US") -> None:
         super().__init__()
         self.value: Optional[str] = None
         self.text = discord.ui.TextInput(
@@ -80,7 +80,7 @@ class _JoinNotificationTextModal(discord.ui.Modal, title="Join Notification Text
 
 
 class JoinNotificationSetupView(discord.ui.View):
-    def __init__(self, cog: "ChannelJoinNotification", guild: discord.Guild, user_id: int, lang: str = "de-DE") -> None:
+    def __init__(self, cog: "ChannelJoinNotification", guild: discord.Guild, user_id: int, lang: str = "en-US") -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
@@ -262,7 +262,7 @@ class ChannelJoinNotification(commands.Cog):
     @app_commands.guild_only()
     async def join_notification(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            lang = await self.config.guild(interaction.guild).language() if interaction.guild else "de-DE"
+            lang = await self.config.guild(interaction.guild).language() if interaction.guild else "en-US"
             await interaction.response.send_message(
                 tr_lang(lang, "Nur auf einem Server nutzbar.", "Only usable within a server."), ephemeral=True
             )
@@ -414,7 +414,7 @@ class ChannelJoinNotification(commands.Cog):
                 Field.switch("delete_entry", "Delete/reset entry completely", value=False)
             ])
 
-        return PanelSchema(description="Pro Sprachkanal: DM beim Beitritt aktivieren und Text festlegen.", fields=fields)
+        return PanelSchema(description=tr(ctx, "Pro Sprachkanal: DM beim Beitritt aktivieren und Text festlegen.", "Per voice channel: enable a join DM and set its text."), fields=fields)
 
     @cjn_panel.on_submit
     async def _save_cjn(self, ctx, data):
@@ -435,7 +435,7 @@ class ChannelJoinNotification(commands.Cog):
             return SubmitResult.ok()
 
         if channel_id == "0":
-            return SubmitResult.fail("Bitte wähle einen Sprachkanal aus.")
+            return SubmitResult.fail(tr(ctx, "Bitte wähle einen Sprachkanal aus.", "Please select a voice channel."))
 
         notifications = await self.config.guild(ctx.guild).notifications()
         if not isinstance(notifications, dict):
@@ -447,7 +447,7 @@ class ChannelJoinNotification(commands.Cog):
                 del notifications[channel_id]
                 await self.config.guild(ctx.guild).notifications.set(notifications)
             self._selected_channel[(guild_id, user_id)] = "0"
-            return SubmitResult.ok("Eintrag gelöscht.")
+            return SubmitResult.ok(tr(ctx, "Eintrag gelöscht.", "Entry deleted."))
 
         # Normal save
         notifications[channel_id] = {
@@ -455,7 +455,7 @@ class ChannelJoinNotification(commands.Cog):
             "text": str(data.get("text", "")).strip()[:1500]
         }
         await self.config.guild(ctx.guild).notifications.set(notifications)
-        return SubmitResult.ok("Eintrag gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Eintrag gespeichert.", "Entry saved."))
 
     # --- Guild list: configured join notifications ---------------------- #
     @dashboard_list(
@@ -493,8 +493,8 @@ class ChannelJoinNotification(commands.Cog):
         data = await self.config.guild(ctx.guild).notifications()
         entry = (data or {}).get(str(item_id)) or {}
         variables = [
-            {"token": "<Username>", "desc": "Nutzer"},
-            {"token": "<Channelname>", "desc": "Kanal"},
+            {"token": "<Username>", "desc": tr(ctx, "Nutzer", "User")},
+            {"token": "<Channelname>", "desc": tr(ctx, "Kanal", "Channel")},
         ]
         return PanelSchema(
             description=tr(ctx, "Benachrichtigung für diesen Sprachkanal bearbeiten.", "Edit the notification for this voice channel."),
@@ -514,7 +514,7 @@ class ChannelJoinNotification(commands.Cog):
             if "text" in data:
                 entry["text"] = str(data["text"])[:1500]
             notifications[str(item_id)] = entry
-        return SubmitResult.ok("Gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     @cjn_list.on_delete
     async def _cjn_delete(self, ctx, item_id):
@@ -522,8 +522,8 @@ class ChannelJoinNotification(commands.Cog):
             if str(item_id) in notifications:
                 del notifications[str(item_id)]
             else:
-                return SubmitResult.fail("Eintrag nicht gefunden.")
-        return SubmitResult.ok("Benachrichtigung entfernt.")
+                return SubmitResult.fail(tr(ctx, "Eintrag nicht gefunden.", "Entry not found."))
+        return SubmitResult.ok(tr(ctx, "Benachrichtigung entfernt.", "Notification removed."))
 
     async def cog_unload(self) -> None:
         unregister_dashboard(self)
@@ -607,7 +607,7 @@ class ChannelJoinNotification(commands.Cog):
             page_notice = ""
             page_notice_kind = "success"
 
-            voice_choices = [("0", "-- Channel wählen --")]
+            voice_choices = [("0", "-- Select channel --")]
             for ch in sorted(guild.voice_channels, key=lambda c: (c.position, c.name.lower())):
                 voice_choices.append((str(ch.id), f"{ch.name} (voice) ({ch.id})"))
 
@@ -629,7 +629,7 @@ class ChannelJoinNotification(commands.Cog):
                     enabled = wtforms.BooleanField("Enabled")
                     text = wtforms.TextAreaField(
                         "DM Text (placeholders: <Username>, <Channelname>)",
-                        default="Hi <Username>! Willkommen in <Channelname>.",
+                        default="Hi <Username>! Welcome to <Channelname>.",
                     )
                     save = wtforms.SubmitField("Add/Update")
 
@@ -657,10 +657,10 @@ class ChannelJoinNotification(commands.Cog):
                         if rid != "0" and rid in notifications:
                             notifications.pop(rid, None)
                             await self.config.guild(guild).notifications.set(notifications)
-                            page_notice = "Eintrag entfernt."
+                            page_notice = "Entry removed."
                             page_notice_kind = "success"
                         else:
-                            page_notice = "Kein gültiger Eintrag zum Entfernen ausgewählt."
+                            page_notice = "No valid entry selected for removal."
                             page_notice_kind = "warning"
                     elif save_clicked:
                         cid = str(posted.get("cjn-channel_id") or posted.get("channel_id") or form.channel_id.data or "0")
@@ -668,7 +668,7 @@ class ChannelJoinNotification(commands.Cog):
                         enabled = str(enabled_raw).lower() in ("true", "1", "on", "yes") or enabled_raw is True
                         text = str(posted.get("cjn-text") or posted.get("text") or form.text.data or "").strip()
                         if cid == "0":
-                            page_notice = "Bitte einen Channel auswählen."
+                            page_notice = "Please select a channel."
                             page_notice_kind = "warning"
                         else:
                             notifications[cid] = {
@@ -676,7 +676,7 @@ class ChannelJoinNotification(commands.Cog):
                                 "text": text,
                             }
                             await self.config.guild(guild).notifications.set(notifications)
-                            page_notice = "Eintrag gespeichert."
+                            page_notice = "Entry saved."
                             page_notice_kind = "success"
 
                 rows = []
@@ -697,7 +697,7 @@ class ChannelJoinNotification(commands.Cog):
                     )
                 table_html = (
                     "<table class='tbl'><thead><tr><th>Channel</th><th>Status</th><th>Text Preview</th></tr></thead>"
-                    f"<tbody>{''.join(rows) if rows else '<tr><td colspan=3 class=muted>Keine Einträge</td></tr>'}</tbody></table>"
+                    f"<tbody>{''.join(rows) if rows else '<tr><td colspan=3 class=muted>No entries</td></tr>'}</tbody></table>"
                 )
                 notice_html = (
                     f"<div class='notice {'ok' if page_notice_kind == 'success' else 'warn'}'>{html.escape(page_notice)}</div>"
@@ -905,8 +905,8 @@ input:focus, select:focus, textarea:focus {{
     <div>
       <div class="title">Channel Join Notification</div>
       <div class="subtitle">
-        Bei Join in einen konfigurierten <b>Voice-Channel</b> sendet der Bot eine DM.
-        <br>Platzhalter: <code class="code">&lt;Username&gt;</code>, <code class="code">&lt;Channelname&gt;</code>
+        When a user joins a configured <b>voice channel</b>, the bot sends a DM.
+        <br>Placeholders: <code class="code">&lt;Username&gt;</code>, <code class="code">&lt;Channelname&gt;</code>
       </div>
     </div>
     <div class="muted">Server: <b>{html.escape(guild.name)}</b></div>
@@ -919,7 +919,7 @@ input:focus, select:focus, textarea:focus {{
         <div class="row"><label>Channel</label><br>{form.channel_id()}</div>
         <div class="row">
           <div class="toggle"><span>{form.enabled()}</span><span class="tlabel">Enabled</span></div>
-          <div class="muted" style="margin-top: 6px;">Wenn aus: keine DM beim Join.</div>
+          <div class="muted" style="margin-top: 6px;">When off: no DM on join.</div>
         </div>
         <div class="row"><label>DM Text</label><br>{form.text()}</div>
         <div class="btnrow">
@@ -930,19 +930,19 @@ input:focus, select:focus, textarea:focus {{
     <div class="card">
       <form method="post">
         {form.hidden_tag()}
-        <div class="row"><label>Eintrag entfernen</label><br>{form.remove_channel_id()}</div>
+        <div class="row"><label>Remove entry</label><br>{form.remove_channel_id()}</div>
         <div class="btnrow">
           {form.remove()}
         </div>
         <div class="muted" style="margin-top:10px;">
-          Tipp: Du kannst einen Channel auch einfach deaktivieren statt zu entfernen.
+          Tip: You can also just disable a channel instead of removing it.
         </div>
       </form>
     </div>
   </div>
   <div style="height: 14px;"></div>
   <div class="card">
-    <div style="font-weight:700; margin-bottom:10px;">Aktuelle Einträge</div>
+    <div style="font-weight:700; margin-bottom:10px;">Current entries</div>
     {table_html}
   </div>
 </div>
@@ -968,7 +968,7 @@ input:focus, select:focus, textarea:focus {{
     const entry = cfg[cid];
     if (!entry) {{
       enabledInput.checked = true;
-      textInput.value = "Hi <Username>! Willkommen in <Channelname>.";
+      textInput.value = "Hi <Username>! Welcome to <Channelname>.";
       return;
     }}
     enabledInput.checked = !!entry.enabled;

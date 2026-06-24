@@ -125,12 +125,19 @@ class ReadyDayModal(discord.ui.Modal):
         cog: "WowGuildAutomation",
         member: discord.Member,
         day_key: str,
+        lang: str = "en-US",
     ) -> None:
-        label = DAY_LABEL_DE.get(day_key, day_key)
-        super().__init__(title=f"{label} — Bereitschaft")
+        labels = DAY_LABEL_EN if str(lang).startswith("en") else DAY_LABEL_DE
+        label = labels.get(day_key, day_key)
+        super().__init__(title=tr_lang(lang, f"{label} — Bereitschaft", f"{label} — availability"))
         self.cog = cog
         self.member = member
         self.day_key = day_key
+        self.lang = lang
+        self.active.label = tr_lang(lang, "Aktiv? (ja/nein)", "Active? (yes/no)")
+        self.active.placeholder = tr_lang(lang, "ja", "yes")
+        self.start.label = tr_lang(lang, "Von (HH:MM, leer = egal)", "From (HH:MM, empty = any)")
+        self.end.label = tr_lang(lang, "Bis (HH:MM, leer = egal)", "Until (HH:MM, empty = any)")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         glang = await self.cog._guild_lang(self.member.guild)
@@ -157,18 +164,22 @@ class ReadyDayModal(discord.ui.Modal):
 
 
 class MemberReadyTimesView(discord.ui.View):
-    def __init__(self, cog: "WowGuildAutomation", member: discord.Member) -> None:
+    def __init__(self, cog: "WowGuildAutomation", member: discord.Member, lang: str = "en-US") -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.member = member
+        self.lang = lang
         self._day_key = "monday"
+        day_labels = DAY_LABEL_EN if str(lang).startswith("en") else DAY_LABEL_DE
         opts = [
-            discord.SelectOption(label=DAY_LABEL_DE[k], value=k, default=(k == "monday"))
+            discord.SelectOption(label=day_labels[k], value=k, default=(k == "monday"))
             for k in DAY_KEYS
         ]
-        self.day_sel = discord.ui.Select(placeholder="Wochentag", options=opts, row=0)
+        self.day_sel = discord.ui.Select(placeholder=tr_lang(lang, "Wochentag", "Weekday"), options=opts, row=0)
         self.day_sel.callback = self._on_day
         self.add_item(self.day_sel)
+        self.edit_btn.label = tr_lang(lang, "Gewählten Tag bearbeiten", "Edit selected day")
+        self.refresh_btn.label = tr_lang(lang, "Übersicht aktualisieren", "Refresh overview")
 
     async def _on_day(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.member.id:
@@ -190,7 +201,7 @@ class MemberReadyTimesView(discord.ui.View):
             return
         raw = await self.cog.config.member(self.member).ready_times()
         data = _merge_ready_times(raw)
-        await interaction.response.send_modal(ReadyDayModal(self.cog, self.member, self._day_key))
+        await interaction.response.send_modal(ReadyDayModal(self.cog, self.member, self._day_key, self.lang))
 
     @discord.ui.button(label="Übersicht aktualisieren", style=discord.ButtonStyle.secondary, row=1)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -217,6 +228,6 @@ async def send_member_readytimes_panel(
     header = tr_lang(glang, "**Bereitschaftszeiten**", "**Ready times**")
     await interaction.response.send_message(
         f"{header} — {member.display_name}\n\n{block}",
-        view=MemberReadyTimesView(cog, member),
+        view=MemberReadyTimesView(cog, member, glang),
         ephemeral=True,
     )

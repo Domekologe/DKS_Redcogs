@@ -96,7 +96,7 @@ class WoWTools(
             "status_guild": [],
         }
         default_guild = {
-            "language": "de-DE",
+            "language": "en-US",
             "region": None,
             "realm": None,
             "real_guild_name": None,
@@ -556,7 +556,7 @@ class WoWTools(
         ]
         return PanelSchema(
             fields=[
-                Field.select("language", L("Sprache", "Language"), lang_opts, value=str(await g.language() or "de-DE"), reload_on_change=True),
+                Field.select("language", L("Sprache", "Language"), lang_opts, value=str(await g.language() or "en-US"), reload_on_change=True),
                 Field.switch("on_message", "Auto-reply to WoW terms", value=bool(await g.on_message())),
                 Field.select("region", "Region", region_opts, value=str(await g.region() or "")),
                 Field.text("realm", "Realm", value=str(await g.realm() or "")),
@@ -604,7 +604,7 @@ class WoWTools(
         if "countdown_channel" in data:
             v = data["countdown_channel"]
             await g.countdown_channel.set(int(v) if v else None)
-        return SubmitResult.ok("Gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # --- Global panel (bot owner): API tokens ---------------------------- #
     @dashboard_panel("api_tokens", L("WoW API-Tokens", "WoW API Tokens"), scope="global", mount="bot_settings", permission="bot_owner")
@@ -635,7 +635,7 @@ class WoWTools(
             self.raiderio_api = RaiderIO(api_key=str(data.get("raiderio_api_key", "")).strip())
         except Exception:
             pass
-        return SubmitResult.ok("API-Tokens gespeichert.")
+        return SubmitResult.ok(tr(ctx, "API-Tokens gespeichert.", "API tokens saved."))
 
     # --- Guild list: scoreboard blacklist (character names) -------------- #
     @dashboard_list(
@@ -657,10 +657,10 @@ class WoWTools(
             # remove by value (list of names)
             matches = [n for n in bl if str(n) == str(item_id)]
             if not matches:
-                return SubmitResult.fail("Eintrag nicht gefunden.")
+                return SubmitResult.fail(tr(ctx, "Eintrag nicht gefunden.", "Entry not found."))
             for n in matches:
                 bl.remove(n)
-        return SubmitResult.ok("Von der Blacklist entfernt.")
+        return SubmitResult.ok(tr(ctx, "Von der Blacklist entfernt.", "Removed from the blacklist."))
 
     async def cog_unload(self):
         unregister_dashboard(self)

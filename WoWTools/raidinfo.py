@@ -249,7 +249,7 @@ def _group_by_expansion_and_raid(stats: List[dict], only_expansion: Optional[str
 
     return sorted_out
 
-def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]], lang: str = "de-DE") -> str:
+def _format_embed_text(grouped: Dict[str, Dict[str, Dict[str, Dict[str, int]]]], lang: str = "en-US") -> str:
     """
     Expansion
     RAID
@@ -326,7 +326,7 @@ class RaidInfo(commands.Cog):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
-        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         region = (region or "").lower()
         locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")

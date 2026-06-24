@@ -31,7 +31,7 @@ class ReactionRole(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=983472983472, force_registration=True)
         self.config.register_guild(
-            language="de-DE",  # per-guild language of this cog (de-DE | en-US)
+            language="en-US",  # per-guild language of this cog (de-DE | en-US)
             reactionroles={},
             panels={},
             templates={
@@ -126,7 +126,7 @@ class ReactionRole(commands.Cog):
             if k in data:
                 cur[k] = str(data[k])[:500]
         await self.config.guild(ctx.guild).templates.set(cur)
-        return SubmitResult.ok("Gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # --- Guild panel: create ReactionRole directly ----------------------- #
     @dashboard_panel(
@@ -146,7 +146,7 @@ class ReactionRole(commands.Cog):
                         "ReactionRole an und setzt die Reaktion an der Nachricht.",
                         "Provide channel, message ID, emoji and role. Saving creates the "
                         "ReactionRole and adds the reaction to the message."),
-            submit_label="ReactionRole anlegen",
+            submit_label=tr(ctx, "ReactionRole anlegen", "Create ReactionRole"),
             fields=[
                 Field.select("channel", "Channel", ch_opts, value=""),
                 Field.text("message_id", "Message ID", value="", placeholder="123456789012345678"),
@@ -163,28 +163,28 @@ class ReactionRole(commands.Cog):
         emoji = str(data.get("emoji", "")).strip()
         msg_raw = str(data.get("message_id", "")).strip()
         if not ch_id or not role_id or not emoji or not msg_raw:
-            return SubmitResult.fail("Bitte Kanal, Nachrichten-ID, Emoji und Rolle ausfüllen.")
+            return SubmitResult.fail(tr(ctx, "Bitte Kanal, Nachrichten-ID, Emoji und Rolle ausfüllen.", "Please fill in channel, message ID, emoji and role."))
         channel = guild.get_channel(int(ch_id))
         if channel is None:
-            return SubmitResult.fail("Kanal nicht gefunden.", errors={"channel": "Ungültig"})
+            return SubmitResult.fail(tr(ctx, "Kanal nicht gefunden.", "Channel not found."), errors={"channel": tr(ctx, "Ungültig", "Invalid")})
         role = guild.get_role(int(role_id))
         if role is None:
-            return SubmitResult.fail("Rolle nicht gefunden.", errors={"role": "Ungültig"})
+            return SubmitResult.fail(tr(ctx, "Rolle nicht gefunden.", "Role not found."), errors={"role": tr(ctx, "Ungültig", "Invalid")})
         try:
             message_id = int(msg_raw)
         except ValueError:
-            return SubmitResult.fail("Nachrichten-ID muss eine Zahl sein.",
-                                     errors={"message_id": "Zahl erwartet"})
+            return SubmitResult.fail(tr(ctx, "Nachrichten-ID muss eine Zahl sein.", "Message ID must be a number."),
+                                     errors={"message_id": tr(ctx, "Zahl erwartet", "Number expected")})
         try:
             message = await channel.fetch_message(message_id)
         except discord.NotFound:
-            return SubmitResult.fail("Nachricht nicht gefunden.", errors={"message_id": "Nicht gefunden"})
+            return SubmitResult.fail(tr(ctx, "Nachricht nicht gefunden.", "Message not found."), errors={"message_id": tr(ctx, "Nicht gefunden", "Not found")})
         except discord.Forbidden:
-            return SubmitResult.fail("Keine Rechte, die Nachricht zu lesen.")
+            return SubmitResult.fail(tr(ctx, "Keine Rechte, die Nachricht zu lesen.", "No permission to read that message."))
         try:
             await message.add_reaction(emoji)
         except discord.HTTPException:
-            return SubmitResult.fail("Ungültiges Emoji oder keine Rechte.", errors={"emoji": "Ungültig"})
+            return SubmitResult.fail(tr(ctx, "Ungültiges Emoji oder keine Rechte.", "Invalid emoji or missing permissions."), errors={"emoji": tr(ctx, "Ungültig", "Invalid")})
         rr_id = str(uuid.uuid4())[:8]
         async with self.config.guild(guild).reactionroles() as d:
             d[rr_id] = {
@@ -193,7 +193,7 @@ class ReactionRole(commands.Cog):
                 "emoji": str(emoji),
                 "role_id": role.id,
             }
-        return SubmitResult.ok(f"ReactionRole angelegt (ID {rr_id}).")
+        return SubmitResult.ok(tr(ctx, f"ReactionRole angelegt (ID {rr_id}).", f"ReactionRole created (ID {rr_id})."))
 
     # --- Guild list: view/delete existing ReactionRoles ------------------ #
     @dashboard_list(
@@ -230,7 +230,7 @@ class ReactionRole(commands.Cog):
         async with self.config.guild(ctx.guild).reactionroles() as d:
             entry = d.pop(item_id, None)
         if entry is None:
-            return SubmitResult.fail("Eintrag nicht gefunden.")
+            return SubmitResult.fail(tr(ctx, "Eintrag nicht gefunden.", "Entry not found."))
         # Clean up the reaction on the message (best effort).
         try:
             ch = ctx.guild.get_channel(entry.get("channel_id"))
@@ -239,7 +239,7 @@ class ReactionRole(commands.Cog):
                 await msg.clear_reaction(entry.get("emoji"))
         except Exception:
             pass
-        return SubmitResult.ok("ReactionRole entfernt.")
+        return SubmitResult.ok(tr(ctx, "ReactionRole entfernt.", "ReactionRole removed."))
 
     @reactionrole_list.edit_form
     async def _edit_reactionrole_form(self, ctx, item_id):
@@ -266,14 +266,14 @@ class ReactionRole(commands.Cog):
     async def _edit_reactionrole(self, ctx, item_id, data):
         new_role = data.get("role_id")
         if not new_role or not str(new_role).isdigit():
-            return SubmitResult.fail("Bitte eine gültige Rolle wählen.")
+            return SubmitResult.fail(tr(ctx, "Bitte eine gültige Rolle wählen.", "Please choose a valid role."))
         async with self.config.guild(ctx.guild).reactionroles() as d:
             entry = d.get(item_id)
             if not isinstance(entry, dict):
-                return SubmitResult.fail("Eintrag nicht gefunden.")
+                return SubmitResult.fail(tr(ctx, "Eintrag nicht gefunden.", "Entry not found."))
             entry["role_id"] = int(new_role)
             d[item_id] = entry
-        return SubmitResult.ok("Rolle aktualisiert.")
+        return SubmitResult.ok(tr(ctx, "Rolle aktualisiert.", "Role updated."))
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:
@@ -810,7 +810,7 @@ class ReactionRole(commands.Cog):
 <label>Channel</label><br>
 <select id="channel_id" name="channel_id">{"".join(channel_options)}</select><br><br>
 <label>Message (Discord Markdown supported)</label><br>
-<textarea id="panel_content" name="panel_content" rows="6" placeholder="**Willkommen**&#10;Reagiere für deine Rolle."></textarea><br><br>
+<textarea id="panel_content" name="panel_content" rows="6" placeholder="**Welcome**&#10;React to get your role."></textarea><br><br>
 <label>ReactionRole mappings (emoji + role, multiple with +)</label><br>
 <div id="mapping_rows">
   <div class="row">

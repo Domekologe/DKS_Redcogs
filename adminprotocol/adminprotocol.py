@@ -11,7 +11,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
-    L, tr,
+    L, tr, tr_lang,
 )
 
 log = logging.getLogger("red.domekologe.adminprotocol")
@@ -80,21 +80,21 @@ EVENT_CATEGORIES = {
     ]),
 }
 
-def format_duration(seconds: float) -> str:
+def format_duration(seconds: float, lang: str = "en-US") -> str:
     if seconds <= 0:
-        return "Permanent / Sofort"
+        return tr_lang(lang, "Permanent / Sofort", "Permanent / Instant")
     parts = []
     days, remainder = divmod(int(seconds), 86400)
     if days > 0:
-        parts.append(f"{days} Tage")
+        parts.append(tr_lang(lang, f"{days} Tage", f"{days} days"))
     hours, remainder = divmod(remainder, 3600)
     if hours > 0:
-        parts.append(f"{hours} Stunden")
+        parts.append(tr_lang(lang, f"{hours} Stunden", f"{hours} hours"))
     minutes, secs = divmod(remainder, 60)
     if minutes > 0:
-        parts.append(f"{minutes} Minuten")
+        parts.append(tr_lang(lang, f"{minutes} Minuten", f"{minutes} minutes"))
     if secs > 0 and not parts:
-        parts.append(f"{secs} Sekunden")
+        parts.append(tr_lang(lang, f"{secs} Sekunden", f"{secs} seconds"))
     return " ".join(parts)
 
 class AdminProtocol(commands.Cog):
@@ -114,7 +114,7 @@ class AdminProtocol(commands.Cog):
             }
             for ev in EVENTS
         }
-        self.config.register_guild(events=default_events)
+        self.config.register_guild(language="en-US", events=default_events)
         self._dashboard_attached = False
         self._selected_event = {}  # (guild_id, user_id, category) -> event_id
 
@@ -138,7 +138,7 @@ class AdminProtocol(commands.Cog):
             return WidgetData.kpi(value="–", label="Aktive Log-Events")
 
     # --- Guild panels: log events by category (clear tabs) ---- #
-    async def _ap_events_schema(self, ctx, category: str, keys: list):
+    async def _ap_events_schema(self, ctx, category: str, keys: list, with_language: bool = False):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
         self._selected_event.setdefault(guild_id, {}).setdefault(user_id, {})
@@ -155,9 +155,15 @@ class AdminProtocol(commands.Cog):
             sel_ev = "0"
             self._selected_event[guild_id][user_id][category] = "0"
 
-        fields = [
+        fields = []
+        if with_language:
+            fields.append(Field.select("language", L("Sprache", "Language"), [
+                {"value": "de-DE", "label": "Deutsch"},
+                {"value": "en-US", "label": "English"},
+            ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True))
+        fields.append(
             Field.select("event_id", "Ereignis", event_choices, value=sel_ev, reload_on_change=True)
-        ]
+        )
 
         if sel_ev != "0":
             events = await self.config.guild(ctx.guild).events()
@@ -183,11 +189,14 @@ class AdminProtocol(commands.Cog):
 
         return PanelSchema(description=tr(ctx, "Pro Ereignis aktivieren, Ziel-Kanal und Ausnahmen wählen.", "Per event: enable, choose the target channel and exceptions."), fields=fields)
 
-    async def _ap_events_save(self, ctx, category: str, keys: list, data: dict):
+    async def _ap_events_save(self, ctx, category: str, keys: list, data: dict, with_language: bool = False):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
         self._selected_event.setdefault(guild_id, {}).setdefault(user_id, {})
         current_sel = self._selected_event[guild_id][user_id].get(category, "0")
+
+        if with_language and "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
 
         submitted_ev = str(data.get("event_id", "0")).strip()
         if submitted_ev != current_sel:
@@ -225,11 +234,11 @@ class AdminProtocol(commands.Cog):
 
     @dashboard_panel("events_messages", L("Nachrichten & Kanäle", "Messages & Channels"), mount="guild_settings", permission="guild_admin", order=1)
     async def ap_panel_messages(self, ctx):
-        return await self._ap_events_schema(ctx, "messages", EVENT_CATEGORIES["messages"][1])
+        return await self._ap_events_schema(ctx, "messages", EVENT_CATEGORIES["messages"][1], with_language=True)
 
     @ap_panel_messages.on_submit
     async def _ap_save_messages(self, ctx, data):
-        return await self._ap_events_save(ctx, "messages", EVENT_CATEGORIES["messages"][1], data)
+        return await self._ap_events_save(ctx, "messages", EVENT_CATEGORIES["messages"][1], data, with_language=True)
 
     @dashboard_panel("events_members", L("Mitglieder & Rollen", "Members & Roles"), mount="guild_settings", permission="guild_admin", order=2)
     async def ap_panel_members(self, ctx):
@@ -404,13 +413,14 @@ class AdminProtocol(commands.Cog):
         if before.content == after.content:
             return
 
+        lang = await self.config.guild(after.guild).language()
         embed = discord.Embed(
             color=0xf1c40f,  # Orange
-            description=f"📝 **Nachricht gesendet von** {after.author.mention} in {after.channel.mention} **bearbeitet.** [Zur Nachricht springen]({after.jump_url})"
+            description=tr_lang(lang, f"📝 **Nachricht gesendet von** {after.author.mention} in {after.channel.mention} **bearbeitet.** [Zur Nachricht springen]({after.jump_url})", f"📝 **Message sent by** {after.author.mention} in {after.channel.mention} **edited.** [Jump to message]({after.jump_url})")
         )
         embed.set_author(name=str(after.author), icon_url=after.author.display_avatar.url)
-        embed.add_field(name="Alt", value=f">>> {before.content[:1010]}" if before.content else "> *kein Text*", inline=False)
-        embed.add_field(name="Neu", value=f">>> {after.content[:1010]}" if after.content else "> *kein Text*", inline=False)
+        embed.add_field(name=tr_lang(lang, "Alt", "Old"), value=f">>> {before.content[:1010]}" if before.content else tr_lang(lang, "> *kein Text*", "> *no text*"), inline=False)
+        embed.add_field(name=tr_lang(lang, "Neu", "New"), value=f">>> {after.content[:1010]}" if after.content else tr_lang(lang, "> *kein Text*", "> *no text*"), inline=False)
         embed.set_footer(text=f"ID: {after.author.id}")
         embed.timestamp = discord.utils.utcnow()
 
@@ -427,15 +437,16 @@ class AdminProtocol(commands.Cog):
         if not channel:
             return
 
+        lang = await self.config.guild(guild).language()
         message = payload.cached_message
         if message:
             if message.author.bot:
                 return
             author = message.author
-            content = message.content[:1010] if message.content else "*Kein Textinhalt oder nur Medien*"
+            content = message.content[:1010] if message.content else tr_lang(lang, "*Kein Textinhalt oder nur Medien*", "*No text content or media only*")
         else:
             author = None
-            content = "*Inhalt nicht im Bot-Cache vorhanden (ältere Nachricht)*"
+            content = tr_lang(lang, "*Inhalt nicht im Bot-Cache vorhanden (ältere Nachricht)*", "*Content not present in bot cache (older message)*")
 
         # Lookup who deleted
         moderator = None
@@ -446,17 +457,17 @@ class AdminProtocol(commands.Cog):
                 moderator = entry.user
 
         # If no moderator found, assume author did it
-        deleter_str = moderator.mention if moderator else (author.mention if author else "Unbekannt (Selbst/Mod)")
+        deleter_str = moderator.mention if moderator else (author.mention if author else tr_lang(lang, "Unbekannt (Selbst/Mod)", "Unknown (Self/Mod)"))
 
         embed = discord.Embed(
             color=0xe74c3c,  # Rot
-            description=f"🗑️ **Nachricht gesendet von** {author.mention if author else 'Unbekannt'} in {channel.mention} **gelöscht.**"
+            description=tr_lang(lang, f"🗑️ **Nachricht gesendet von** {author.mention if author else 'Unbekannt'} in {channel.mention} **gelöscht.**", f"🗑️ **Message sent by** {author.mention if author else 'Unknown'} in {channel.mention} **deleted.**")
         )
         if author:
             embed.set_author(name=str(author), icon_url=author.display_avatar.url)
-        embed.add_field(name="Nachrichteninhalt", value=f">>> {content}", inline=False)
-        embed.add_field(name="Verfasst von", value=author.mention if author else "Unbekannt", inline=True)
-        embed.add_field(name="Gelöscht von", value=deleter_str, inline=True)
+        embed.add_field(name=tr_lang(lang, "Nachrichteninhalt", "Message content"), value=f">>> {content}", inline=False)
+        embed.add_field(name=tr_lang(lang, "Verfasst von", "Authored by"), value=author.mention if author else tr_lang(lang, "Unbekannt", "Unknown"), inline=True)
+        embed.add_field(name=tr_lang(lang, "Gelöscht von", "Deleted by"), value=deleter_str, inline=True)
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
 
@@ -464,17 +475,23 @@ class AdminProtocol(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member):
+        lang = await self.config.guild(guild).language()
         entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.ban, target_id=user.id)
         moderator = entry.user if entry else None
-        reason = entry.reason if entry and entry.reason else "Keine Begründung angegeben"
+        reason = entry.reason if entry and entry.reason else tr_lang(lang, "Keine Begründung angegeben", "No reason provided")
 
         embed = discord.Embed(
             color=0xe74c3c,
-            title="🔨 Benutzer gebannt",
-            description=f"👤 **Benutzer:** {user.mention} ({user.id})\n"
+            title=tr_lang(lang, "🔨 Benutzer gebannt", "🔨 User banned"),
+            description=tr_lang(lang,
+                        f"👤 **Benutzer:** {user.mention} ({user.id})\n"
                         f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
                         f"📝 **Begründung:** {reason}\n"
-                        f"⏱️ **Dauer:** Unbegrenzt / Permanent"
+                        f"⏱️ **Dauer:** Unbegrenzt / Permanent",
+                        f"👤 **User:** {user.mention} ({user.id})\n"
+                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}\n"
+                        f"📝 **Reason:** {reason}\n"
+                        f"⏱️ **Duration:** Unlimited / Permanent")
         )
         embed.set_author(name=str(user), icon_url=user.display_avatar.url if user.display_avatar else None)
         embed.timestamp = discord.utils.utcnow()
@@ -484,14 +501,18 @@ class AdminProtocol(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        lang = await self.config.guild(guild).language()
         entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.unban, target_id=user.id)
         moderator = entry.user if entry else None
 
         embed = discord.Embed(
             color=0x2ecc71,
-            title="🔓 Benutzer entbannt",
-            description=f"👤 **Benutzer:** {user.mention} ({user.id})\n"
-                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}"
+            title=tr_lang(lang, "🔓 Benutzer entbannt", "🔓 User unbanned"),
+            description=tr_lang(lang,
+                        f"👤 **Benutzer:** {user.mention} ({user.id})\n"
+                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}",
+                        f"👤 **User:** {user.mention} ({user.id})\n"
+                        f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}")
         )
         embed.set_author(name=str(user), icon_url=user.display_avatar.url if user.display_avatar else None)
         embed.timestamp = discord.utils.utcnow()
@@ -502,21 +523,26 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         guild = member.guild
-        
+        lang = await self.config.guild(guild).language()
+
         # Check if member was kicked
         entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.kick, target_id=member.id)
-        
+
         if entry:
             # Kick event
             moderator = entry.user
-            reason = entry.reason if entry.reason else "Keine Begründung angegeben"
-            
+            reason = entry.reason if entry.reason else tr_lang(lang, "Keine Begründung angegeben", "No reason provided")
+
             embed = discord.Embed(
                 color=0xe74c3c,
-                title="👢 Benutzer gekickt",
-                description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                title=tr_lang(lang, "👢 Benutzer gekickt", "👢 User kicked"),
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {member.mention} ({member.id})\n"
                             f"🛡️ **Moderator:** {moderator.mention}\n"
-                            f"📝 **Begründung:** {reason}"
+                            f"📝 **Begründung:** {reason}",
+                            f"👤 **User:** {member.mention} ({member.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention}\n"
+                            f"📝 **Reason:** {reason}")
             )
             embed.set_author(name=str(member), icon_url=member.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -527,7 +553,7 @@ class AdminProtocol(commands.Cog):
             # Leave event
             embed = discord.Embed(
                 color=0xe74c3c,
-                description=f"👋 **{member.mention}** ({str(member)}) hat den Server verlassen."
+                description=tr_lang(lang, f"👋 **{member.mention}** ({str(member)}) hat den Server verlassen.", f"👋 **{member.mention}** ({str(member)}) left the server.")
             )
             embed.set_author(name=str(member), icon_url=member.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -538,27 +564,33 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         guild = member.guild
+        lang = await self.config.guild(guild).language()
         created_at = member.created_at
         now = discord.utils.utcnow()
         age_delta = now - created_at
-        
+
         # Format account age nicely
         days = age_delta.days
         if days > 365:
             years = round(days / 365.25, 1)
-            age_str = f"{years} Jahre alt"
+            age_str = tr_lang(lang, f"{years} Jahre alt", f"{years} years old")
         elif days > 30:
             months = round(days / 30.4, 1)
-            age_str = f"{months} Monate alt"
+            age_str = tr_lang(lang, f"{months} Monate alt", f"{months} months old")
         else:
-            age_str = f"{days} Tage alt"
+            age_str = tr_lang(lang, f"{days} Tage alt", f"{days} days old")
 
         embed = discord.Embed(
             color=0x2ecc71,
-            description=f"📥 {member.mention} **trat dem Server bei.**\n\n"
+            description=tr_lang(lang,
+                        f"📥 {member.mention} **trat dem Server bei.**\n\n"
                         f"🧭 **Alter des Kontos:**\n"
                         f"`{created_at.strftime('%d/%m/%Y %H:%M')}`\n"
-                        f"*{age_str}*"
+                        f"*{age_str}*",
+                        f"📥 {member.mention} **joined the server.**\n\n"
+                        f"🧭 **Account age:**\n"
+                        f"`{created_at.strftime('%d/%m/%Y %H:%M')}`\n"
+                        f"*{age_str}*")
         )
         embed.set_author(name=str(member), icon_url=member.display_avatar.url)
         embed.set_thumbnail(url=member.display_avatar.url)
@@ -570,25 +602,31 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         guild = after.guild
+        lang = await self.config.guild(guild).language()
 
         # 1. Timeout (gegeben / entfernt)
         if before.timed_out_until != after.timed_out_until:
             entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.member_update, target_id=after.id)
             moderator = entry.user if entry else None
-            reason = entry.reason if entry and entry.reason else "Keine Begründung angegeben"
-            
+            reason = entry.reason if entry and entry.reason else tr_lang(lang, "Keine Begründung angegeben", "No reason provided")
+
             if after.timed_out_until and after.timed_out_until > discord.utils.utcnow():
                 # Given
                 duration_sec = (after.timed_out_until - discord.utils.utcnow()).total_seconds()
-                duration_str = format_duration(duration_sec)
-                
+                duration_str = format_duration(duration_sec, lang)
+
                 embed = discord.Embed(
                     color=0xf1c40f,
-                    title="⏱️ Timeout gegeben",
-                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                    title=tr_lang(lang, "⏱️ Timeout gegeben", "⏱️ Timeout given"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {after.mention} ({after.id})\n"
                                 f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
                                 f"📝 **Begründung:** {reason}\n"
-                                f"⏱️ **Dauer:** {duration_str}"
+                                f"⏱️ **Dauer:** {duration_str}",
+                                f"👤 **User:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}\n"
+                                f"📝 **Reason:** {reason}\n"
+                                f"⏱️ **Duration:** {duration_str}")
                 )
                 embed.set_author(name=str(after), icon_url=after.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -598,9 +636,12 @@ class AdminProtocol(commands.Cog):
                 # Removed
                 embed = discord.Embed(
                     color=0x2ecc71,
-                    title="⏱️ Timeout entfernt",
-                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
-                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}"
+                    title=tr_lang(lang, "⏱️ Timeout entfernt", "⏱️ Timeout removed"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}",
+                                f"👤 **User:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}")
                 )
                 embed.set_author(name=str(after), icon_url=after.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -615,11 +656,16 @@ class AdminProtocol(commands.Cog):
                 # Nickname changed (by someone else)
                 embed = discord.Embed(
                     color=0xf1c40f,
-                    title="🏷️ Nickname verändert (Fremd)",
-                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                    title=tr_lang(lang, "🏷️ Nickname verändert (Fremd)", "🏷️ Nickname changed (By other)"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {after.mention} ({after.id})\n"
                                 f"🛡️ **Geändert von:** {entry.user.mention}\n"
                                 f"➖ **Alter Nickname:** `{before.nick or 'Keiner'}`\n"
-                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`"
+                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`",
+                                f"👤 **User:** {after.mention} ({after.id})\n"
+                                f"🛡️ **Changed by:** {entry.user.mention}\n"
+                                f"➖ **Old nickname:** `{before.nick or 'None'}`\n"
+                                f"➕ **New nickname:** `{after.nick or 'None'}`")
                 )
                 embed.set_author(name=str(after), icon_url=after.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -629,10 +675,14 @@ class AdminProtocol(commands.Cog):
                 # Nickname changed (by self)
                 embed = discord.Embed(
                     color=0xf1c40f,
-                    title="🏷️ Nickname geändert (Selbst)",
-                    description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                    title=tr_lang(lang, "🏷️ Nickname geändert (Selbst)", "🏷️ Nickname changed (Self)"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {after.mention} ({after.id})\n"
                                 f"➖ **Alter Nickname:** `{before.nick or 'Keiner'}`\n"
-                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`"
+                                f"➕ **Neuer Nickname:** `{after.nick or 'Keiner'}`",
+                                f"👤 **User:** {after.mention} ({after.id})\n"
+                                f"➖ **Old nickname:** `{before.nick or 'None'}`\n"
+                                f"➕ **New nickname:** `{after.nick or 'None'}`")
                 )
                 embed.set_author(name=str(after), icon_url=after.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -647,10 +697,14 @@ class AdminProtocol(commands.Cog):
             
             embed = discord.Embed(
                 color=0x2ecc71,
-                title="🛡️ Rolle vergeben",
-                description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                title=tr_lang(lang, "🛡️ Rolle vergeben", "🛡️ Role added"),
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {after.mention} ({after.id})\n"
                             f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
-                            f"🏷️ **Rolle:** {role.mention} ({role.name})"
+                            f"🏷️ **Rolle:** {role.mention} ({role.name})",
+                            f"👤 **User:** {after.mention} ({after.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}\n"
+                            f"🏷️ **Role:** {role.mention} ({role.name})")
             )
             embed.set_author(name=str(after), icon_url=after.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -665,10 +719,14 @@ class AdminProtocol(commands.Cog):
             
             embed = discord.Embed(
                 color=0xe74c3c,
-                title="🛡️ Rolle entfernt",
-                description=f"👤 **Benutzer:** {after.mention} ({after.id})\n"
+                title=tr_lang(lang, "🛡️ Rolle entfernt", "🛡️ Role removed"),
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {after.mention} ({after.id})\n"
                             f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unbekannt'}\n"
-                            f"🏷️ **Rolle:** {role.mention} ({role.name})"
+                            f"🏷️ **Rolle:** {role.mention} ({role.name})",
+                            f"👤 **User:** {after.mention} ({after.id})\n"
+                            f"🛡️ **Moderator:** {moderator.mention if moderator else 'Unknown'}\n"
+                            f"🏷️ **Role:** {role.mention} ({role.name})")
             )
             embed.set_author(name=str(after), icon_url=after.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -678,13 +736,18 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         guild = channel.guild
-        
+        lang = await self.config.guild(guild).language()
+
         embed = discord.Embed(
             color=0x2ecc71,
-            title="🆕 Kanal erstellt",
-            description=f"🌐 **Kanal:** {channel.mention if hasattr(channel, 'mention') else f'#{channel.name}'}\n"
+            title=tr_lang(lang, "🆕 Kanal erstellt", "🆕 Channel created"),
+            description=tr_lang(lang,
+                        f"🌐 **Kanal:** {channel.mention if hasattr(channel, 'mention') else f'#{channel.name}'}\n"
                         f"🏷️ **Typ:** `{channel.type.name}`\n"
-                        f"🆔 **ID:** `{channel.id}`"
+                        f"🆔 **ID:** `{channel.id}`",
+                        f"🌐 **Channel:** {channel.mention if hasattr(channel, 'mention') else f'#{channel.name}'}\n"
+                        f"🏷️ **Type:** `{channel.type.name}`\n"
+                        f"🆔 **ID:** `{channel.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -694,13 +757,18 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         guild = channel.guild
+        lang = await self.config.guild(guild).language()
 
         embed = discord.Embed(
             color=0xe74c3c,
-            title="🗑️ Kanal gelöscht",
-            description=f"🌐 **Kanalname:** `#{channel.name}`\n"
+            title=tr_lang(lang, "🗑️ Kanal gelöscht", "🗑️ Channel deleted"),
+            description=tr_lang(lang,
+                        f"🌐 **Kanalname:** `#{channel.name}`\n"
                         f"🏷️ **Typ:** `{channel.type.name}`\n"
-                        f"🆔 **ID:** `{channel.id}`"
+                        f"🆔 **ID:** `{channel.id}`",
+                        f"🌐 **Channel name:** `#{channel.name}`\n"
+                        f"🏷️ **Type:** `{channel.type.name}`\n"
+                        f"🆔 **ID:** `{channel.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -710,6 +778,7 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
         guild = after.guild
+        lang = await self.config.guild(guild).language()
         entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.channel_update, target_id=after.id)
         moderator = entry.user if entry else None
 
@@ -717,7 +786,7 @@ class AdminProtocol(commands.Cog):
         if before.name != after.name:
             changes.append(f"Name: `{before.name}` ➔ `{after.name}`")
         if hasattr(before, "topic") and hasattr(after, "topic") and before.topic != after.topic:
-            changes.append(f"Thema: `{before.topic or 'Kein Thema'}` ➔ `{after.topic or 'Kein Thema'}`")
+            changes.append(tr_lang(lang, f"Thema: `{before.topic or 'Kein Thema'}` ➔ `{after.topic or 'Kein Thema'}`", f"Topic: `{before.topic or 'No topic'}` ➔ `{after.topic or 'No topic'}`"))
         if hasattr(before, "nsfw") and hasattr(after, "nsfw") and before.nsfw != after.nsfw:
             changes.append(f"NSFW: `{before.nsfw}` ➔ `{after.nsfw}`")
 
@@ -726,10 +795,14 @@ class AdminProtocol(commands.Cog):
 
         embed = discord.Embed(
             color=0xf1c40f,
-            title="⚙️ Kanal aktualisiert/modifiziert",
-            description=f"🌐 **Kanal:** {after.mention if hasattr(after, 'mention') else f'#{after.name}'} ({after.id})\n"
+            title=tr_lang(lang, "⚙️ Kanal aktualisiert/modifiziert", "⚙️ Channel updated/modified"),
+            description=tr_lang(lang,
+                        f"🌐 **Kanal:** {after.mention if hasattr(after, 'mention') else f'#{after.name}'} ({after.id})\n"
                         f"🛡️ **Modifiziert von:** {moderator.mention if moderator else 'Unbekannt'}\n\n"
-                        f"📋 **Änderungen:**\n" + "\n".join(changes)
+                        f"📋 **Änderungen:**\n",
+                        f"🌐 **Channel:** {after.mention if hasattr(after, 'mention') else f'#{after.name}'} ({after.id})\n"
+                        f"🛡️ **Modified by:** {moderator.mention if moderator else 'Unknown'}\n\n"
+                        f"📋 **Changes:**\n") + "\n".join(changes)
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -739,13 +812,18 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
         guild = thread.guild
+        lang = await self.config.guild(guild).language()
 
         embed = discord.Embed(
             color=0x2ecc71,
-            title="🧵 Thread erstellt",
-            description=f"🌐 **Thread:** {thread.mention} ({thread.name})\n"
+            title=tr_lang(lang, "🧵 Thread erstellt", "🧵 Thread created"),
+            description=tr_lang(lang,
+                        f"🌐 **Thread:** {thread.mention} ({thread.name})\n"
                         f"📁 **Kanal:** {thread.parent.mention if thread.parent else 'Unbekannt'}\n"
-                        f"🆔 **ID:** `{thread.id}`"
+                        f"🆔 **ID:** `{thread.id}`",
+                        f"🌐 **Thread:** {thread.mention} ({thread.name})\n"
+                        f"📁 **Channel:** {thread.parent.mention if thread.parent else 'Unknown'}\n"
+                        f"🆔 **ID:** `{thread.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -755,13 +833,18 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_thread_delete(self, thread: discord.Thread):
         guild = thread.guild
+        lang = await self.config.guild(guild).language()
 
         embed = discord.Embed(
             color=0xe74c3c,
-            title="🧵 Thread gelöscht",
-            description=f"🌐 **Threadname:** `{thread.name}`\n"
+            title=tr_lang(lang, "🧵 Thread gelöscht", "🧵 Thread deleted"),
+            description=tr_lang(lang,
+                        f"🌐 **Threadname:** `{thread.name}`\n"
                         f"📁 **Kanal:** {thread.parent.mention if thread.parent else 'Unbekannt'}\n"
-                        f"🆔 **ID:** `{thread.id}`"
+                        f"🆔 **ID:** `{thread.id}`",
+                        f"🌐 **Thread name:** `{thread.name}`\n"
+                        f"📁 **Channel:** {thread.parent.mention if thread.parent else 'Unknown'}\n"
+                        f"🆔 **ID:** `{thread.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -771,6 +854,7 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         guild = after.guild
+        lang = await self.config.guild(guild).language()
         entry = await self._get_audit_log_entry(guild, discord.AuditLogAction.thread_update, target_id=after.id)
         moderator = entry.user if entry else None
 
@@ -778,18 +862,23 @@ class AdminProtocol(commands.Cog):
         if before.name != after.name:
             changes.append(f"Name: `{before.name}` ➔ `{after.name}`")
         if before.archived != after.archived:
-            changes.append(f"Archiviert: `{before.archived}` ➔ `{after.archived}`")
+            changes.append(tr_lang(lang, f"Archiviert: `{before.archived}` ➔ `{after.archived}`", f"Archived: `{before.archived}` ➔ `{after.archived}`"))
 
         if not changes:
             return
 
         embed = discord.Embed(
             color=0xf1c40f,
-            title="⚙️ Thread aktualisiert/modifiziert",
-            description=f"🌐 **Thread:** {after.mention} ({after.id})\n"
+            title=tr_lang(lang, "⚙️ Thread aktualisiert/modifiziert", "⚙️ Thread updated/modified"),
+            description=tr_lang(lang,
+                        f"🌐 **Thread:** {after.mention} ({after.id})\n"
                         f"📁 **Kanal:** {after.parent.mention if after.parent else 'Unbekannt'}\n"
                         f"🛡️ **Modifiziert von:** {moderator.mention if moderator else 'Unbekannt'}\n\n"
-                        f"📋 **Änderungen:**\n" + "\n".join(changes)
+                        f"📋 **Änderungen:**\n",
+                        f"🌐 **Thread:** {after.mention} ({after.id})\n"
+                        f"📁 **Channel:** {after.parent.mention if after.parent else 'Unknown'}\n"
+                        f"🛡️ **Modified by:** {moderator.mention if moderator else 'Unknown'}\n\n"
+                        f"📋 **Changes:**\n") + "\n".join(changes)
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -799,12 +888,16 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role):
         guild = role.guild
+        lang = await self.config.guild(guild).language()
 
         embed = discord.Embed(
             color=0x2ecc71,
-            title="🎨 Rolle angelegt",
-            description=f"🏷️ **Rolle:** {role.mention} (`{role.name}`)\n"
-                        f"🆔 **ID:** `{role.id}`"
+            title=tr_lang(lang, "🎨 Rolle angelegt", "🎨 Role created"),
+            description=tr_lang(lang,
+                        f"🏷️ **Rolle:** {role.mention} (`{role.name}`)\n"
+                        f"🆔 **ID:** `{role.id}`",
+                        f"🏷️ **Role:** {role.mention} (`{role.name}`)\n"
+                        f"🆔 **ID:** `{role.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -814,12 +907,16 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
         guild = role.guild
+        lang = await self.config.guild(guild).language()
 
         embed = discord.Embed(
             color=0xe74c3c,
-            title="🗑️ Rolle gelöscht",
-            description=f"🏷️ **Rollenname:** `{role.name}`\n"
-                        f"🆔 **ID:** `{role.id}`"
+            title=tr_lang(lang, "🗑️ Rolle gelöscht", "🗑️ Role deleted"),
+            description=tr_lang(lang,
+                        f"🏷️ **Rollenname:** `{role.name}`\n"
+                        f"🆔 **ID:** `{role.id}`",
+                        f"🏷️ **Role name:** `{role.name}`\n"
+                        f"🆔 **ID:** `{role.id}`")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -832,15 +929,21 @@ class AdminProtocol(commands.Cog):
         if not guild:
             return
 
-        expire_str = format_duration(invite.max_age) if invite.max_age > 0 else "Niemals"
+        lang = await self.config.guild(guild).language()
+        expire_str = format_duration(invite.max_age, lang) if invite.max_age > 0 else tr_lang(lang, "Niemals", "Never")
 
         embed = discord.Embed(
             color=0x2ecc71,
-            title="🎟️ Server-Einladung erstellt",
-            description=f"👤 **Ersteller:** {invite.inviter.mention if invite.inviter else 'Unbekannt'}\n"
+            title=tr_lang(lang, "🎟️ Server-Einladung erstellt", "🎟️ Server invite created"),
+            description=tr_lang(lang,
+                        f"👤 **Ersteller:** {invite.inviter.mention if invite.inviter else 'Unbekannt'}\n"
                         f"🌐 **Kanal:** {invite.channel.mention if hasattr(invite.channel, 'mention') else f'#{invite.channel.name}'}\n"
                         f"🔗 **Link:** {invite.url}\n"
-                        f"⏱️ **Ablauf:** {expire_str}"
+                        f"⏱️ **Ablauf:** {expire_str}",
+                        f"👤 **Creator:** {invite.inviter.mention if invite.inviter else 'Unknown'}\n"
+                        f"🌐 **Channel:** {invite.channel.mention if hasattr(invite.channel, 'mention') else f'#{invite.channel.name}'}\n"
+                        f"🔗 **Link:** {invite.url}\n"
+                        f"⏱️ **Expires:** {expire_str}")
         )
         embed.timestamp = discord.utils.utcnow()
         embed.set_footer(text="adminprotocol")
@@ -850,12 +953,13 @@ class AdminProtocol(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         guild = member.guild
+        lang = await self.config.guild(guild).language()
 
         # 1. Joined voice channel
         if before.channel is None and after.channel is not None:
             embed = discord.Embed(
                 color=0x3498db,  # Blau
-                description=f"🔊 {member.mention} **ist dem Sprachkanal** {after.channel.mention} **beigetreten.**"
+                description=tr_lang(lang, f"🔊 {member.mention} **ist dem Sprachkanal** {after.channel.mention} **beigetreten.**", f"🔊 {member.mention} **joined the voice channel** {after.channel.mention}**.**")
             )
             embed.set_author(name=str(member), icon_url=member.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -870,10 +974,14 @@ class AdminProtocol(commands.Cog):
                 # Disconnected by other
                 embed = discord.Embed(
                     color=0xe74c3c,
-                    title="🔇 Sprachkanal-Verbindung getrennt",
-                    description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                    title=tr_lang(lang, "🔇 Sprachkanal-Verbindung getrennt", "🔇 Voice channel disconnected"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {member.mention} ({member.id})\n"
                                 f"🛡️ **Getrennt von:** {entry.user.mention}\n"
-                                f"🌐 **Kanal:** {before.channel.name}"
+                                f"🌐 **Kanal:** {before.channel.name}",
+                                f"👤 **User:** {member.mention} ({member.id})\n"
+                                f"🛡️ **Disconnected by:** {entry.user.mention}\n"
+                                f"🌐 **Channel:** {before.channel.name}")
                 )
                 embed.set_author(name=str(member), icon_url=member.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -883,7 +991,7 @@ class AdminProtocol(commands.Cog):
                 # Self leave
                 embed = discord.Embed(
                     color=0xe74c3c,
-                    description=f"🔊 {member.mention} **hat den Sprachkanal** {before.channel.mention} **verlassen.**"
+                    description=tr_lang(lang, f"🔊 {member.mention} **hat den Sprachkanal** {before.channel.mention} **verlassen.**", f"🔊 {member.mention} **left the voice channel** {before.channel.mention}**.**")
                 )
                 embed.set_author(name=str(member), icon_url=member.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -899,11 +1007,16 @@ class AdminProtocol(commands.Cog):
                 # Moderator moved
                 embed = discord.Embed(
                     color=0xf1c40f,
-                    title="🔀 Benutzer in Sprachkanal verschoben",
-                    description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                    title=tr_lang(lang, "🔀 Benutzer in Sprachkanal verschoben", "🔀 User moved to voice channel"),
+                    description=tr_lang(lang,
+                                f"👤 **Benutzer:** {member.mention} ({member.id})\n"
                                 f"🛡️ **Verschoben von:** {entry.user.mention}\n"
                                 f"📥 **Von:** {before.channel.name}\n"
-                                f"📤 **Zu:** {after.channel.name}"
+                                f"📤 **Zu:** {after.channel.name}",
+                                f"👤 **User:** {member.mention} ({member.id})\n"
+                                f"🛡️ **Moved by:** {entry.user.mention}\n"
+                                f"📥 **From:** {before.channel.name}\n"
+                                f"📤 **To:** {after.channel.name}")
                 )
                 embed.set_author(name=str(member), icon_url=member.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -913,9 +1026,13 @@ class AdminProtocol(commands.Cog):
                 # Self switch
                 embed = discord.Embed(
                     color=0xf1c40f,
-                    description=f"🔊 {member.mention} **hat den Sprachkanal gewechselt.**\n"
+                    description=tr_lang(lang,
+                                f"🔊 {member.mention} **hat den Sprachkanal gewechselt.**\n"
                                 f"📥 **Herkunft:** {before.channel.mention}\n"
-                                f"📤 **Ziel:** {after.channel.mention}"
+                                f"📤 **Ziel:** {after.channel.mention}",
+                                f"🔊 {member.mention} **switched voice channel.**\n"
+                                f"📥 **From:** {before.channel.mention}\n"
+                                f"📤 **To:** {after.channel.mention}")
                 )
                 embed.set_author(name=str(member), icon_url=member.display_avatar.url)
                 embed.timestamp = discord.utils.utcnow()
@@ -925,26 +1042,30 @@ class AdminProtocol(commands.Cog):
         # 4. Voice status changed (mute/deafen)
         status_changes = []
         if before.self_mute != after.self_mute:
-            status_changes.append(f"Mute (Selbst): `{'Aktiv' if after.self_mute else 'Inaktiv'}`")
+            status_changes.append(tr_lang(lang, f"Mute (Selbst): `{'Aktiv' if after.self_mute else 'Inaktiv'}`", f"Mute (Self): `{'Active' if after.self_mute else 'Inactive'}`"))
         if before.self_deaf != after.self_deaf:
-            status_changes.append(f"Deafen (Selbst): `{'Aktiv' if after.self_deaf else 'Inaktiv'}`")
+            status_changes.append(tr_lang(lang, f"Deafen (Selbst): `{'Aktiv' if after.self_deaf else 'Inaktiv'}`", f"Deafen (Self): `{'Active' if after.self_deaf else 'Inactive'}`"))
         if before.mute != after.mute:
-            status_changes.append(f"Mute (Server): `{'Aktiv' if after.mute else 'Inaktiv'}`")
+            status_changes.append(tr_lang(lang, f"Mute (Server): `{'Aktiv' if after.mute else 'Inaktiv'}`", f"Mute (Server): `{'Active' if after.mute else 'Inactive'}`"))
         if before.deaf != after.deaf:
-            status_changes.append(f"Deafen (Server): `{'Aktiv' if after.deaf else 'Inaktiv'}`")
+            status_changes.append(tr_lang(lang, f"Deafen (Server): `{'Aktiv' if after.deaf else 'Inaktiv'}`", f"Deafen (Server): `{'Active' if after.deaf else 'Inactive'}`"))
         if before.self_stream != after.self_stream:
-            status_changes.append(f"Stream: `{'Start' if after.self_stream else 'Stopp'}`")
+            status_changes.append(tr_lang(lang, f"Stream: `{'Start' if after.self_stream else 'Stopp'}`", f"Stream: `{'Start' if after.self_stream else 'Stop'}`"))
         if before.self_video != after.self_video:
-            status_changes.append(f"Kamera: `{'An' if after.self_video else 'Aus'}`")
+            status_changes.append(tr_lang(lang, f"Kamera: `{'An' if after.self_video else 'Aus'}`", f"Camera: `{'On' if after.self_video else 'Off'}`"))
 
         if status_changes:
             current_channel = after.channel or before.channel
             embed = discord.Embed(
                 color=0x3498db,
-                title="🎙️ Sprachstatus geändert",
-                description=f"👤 **Benutzer:** {member.mention} ({member.id})\n"
+                title=tr_lang(lang, "🎙️ Sprachstatus geändert", "🎙️ Voice status changed"),
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {member.mention} ({member.id})\n"
                             f"🌐 **Sprachkanal:** {current_channel.name if current_channel else 'Unbekannt'}\n\n"
-                            f"📋 **Änderungen:**\n" + "\n".join(status_changes)
+                            f"📋 **Änderungen:**\n",
+                            f"👤 **User:** {member.mention} ({member.id})\n"
+                            f"🌐 **Voice channel:** {current_channel.name if current_channel else 'Unknown'}\n\n"
+                            f"📋 **Changes:**\n") + "\n".join(status_changes)
             )
             embed.set_author(name=str(member), icon_url=member.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -957,12 +1078,17 @@ class AdminProtocol(commands.Cog):
             return
         cog_name = ctx.cog.qualified_name if ctx.cog else None
         if self._is_mod_command(ctx.command.name, cog_name):
+            lang = await self.config.guild(ctx.guild).language()
             embed = discord.Embed(
-                title="🛡️ Moderationsbefehl verwendet",
+                title=tr_lang(lang, "🛡️ Moderationsbefehl verwendet", "🛡️ Moderation command used"),
                 color=0xf1c40f,
-                description=f"👤 **Benutzer:** {ctx.author.mention} ({ctx.author.id})\n"
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {ctx.author.mention} ({ctx.author.id})\n"
                             f"💬 **Befehl:** `{ctx.message.content}`\n"
-                            f"🌐 **Kanal:** {ctx.channel.mention}"
+                            f"🌐 **Kanal:** {ctx.channel.mention}",
+                            f"👤 **User:** {ctx.author.mention} ({ctx.author.id})\n"
+                            f"💬 **Command:** `{ctx.message.content}`\n"
+                            f"🌐 **Channel:** {ctx.channel.mention}")
             )
             embed.set_author(name=str(ctx.author), icon_url=ctx.author.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()
@@ -984,12 +1110,17 @@ class AdminProtocol(commands.Cog):
                 cmd_repr += f" {opts_str}"
                 
         if self._is_mod_command(command.name, cog_name):
+            lang = await self.config.guild(interaction.guild).language()
             embed = discord.Embed(
-                title="🛡️ Moderationsbefehl verwendet",
+                title=tr_lang(lang, "🛡️ Moderationsbefehl verwendet", "🛡️ Moderation command used"),
                 color=0xf1c40f,
-                description=f"👤 **Benutzer:** {interaction.user.mention} ({interaction.user.id})\n"
+                description=tr_lang(lang,
+                            f"👤 **Benutzer:** {interaction.user.mention} ({interaction.user.id})\n"
                             f"💬 **Befehl:** `{cmd_repr}`\n"
-                            f"🌐 **Kanal:** {interaction.channel.mention if interaction.channel else 'Unbekannt'}"
+                            f"🌐 **Kanal:** {interaction.channel.mention if interaction.channel else 'Unbekannt'}",
+                            f"👤 **User:** {interaction.user.mention} ({interaction.user.id})\n"
+                            f"💬 **Command:** `{cmd_repr}`\n"
+                            f"🌐 **Channel:** {interaction.channel.mention if interaction.channel else 'Unknown'}")
             )
             embed.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
             embed.timestamp = discord.utils.utcnow()

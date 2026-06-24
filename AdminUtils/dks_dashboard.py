@@ -22,6 +22,7 @@ try:
         SubmitResult,
         WidgetData,
         tr,
+        tr_lang,
     )
 
     DASHBOARD_AVAILABLE = True
@@ -67,6 +68,9 @@ except Exception:  # webdashboard not installed
         return de
 
     def tr(ctx, de, en):
+        return de
+
+    def tr_lang(lang, de, en):
         return de
 
 

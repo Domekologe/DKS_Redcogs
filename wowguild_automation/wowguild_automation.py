@@ -171,14 +171,14 @@ class WowGuildAutomation(commands.Cog):
                 "client_id": "",
                 "client_secret": "",
                 "owner_ids": [],
-                "default_language": "de-DE",
+                "default_language": "en-US",
                 "default_region": "eu",
                 "default_version": "retail",
                 "dashboard_enabled": True,
             }
         )
         self.config.register_guild(
-            language="de-DE",
+            language="en-US",
             active_profile_key="retail",
             features={
                 "onboarding": True,
@@ -242,7 +242,7 @@ class WowGuildAutomation(commands.Cog):
             # Only persist real dict entries — Red nested_update fails on None leaves.
             main_characters={},
             ready_times={},
-            onboarding_language="de-DE",
+            onboarding_language="en-US",
             selected_game="retail",
             registration={},
             onboarding_session_id="",
@@ -1144,11 +1144,11 @@ class WowGuildAutomation(commands.Cog):
             guild_lang = await self.config.guild(ctx.guild).language()
             if guild_lang in ("de-DE", "en-US"):
                 return guild_lang
-        return "de-DE"
+        return "en-US"
 
     async def _t(self, ctx: commands.Context, key: str, **kwargs: str) -> str:
         lang = await self._lang(ctx)
-        template = I18N.get(lang, I18N["de-DE"]).get(key, key)
+        template = I18N.get(lang, I18N["en-US"]).get(key, key)
         return template.format(**kwargs)
 
     async def _guild_lang(self, guild: discord.Guild, member: Optional[discord.Member] = None) -> str:
@@ -1159,13 +1159,13 @@ class WowGuildAutomation(commands.Cog):
         gl = await self.config.guild(guild).language()
         if gl in ("de-DE", "en-US"):
             return gl
-        return "de-DE"
+        return "en-US"
 
     async def _t_from_guild(
         self, guild: discord.Guild, member: discord.Member, key: str, **kwargs: str
     ) -> str:
         lang = await self._guild_lang(guild, member)
-        template = I18N.get(lang, I18N["de-DE"]).get(key, key)
+        template = I18N.get(lang, I18N["en-US"]).get(key, key)
         return template.format(**kwargs)
 
     async def _wait_text(self, ctx: commands.Context, timeout: int = 180) -> Optional[str]:
@@ -1801,7 +1801,7 @@ class WowGuildAutomation(commands.Cog):
             onboarding_channel=onboarding_channel,  # type: ignore[arg-type]
             member_config=self.config.member(member),
         )
-        chosen_lang = onboarding_result.get("language", "de-DE")
+        chosen_lang = onboarding_result.get("language", "en-US")
         selected_game = onboarding_result.get("selected_game", "retail")
         registration = onboarding_result.get("registration", {})
         registration["registered_at"] = datetime.now(timezone.utc).isoformat()
@@ -1874,16 +1874,16 @@ class WowGuildAutomation(commands.Cog):
     @app_commands.describe(action="Action")
     @app_commands.choices(
         action=[
-            app_commands.Choice(name="Panel (interaktives Menü)", value="panel"),
-            app_commands.Choice(name="Meine Chars (Liste)", value="list_my"),
-            app_commands.Choice(name="Rang-Sync (meine Mains)", value="sync_my_profile"),
-            app_commands.Choice(name="Bereitschaftszeiten (nur du)", value="readytimes"),
+            app_commands.Choice(name="Panel (interactive menu)", value="panel"),
+            app_commands.Choice(name="My characters (list)", value="list_my"),
+            app_commands.Choice(name="Rank sync (my mains)", value="sync_my_profile"),
+            app_commands.Choice(name="Ready times (only you)", value="readytimes"),
         ]
     )
     async def slash_wow_user(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
             await interaction.response.send_message(
-                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+                tr_lang("en-US", "Nur auf einem Server.", "Only on a server."), ephemeral=True
             )
             return
         lang = await self._guild_lang(interaction.guild, interaction.user)
@@ -1891,7 +1891,7 @@ class WowGuildAutomation(commands.Cog):
             await interaction.response.send_message(
                 _panel_intro(lang),
                 ephemeral=True,
-                view=CharMainMenuView(self, interaction.guild, interaction.user),
+                view=CharMainMenuView(self, interaction.guild, interaction.user, lang=lang),
             )
             return
         if action == "list_my":
@@ -1931,20 +1931,20 @@ class WowGuildAutomation(commands.Cog):
                 name="Panel (Mitglied wählen + Buttons)",
                 value="panel",
             ),
-            app_commands.Choice(name="Rang-Sync: ein Mitglied", value="sync_specific_member"),
-            app_commands.Choice(name="Rang-Sync: alle mit Main", value="sync_all_members"),
-            app_commands.Choice(name="Onboarding simulieren (Join)", value="simulate_join"),
-            app_commands.Choice(name="Gildenprofil (Modal)", value="guildsettings"),
-            app_commands.Choice(name="Registrierung löschen (User wählen)", value="remove_registration"),
-            app_commands.Choice(name="Registrierungen listen", value="list_onboardings"),
-            app_commands.Choice(name="Rang-Mapping listen", value="list_rankmap"),
-            app_commands.Choice(name="Bereitschaftszeiten (Übersicht)", value="readytimes"),
+            app_commands.Choice(name="Rank sync: one member", value="sync_specific_member"),
+            app_commands.Choice(name="Rank sync: all with a main", value="sync_all_members"),
+            app_commands.Choice(name="Simulate onboarding (join)", value="simulate_join"),
+            app_commands.Choice(name="Guild profile (modal)", value="guildsettings"),
+            app_commands.Choice(name="Delete registration (pick user)", value="remove_registration"),
+            app_commands.Choice(name="List registrations", value="list_onboardings"),
+            app_commands.Choice(name="List rank mapping", value="list_rankmap"),
+            app_commands.Choice(name="Ready times (overview)", value="readytimes"),
         ]
     )
     async def slash_wow_admin(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
             await interaction.response.send_message(
-                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+                tr_lang("en-US", "Nur auf einem Server.", "Only on a server."), ephemeral=True
             )
             return
         lang = await self._guild_lang(interaction.guild, interaction.user)
@@ -1963,14 +1963,14 @@ class WowGuildAutomation(commands.Cog):
             await interaction.response.send_message(
                 _admin_panel_intro(lang),
                 ephemeral=True,
-                view=WowAdminCharPanelView(self, guild, interaction.user),
+                view=WowAdminCharPanelView(self, guild, interaction.user, lang=lang),
             )
             return
         if action == "sync_specific_member":
             await interaction.response.send_message(
                 tr_lang(lang, "Welches Mitglied synchronisieren?", "Which member to sync?"),
                 ephemeral=True,
-                view=AdminPickOneMemberView(self, guild, interaction.user, mode="sync_rank_member"),
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="sync_rank_member", lang=lang),
             )
             return
         if action == "sync_all_members":
@@ -1994,11 +1994,11 @@ class WowGuildAutomation(commands.Cog):
                     "Which member? The bot runs the onboarding in **simulation** mode.",
                 ),
                 ephemeral=True,
-                view=AdminPickOneMemberView(self, guild, interaction.user, mode="simulate_join"),
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="simulate_join", lang=lang),
             )
             return
         if action == "guildsettings":
-            await interaction.response.send_modal(GuildSettingsModal(self, guild))
+            await interaction.response.send_modal(GuildSettingsModal(self, guild, lang))
             return
         if action == "remove_registration":
             await interaction.response.send_message(
@@ -2008,7 +2008,7 @@ class WowGuildAutomation(commands.Cog):
                     "Which registration should be deleted?",
                 ),
                 ephemeral=True,
-                view=AdminPickOneMemberView(self, guild, interaction.user, mode="remove_registration"),
+                view=AdminPickOneMemberView(self, guild, interaction.user, mode="remove_registration", lang=lang),
             )
             return
         if action == "list_onboardings":
@@ -2042,20 +2042,20 @@ class WowGuildAutomation(commands.Cog):
     @app_commands.describe(action="Action")
     @app_commands.choices(
         action=[
-            app_commands.Choice(name="Onboarding Kanal & Rollen (Modal)", value="onboarding_setup"),
-            app_commands.Choice(name="Blizzard API (nur Bot-Besitzer)", value="botsetup"),
-            app_commands.Choice(name="Rangtitel setzen (Index 0–9)", value="setranktitle"),
-            app_commands.Choice(name="Rang → Rolle mappen (Modal)", value="maprank"),
-            app_commands.Choice(name="Globale Bot-Defaults (nur Bot-Besitzer)", value="mastersetup_bot"),
-            app_commands.Choice(name="Auto Rang-Sync Intervall (Minuten)", value="syncsetup"),
-            app_commands.Choice(name="Rank-Lock: Ingame-Rang sperren (Modal)", value="rank_lock"),
-            app_commands.Choice(name="Rank-Lock: Eintrag entfernen (Modal)", value="rank_unlock"),
+            app_commands.Choice(name="Onboarding channel & roles (modal)", value="onboarding_setup"),
+            app_commands.Choice(name="Blizzard API (bot owner only)", value="botsetup"),
+            app_commands.Choice(name="Set rank title (index 0–9)", value="setranktitle"),
+            app_commands.Choice(name="Map rank → role (modal)", value="maprank"),
+            app_commands.Choice(name="Global bot defaults (bot owner only)", value="mastersetup_bot"),
+            app_commands.Choice(name="Auto rank-sync interval (minutes)", value="syncsetup"),
+            app_commands.Choice(name="Rank lock: lock in-game rank (modal)", value="rank_lock"),
+            app_commands.Choice(name="Rank lock: remove entry (modal)", value="rank_unlock"),
         ]
     )
     async def slash_wow_masteradmin(self, interaction: discord.Interaction, action: str) -> None:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
             await interaction.response.send_message(
-                tr_lang("de-DE", "Nur auf einem Server.", "Only on a server."), ephemeral=True
+                tr_lang("en-US", "Nur auf einem Server.", "Only on a server."), ephemeral=True
             )
             return
         lang = await self._guild_lang(interaction.guild, interaction.user)
@@ -2078,28 +2078,28 @@ class WowGuildAutomation(commands.Cog):
                 )
                 return
         if action == "onboarding_setup":
-            await interaction.response.send_modal(OnboardingSetupModal(self, guild))
+            await interaction.response.send_modal(OnboardingSetupModal(self, guild, lang))
             return
         if action == "botsetup":
-            await interaction.response.send_modal(BotSetupModal(self))
+            await interaction.response.send_modal(BotSetupModal(self, lang))
             return
         if action == "setranktitle":
-            await interaction.response.send_modal(SetRankTitleModal(self, guild))
+            await interaction.response.send_modal(SetRankTitleModal(self, guild, lang))
             return
         if action == "maprank":
-            await interaction.response.send_modal(MapRankModal(self, guild))
+            await interaction.response.send_modal(MapRankModal(self, guild, lang))
             return
         if action == "mastersetup_bot":
-            await interaction.response.send_modal(MasterSetupModal(self))
+            await interaction.response.send_modal(MasterSetupModal(self, lang))
             return
         if action == "syncsetup":
-            await interaction.response.send_modal(SyncIntervalModal(self, guild))
+            await interaction.response.send_modal(SyncIntervalModal(self, guild, lang))
             return
         if action == "rank_lock":
-            await interaction.response.send_modal(RankLockAddModal(self, guild))
+            await interaction.response.send_modal(RankLockAddModal(self, guild, lang))
             return
         if action == "rank_unlock":
-            await interaction.response.send_modal(RankLockRemoveModal(self, guild))
+            await interaction.response.send_modal(RankLockRemoveModal(self, guild, lang))
             return
         await interaction.response.send_message(
             tr_lang(lang, "Unbekannte Aktion.", "Unknown action."), ephemeral=True

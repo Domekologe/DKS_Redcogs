@@ -118,10 +118,11 @@ class SetupNewMember(commands.Cog):
         after_roles = {r.id for r in after.roles}
         if role_id in after_roles and role_id not in before_roles:
             lang = await self.config.guild(guild).language()
-            msg = {
-                "en": "Welcome! What is your **main character name**?",
-                "de": "Willkommen! Wie heißt dein **Hauptcharakter**?",
-            }[lang]
+            msg = (
+                "Welcome! What is your **main character name**?"
+                if str(lang or "").lower().startswith("en")
+                else "Willkommen! Wie heißt dein **Hauptcharakter**?"
+            )
 
             try:
                 await after.send(msg)

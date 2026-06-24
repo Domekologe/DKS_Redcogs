@@ -6,7 +6,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
-    L, tr,
+    L, tr, tr_lang,
 )
 
 try:
@@ -48,6 +48,7 @@ class EventMessages(commands.Cog):
             "timeout_end": "⏱️ Timeout für **{display_name}** (`{username}`) ist abgelaufen.",
         }
         default_guild = {
+            "language": "en-US",
             "events": {
                 ev: {
                     "enabled": False,
@@ -135,6 +136,10 @@ class EventMessages(commands.Cog):
             self._selected_event[(guild_id, user_id)] = "0"
 
         fields = [
+            Field.select("language", L("Sprache", "Language"), [
+                {"value": "de-DE", "label": "Deutsch"},
+                {"value": "en-US", "label": "English"},
+            ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
             Field.select("event_id", "Event", event_choices, value=selection, reload_on_change=True)
         ]
 
@@ -172,6 +177,9 @@ class EventMessages(commands.Cog):
     async def _save_eventmessages(self, ctx, data):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
+
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
 
         event_id = str(data.get("event_id", "0")).strip()
         prev_sel = self._selected_event.get((guild_id, user_id), "0")
@@ -246,11 +254,12 @@ class EventMessages(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
+        lang = await self.config.guild(guild).language() if guild else "en-US"
 
         # Validation
         if event not in EVENTS:
             await interaction.followup.send(
-                f"Ungültiges Event. Verwendet werden kann: `{', '.join(EVENTS)}`",
+                tr_lang(lang, f"Ungültiges Event. Verwendet werden kann: `{', '.join(EVENTS)}`", f"Invalid event. Allowed: `{', '.join(EVENTS)}`"),
                 ephemeral=True
             )
             return
@@ -261,7 +270,7 @@ class EventMessages(commands.Cog):
         )
 
         await interaction.followup.send(
-            f"Event **{event}** wurde auf **{value}** gesetzt.",
+            tr_lang(lang, f"Event **{event}** wurde auf **{value}** gesetzt.", f"Event **{event}** was set to **{value}**."),
             ephemeral=True
         )
 
@@ -286,10 +295,11 @@ class EventMessages(commands.Cog):
         channel: discord.TextChannel   # <-- required
     ):
         await interaction.response.defer(ephemeral=True)
+        lang = await self.config.guild(interaction.guild).language() if interaction.guild else "en-US"
 
         if event not in EVENTS:
             await interaction.followup.send(
-                f"Ungültiges Event. Erlaubt: `{', '.join(EVENTS)}`",
+                tr_lang(lang, f"Ungültiges Event. Erlaubt: `{', '.join(EVENTS)}`", f"Invalid event. Allowed: `{', '.join(EVENTS)}`"),
                 ephemeral=True
             )
             return
@@ -299,7 +309,7 @@ class EventMessages(commands.Cog):
         )
 
         await interaction.followup.send(
-            f"Channel für **{event}** gesetzt auf {channel.mention}.",
+            tr_lang(lang, f"Channel für **{event}** gesetzt auf {channel.mention}.", f"Channel for **{event}** set to {channel.mention}."),
             ephemeral=True
         )
 
@@ -316,16 +326,21 @@ class EventMessages(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
+        lang = await self.config.guild(guild).language() if guild else "en-US"
         data = await self.config.guild(guild).events()
 
-        msg = "**Eventstatus:**\n\n"
+        msg = tr_lang(lang, "**Eventstatus:**\n\n", "**Event status:**\n\n")
         for ev in EVENTS:
             ch_id = data[ev]["channel"]
             ch = f"<#{ch_id}>" if ch_id else "—"
-            msg += (
+            msg += tr_lang(
+                lang,
                 f"**Event:** `{ev}`\n"
                 f"→ Enabled: **{data[ev]['enabled']}**\n"
-                f"→ Channel: {ch}\n\n"
+                f"→ Channel: {ch}\n\n",
+                f"**Event:** `{ev}`\n"
+                f"→ Enabled: **{data[ev]['enabled']}**\n"
+                f"→ Channel: {ch}\n\n",
             )
 
         await interaction.followup.send(msg, ephemeral=True)

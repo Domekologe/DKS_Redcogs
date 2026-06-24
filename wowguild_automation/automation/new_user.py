@@ -194,7 +194,7 @@ class ManualVerificationDecisionView(discord.ui.View):
         char_name: str,
         selected_game: str,
         timeout: int = 172800,
-        lang: str = "de-DE",
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=timeout)
         self.member = member
@@ -347,7 +347,7 @@ async def handle_new_member_onboarding(
     *,
     member_config: Optional[Any] = None,
 ) -> dict:
-    glang = str(guild_config.get("language") or "de-DE")
+    glang = str(guild_config.get("language") or "en-US")
     destination: discord.abc.Messageable
     if onboarding_channel is not None:
         try:
@@ -380,9 +380,9 @@ async def handle_new_member_onboarding(
     lang_view = ChoiceView(member.id, [("Deutsch", "de-DE"), ("English (US)", "en-US")], timeout=180)
     await destination.send(TEXTS["de-DE"]["lang_prompt"] + "\n" + TEXTS["en-US"]["lang_prompt"], view=lang_view)
     if await lang_view.wait() or not lang_view.value:
-        await destination.send(TEXTS["de-DE"]["lang_timeout"])
+        await destination.send(TEXTS["en-US"]["lang_timeout"])
         return {
-            "language": "de-DE",
+            "language": "en-US",
             "selected_game": "retail",
             "registration": {
                 "type": "unknown",

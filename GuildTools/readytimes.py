@@ -38,7 +38,7 @@ DAY_KEY_TO_EN = {
 }
 
 
-def day_label(key: str, lang: str = "de-DE") -> str:
+def day_label(key: str, lang: str = "en-US") -> str:
     if lang.startswith("en"):
         return DAY_KEY_TO_EN.get(key, key)
     return DAY_KEY_TO_DE.get(key, key)
@@ -115,7 +115,7 @@ def overlaps_wrap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
 
 
 
-def format_range(start: Optional[str], end: Optional[str]) -> str:
+def format_range(start: Optional[str], end: Optional[str], lang: str = "en-US") -> str:
     if start and end:
         smin, emin = hhmm_to_min(start), hhmm_to_min(end)
         if smin == emin:
@@ -123,21 +123,21 @@ def format_range(start: Optional[str], end: Optional[str]) -> str:
         # (+1) marks an overhang into the next day
         return f"{start} - {end}" + (" (+1)" if emin < smin else "")
     if start and not end:
-        return f"Ab {start}"
+        return tr_lang(lang, f"Ab {start}", f"From {start}")
     if end and not start:
-        return f"Bis {end}"
+        return tr_lang(lang, f"Bis {end}", f"Until {end}")
     return "-"
 
 
 
-def format_range_with_parens(start: Optional[str], end: Optional[str]) -> str:
+def format_range_with_parens(start: Optional[str], end: Optional[str], lang: str = "en-US") -> str:
     # For filtering displays where one side is missing
     if start and end:
         return f"{start} - {end}"
     if start and not end:
-        return f"Beginn: {start} (Bis)"
+        return tr_lang(lang, f"Beginn: {start} (Bis)", f"Start: {start} (until)")
     if end and not start:
-        return f"(Ab) Ende: {end}"
+        return tr_lang(lang, f"(Ab) Ende: {end}", f"(from) End: {end}")
     return "-"
 
 
@@ -164,14 +164,14 @@ class ReadyTimes(commands.Cog):
     async def _lang(self, guild) -> str:
         """Read the per-guild output language from the GuildTools cog (shared setting)."""
         if guild is None:
-            return "de-DE"
+            return "en-US"
         gt = self.bot.get_cog("GuildTools")
         if gt is None or not hasattr(gt, "config"):
-            return "de-DE"
+            return "en-US"
         try:
             return await gt.config.guild(guild).language()
         except Exception:
-            return "de-DE"
+            return "en-US"
 
     # ------------------------------
     # Slash: /set-readytimes (ephemeral UI)
@@ -232,7 +232,7 @@ class ReadyTimes(commands.Cog):
             for key in DAY_ORDER:
                 info = data.get(key, {"can": False, "start": None, "end": None})
                 icon = "✅" if info["can"] else "❌"
-                text = tr_lang(lang, "Kann nicht", "Not available") if not info["can"] else format_range(info["start"], info["end"])
+                text = tr_lang(lang, "Kann nicht", "Not available") if not info["can"] else format_range(info["start"], info["end"], lang)
                 embed.add_field(name=day_label(key, lang), value=f"{icon} {text}", inline=False)
 
             # Optional: footer analogous to /set, but without controls
@@ -283,7 +283,7 @@ class ReadyTimes(commands.Cog):
                 for member, data in results:
                     info = data.get(key, {"can": False, "start": None, "end": None})
                     if info["can"]:
-                        parts.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
+                        parts.append(f"{member.display_name} ({format_range(info['start'], info['end'], lang)})")
                 embed.add_field(
                     name=day_label(key, lang),
                     value=", ".join(parts) if parts else none_str,
@@ -297,7 +297,7 @@ class ReadyTimes(commands.Cog):
             for member, data in results:
                 info = data.get(day_key, {"can": False, "start": None, "end": None})
                 if info["can"]:
-                    lines.append(f"{member.display_name} ({format_range(info['start'], info['end'])})")
+                    lines.append(f"{member.display_name} ({format_range(info['start'], info['end'], lang)})")
             embed = discord.Embed(
                 title=f"{day_label(day_key, lang)}",
                 description="\n".join(lines) if lines else none_str,
@@ -328,7 +328,7 @@ class ReadyTimes(commands.Cog):
                         # both times given -> as before: names only
                         lines.append(member.display_name)
 
-            title = f"{day_label(day_key, lang)} — {format_range_with_parens(start_t, end_t)}"
+            title = f"{day_label(day_key, lang)} — {format_range_with_parens(start_t, end_t, lang)}"
             embed = discord.Embed(
                 title=title,
                 description="\n".join(lines) if lines else none_str,
@@ -361,7 +361,7 @@ class ReadyTimes(commands.Cog):
                 if day_tokens:
                     lines.append(f"{member.display_name} ({', '.join(day_tokens)})")
 
-            title = tr_lang(lang, f"Zeitfenster — {format_range_with_parens(start_t, end_t)}", f"Time window — {format_range_with_parens(start_t, end_t)}")
+            title = tr_lang(lang, f"Zeitfenster — {format_range_with_parens(start_t, end_t, 'de-DE')}", f"Time window — {format_range_with_parens(start_t, end_t, 'en-US')}")
             embed = discord.Embed(
                 title=title,
                 description="\n".join(lines) if lines else none_str,
@@ -375,7 +375,7 @@ class ReadyTimes(commands.Cog):
 
 
 class ReadyTimesView(discord.ui.View):
-    def __init__(self, cog: ReadyTimes, member: discord.Member, state: Dict[str, DayAvailability], lang: str = "de-DE"):
+    def __init__(self, cog: ReadyTimes, member: discord.Member, state: Dict[str, DayAvailability], lang: str = "en-US"):
         super().__init__(timeout=600)
         self.cog = cog
         self.member = member
@@ -418,7 +418,7 @@ class ReadyTimesView(discord.ui.View):
         for key in DAY_ORDER:
             info = self.state.get(key, DayAvailability())
             icon = "✅" if info.can else "❌"
-            text = tr_lang(lang, "Kann nicht", "Not available") if not info.can else format_range(info.start, info.end)
+            text = tr_lang(lang, "Kann nicht", "Not available") if not info.can else format_range(info.start, info.end, lang)
             emb.add_field(name=day_label(key, lang), value=f"{icon} {text}", inline=False)
 
         footer = tr_lang(lang, "Tag auswählen ▶️ | Ja/Nein togglen | Zeiten bearbeiten", "Select day ▶️ | toggle yes/no | edit times")

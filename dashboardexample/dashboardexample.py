@@ -108,7 +108,7 @@ class DashboardExample(commands.Cog):
     # Owner command for a quick check
     # ------------------------------------------------------------------ #
     @commands.is_owner()
-    @commands.command(name="dashboardexample")
+    @commands.hybrid_command(name="dashboardexample", description="Show whether the WebDashboard integration is available.")
     async def _status(self, ctx: commands.Context) -> None:
         """Show whether the WebDashboard integration is available (example check)."""
         # Discord output -> tr_lang with the per-guild language setting.

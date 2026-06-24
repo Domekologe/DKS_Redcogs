@@ -31,10 +31,18 @@ class GuildSettingsModal(discord.ui.Modal, title="WoW-Gildenprofil (aktives Prof
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "WoW-Gildenprofil (aktives Profil)", "WoW guild profile (active profile)"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.region.label = tr_lang(lang, "Region", "Region")
+        self.version.label = tr_lang(lang, "Version", "Version")
+        self.version.placeholder = tr_lang(lang, "retail oder mop_classic", "retail or mop_classic")
+        self.realm.label = tr_lang(lang, "Realm (Slug)", "Realm (slug)")
+        self.guild_name.label = tr_lang(lang, "Gildenname (exakt)", "Guild name (exact)")
+        self.language.label = tr_lang(lang, "Bot-Sprache", "Bot language")
+        self.language.placeholder = tr_lang(lang, "de-DE oder en-US", "de-DE or en-US")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -74,12 +82,15 @@ class BotSetupModal(discord.ui.Modal, title="Blizzard API (Bot-Besitzer)"):
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation") -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Blizzard API (Bot-Besitzer)", "Blizzard API (bot owner)"))
         self.cog = cog
+        self.lang = lang
+        self.client_id.label = tr_lang(lang, "Client ID", "Client ID")
+        self.client_secret.label = tr_lang(lang, "Client Secret", "Client Secret")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "de-DE"
+        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "en-US"
         if interaction.user.id not in self.cog.bot.owner_ids:
             await interaction.response.send_message(
                 tr_lang(glang, "Nur Bot-Besitzer.", "Bot owner only."), ephemeral=True
@@ -111,12 +122,18 @@ class MasterSetupModal(discord.ui.Modal, title="Globale Defaults"):
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation") -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Globale Defaults", "Global defaults"))
         self.cog = cog
+        self.lang = lang
+        self.default_language.label = tr_lang(lang, "Sprache", "Language")
+        self.default_region.label = tr_lang(lang, "Region", "Region")
+        self.default_version.label = tr_lang(lang, "Version", "Version")
+        self.dashboard_enabled.label = tr_lang(lang, "Dashboard an (ja/nein)", "Dashboard on (yes/no)")
+        self.dashboard_enabled.placeholder = tr_lang(lang, "ja", "yes")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "de-DE"
+        glang = await self.cog._guild_lang(interaction.guild) if interaction.guild else "en-US"
         if interaction.user.id not in self.cog.bot.owner_ids:
             await interaction.response.send_message(
                 tr_lang(glang, "Nur Bot-Besitzer.", "Bot owner only."), ephemeral=True
@@ -142,10 +159,13 @@ class SetRankTitleModal(discord.ui.Modal, title="Rangtitel (Index 0–9)"):
     rank_index = discord.ui.TextInput(label="Index", placeholder="0", max_length=2, required=True)
     title = discord.ui.TextInput(label="Anzeigetitel", max_length=64, required=True)
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Rangtitel (Index 0–9)", "Rank title (index 0–9)"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.rank_index.label = tr_lang(lang, "Index", "Index")
+        self.title.label = tr_lang(lang, "Anzeigetitel", "Display title")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -185,10 +205,13 @@ class MapRankModal(discord.ui.Modal, title="Rang → Discord-Rolle"):
     rank_name = discord.ui.TextInput(label="Rangname (wie Mapping)", max_length=64, required=True)
     role_id = discord.ui.TextInput(label="Rollen-ID", placeholder="1234567890", max_length=22, required=True)
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Rang → Discord-Rolle", "Rank → Discord role"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.rank_name.label = tr_lang(lang, "Rangname (wie Mapping)", "Rank name (as in mapping)")
+        self.role_id.label = tr_lang(lang, "Rollen-ID", "Role ID")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -216,7 +239,12 @@ class MapRankModal(discord.ui.Modal, title="Rang → Discord-Rolle"):
         cfg.setdefault("rank_mapping_by_profile", {})[pk] = m
         await self.cog.config.guild(self.guild).set(cfg)
         await interaction.response.send_message(
-            f"Mapping: `{self.rank_name.value}` → {role.mention}", ephemeral=True
+            tr_lang(
+                glang,
+                f"Mapping: `{self.rank_name.value}` → {role.mention}",
+                f"Mapping: `{self.rank_name.value}` → {role.mention}",
+            ),
+            ephemeral=True,
         )
 
 
@@ -229,10 +257,12 @@ class SyncIntervalModal(discord.ui.Modal, title="Auto Rang-Sync Intervall"):
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Auto Rang-Sync Intervall", "Auto rank-sync interval"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.minutes.label = tr_lang(lang, "Minuten (0 = aus)", "Minutes (0 = off)")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -283,10 +313,14 @@ class OnboardingSetupModal(discord.ui.Modal, title="Onboarding: Kanal & Rollen")
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Onboarding: Kanal & Rollen", "Onboarding: channel & roles"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.channel_id.label = tr_lang(lang, "Onboarding-Channel-ID (0 = unverändert)", "Onboarding channel ID (0 = unchanged)")
+        self.new_role_id.label = tr_lang(lang, "Rolle „onboarding-new“ ID", "Role „onboarding-new“ ID")
+        self.complete_role_id.label = tr_lang(lang, "Rolle „onboarding-complete“ ID", "Role „onboarding-complete“ ID")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -343,12 +377,15 @@ class AdminPickOneMemberView(discord.ui.View):
         officer: discord.Member,
         *,
         mode: str,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.officer = officer
         self.mode = mode
+        self.lang = lang
+        self.pick.placeholder = tr_lang(lang, "Mitglied wählen", "Pick a member")
 
     @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Mitglied wählen", min_values=1, max_values=1)
     async def pick(self, interaction: discord.Interaction, select: discord.ui.UserSelect) -> None:
@@ -411,10 +448,13 @@ class RankLockAddModal(discord.ui.Modal, title="Rank-Lock: Rang sperren"):
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Rank-Lock: Rang sperren", "Rank lock: lock a rank"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.line.label = tr_lang(lang, "Rangname oder Index (0–9), wie in der WebUI", "Rank name or index (0–9), as in the WebUI")
+        self.line.placeholder = tr_lang(lang, "z.B. Kriegsfürst oder 3", "e.g. Warlord or 3")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:
@@ -463,10 +503,13 @@ class RankLockRemoveModal(discord.ui.Modal, title="Rank-Lock: Eintrag entfernen"
         required=True,
     )
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild) -> None:
-        super().__init__()
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, lang: str = "en-US") -> None:
+        super().__init__(title=tr_lang(lang, "Rank-Lock: Eintrag entfernen", "Rank lock: remove entry"))
         self.cog = cog
         self.guild = guild
+        self.lang = lang
+        self.line.label = tr_lang(lang, "Exakt oder Teil des Eintrags (Groß/Klein egal)", "Exact or part of the entry (case-insensitive)")
+        self.line.placeholder = tr_lang(lang, "z.B. Kriegsfürst", "e.g. Warlord")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not interaction.guild:

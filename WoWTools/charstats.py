@@ -136,7 +136,7 @@ class CharStats(commands.Cog):
     ):
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
-        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         region = region.lower()
         #locale = _resolve_locale(locale)
         realm_slug = realm.lower().replace(" ", "-")

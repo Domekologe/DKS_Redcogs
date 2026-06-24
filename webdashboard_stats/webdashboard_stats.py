@@ -1,4 +1,4 @@
-"""WebServerStats – collects server statistics for the DKS web dashboard.
+"""WebDashboardStats – collects server statistics for the DKS web dashboard.
 
 Data is stored in daily buckets (and for status/activity in hourly samples) in the
 Red config and queried by the WebDashboard gateway via public read methods
@@ -22,7 +22,7 @@ from discord.ext import tasks
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 
-log = logging.getLogger("red.dks.web_serverstats")
+log = logging.getLogger("red.dks.webdashboard_stats")
 
 RETENTION_DAYS = 400          # how long daily buckets are kept
 SAMPLE_MINUTES = 30           # interval of the status/activity snapshots
@@ -37,12 +37,16 @@ def _daykey(dt: Optional[datetime] = None) -> str:
     return (dt or _utcnow()).strftime("%Y-%m-%d")
 
 
-class WebServerStats(commands.Cog):
+class WebDashboardStats(commands.Cog):
     """Server statistics for the DKS web dashboard."""
 
     def __init__(self, bot: Red) -> None:
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0x57_57_53_01, force_registration=True)
+        # cog_name pinned to the previous class name so existing stored stats
+        # (Config namespace) are preserved across the web_serverstats -> webdashboard_stats rename.
+        self.config = Config.get_conf(
+            self, identifier=0x57_57_53_01, force_registration=True, cog_name="WebServerStats"
+        )
         self.config.register_guild(
             enabled=True,
             days={},            # {daykey: {messages, joins, leaves, members, voice_minutes}}

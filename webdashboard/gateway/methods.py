@@ -1533,19 +1533,21 @@ async def pages_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
-# ----- Server statistics (WebServerStats cog) ------------------------------ #
+# ----- Server statistics (WebDashboardStats cog) --------------------------- #
 def _serverstats(gateway: Any):
     bot = gateway.bot
-    cog = bot.get_cog("WebServerStats")
-    if cog is not None:
-        return cog
-    # Fallback: find the cog via class name or module (web_serverstats),
-    # in case the qualified name differs.
+    # Current name first, then the legacy name (web_serverstats was renamed).
+    for cog_name in ("WebDashboardStats", "WebServerStats"):
+        cog = bot.get_cog(cog_name)
+        if cog is not None:
+            return cog
+    # Fallback: find the cog via class name or package module, in case the
+    # qualified name differs.
     for c in bot.cogs.values():
         try:
-            if type(c).__name__ == "WebServerStats":
+            if type(c).__name__ in ("WebDashboardStats", "WebServerStats"):
                 return c
-            if str(getattr(type(c), "__module__", "")).split(".")[0] == "web_serverstats":
+            if str(getattr(type(c), "__module__", "")).split(".")[0] in ("webdashboard_stats", "web_serverstats"):
                 return c
         except Exception:
             continue
@@ -1560,7 +1562,7 @@ async def _stats_call(gateway: Any, params: Dict[str, Any], method_name: str, *e
     await _require(gateway, ctx, "guild_member")
     cog = _serverstats(gateway)
     if cog is None:
-        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+        raise RpcError(INVALID_PARAMS, "WebDashboardStats-Cog ist nicht geladen")
     args = params.get("args") or {}
     days = int(args.get("days", 30) or 30)
     fn = getattr(cog, method_name)
@@ -1688,7 +1690,7 @@ async def serverstats_member_drilldown(gateway: Any, params: Dict[str, Any]) -> 
     await _require(gateway, ctx, "guild_member")
     cog = _serverstats(gateway)
     if cog is None:
-        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+        raise RpcError(INVALID_PARAMS, "WebDashboardStats-Cog ist nicht geladen")
     return await cog.stats_member_drilldown(ctx.guild, member_id, int(args.get("days", 30) or 30))
 
 
@@ -1703,7 +1705,7 @@ async def serverstats_channel_drilldown(gateway: Any, params: Dict[str, Any]) ->
     await _require(gateway, ctx, "guild_member")
     cog = _serverstats(gateway)
     if cog is None:
-        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+        raise RpcError(INVALID_PARAMS, "WebDashboardStats-Cog ist nicht geladen")
     return await cog.stats_channel_drilldown(ctx.guild, channel_id, int(args.get("days", 30) or 30))
 
 
@@ -1715,7 +1717,7 @@ async def _stats_guild_only(gateway: Any, params: Dict[str, Any], method_name: s
     await _require(gateway, ctx, "guild_member")
     cog = _serverstats(gateway)
     if cog is None:
-        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+        raise RpcError(INVALID_PARAMS, "WebDashboardStats-Cog ist nicht geladen")
     return await getattr(cog, method_name)(ctx.guild)
 
 
@@ -1732,7 +1734,7 @@ async def serverstats_heatmap(gateway: Any, params: Dict[str, Any]) -> Dict[str,
     await _require(gateway, ctx, "guild_member")
     cog = _serverstats(gateway)
     if cog is None:
-        raise RpcError(INVALID_PARAMS, "WebServerStats-Cog ist nicht geladen")
+        raise RpcError(INVALID_PARAMS, "WebDashboardStats-Cog ist nicht geladen")
     args = params.get("args") or {}
     metric = str(args.get("metric", "messages"))
     return await cog.stats_heatmap(ctx.guild, int(args.get("days", 30) or 30), metric)

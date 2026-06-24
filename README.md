@@ -28,7 +28,7 @@ besteht aus diesen Cogs hier:
 | Cog | Zweck |
 |---|---|
 | `webdashboard` | Companion-Cog: RPC-Gateway, Auth, Branding, Custom Pages, Audit-Log. Mit `[p]dksdashboard` verwalten. |
-| `web_serverstats` | Sammelt Server-Statistiken (Nachrichten/Voice/Status/Einladungen/Aktivität) für die `/stats`-Seite. |
+| `webdashboard_stats` | Sammelt Server-Statistiken (Nachrichten/Voice/Status/Einladungen/Aktivität) für die `/stats`-Seite. |
 | `dashboardtemplate` | **Kopier-Vorlage** mit allen Feature-Beispielen (Widget, Panels, Liste mit Anlegen/Bearbeiten/Löschen, globales Panel). |
 | `dashboardexample` | Minimal-Beispiel der Integration. |
 
@@ -55,7 +55,7 @@ Jeder Cog erscheint als **ein Modul mit Tabs** auf der Server-Detailseite.
 | WoWTools | Beta 0.1.2 | Get Ingame Stats, Information, etc from WoW Characters | `charinfo`, `charstats`, `comparechars`, `cvar`, `gearcheck`, `raiderio`, `raidinfo`, `rating`, `sbset`, `serverset`, `talentcheck`, `wowscoreboard`, `wowtoken` | Karlo (Original) / Domekologe |
 | wowguild_automation | Info / On Work | WoW Guild automation for new members/guests. | `/wow-user`, `/wow-admin`, `/wow-masteradmin` | Domekologe |
 | webdashboard | Release 1.0.0 | Companion cog: RPC gateway, auth, branding, custom pages, audit log + the cog-integration framework. | `dksdashboard` (status/start/stop/bind/token/regen) | Domekologe |
-| web_serverstats | Release 1.0.0 | Collects server statistics (messages/voice/status/invites/activity, heatmaps, peaks) for the dashboard `/stats` page. | *Listeners only (no commands)* | Domekologe |
+| webdashboard_stats | Release 1.0.0 | Collects server statistics (messages/voice/status/invites/activity, heatmaps, peaks) for the dashboard `/stats` page. | *Listeners only (no commands)* | Domekologe |
 | dashboardtemplate | Template | Annotated reference cog for the DKS dashboard integration (incl. the `L`/`tr`/`tr_lang` i18n helpers). | `dashboardtemplate` | Domekologe |
 | dashboardexample | Example | Minimal example of dashboard integration (widget + panel). | `dashboardexample` | Domekologe |
 

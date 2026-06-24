@@ -20,7 +20,7 @@ class NekoAPI(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=0xD0DE20253, force_registration=True)
-        self.config.register_guild(language="de-DE")
+        self.config.register_guild(language="en-US")
 
     async def cog_load(self) -> None:
         register_dashboard(self)
@@ -31,7 +31,7 @@ class NekoAPI(commands.Cog):
     async def _lang(self, ctx) -> str:
         guild = getattr(ctx, "guild", None)
         if guild is None:
-            return "de-DE"
+            return "en-US"
         return await self.config.guild(guild).language()
 
     # ------------------------------------------------------------------

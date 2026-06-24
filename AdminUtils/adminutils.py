@@ -12,7 +12,7 @@ from .dks_dashboard import (
     dashboard_widget, dashboard_panel, WidgetData,
     PanelSchema, Field, SubmitResult,
     register_dashboard, unregister_dashboard,
-    L, tr,
+    L, tr, tr_lang,
 )
 
 
@@ -52,11 +52,12 @@ class AdminUtils(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=708921553001, force_registration=True)
         self.config.register_guild(
+            language="en-US",
             templates={
-                "kick_success": "✅ {member} wurde gekickt. Grund: {reason}",
-                "ban_success": "✅ {member} wurde gebannt. Grund: {reason} | Nachrichten: {delete_days} Tage",
-                "timeout_success": "✅ {member} ist {minutes} Minuten im Timeout. Grund: {reason}",
-                "purge_success": "✅ {deleted} Nachrichten gelöscht. Ausnahmen: {exceptions}",
+                "kick_success": "✅ {member} was kicked. Reason: {reason}",
+                "ban_success": "✅ {member} was banned. Reason: {reason} | Messages: {delete_days} days",
+                "timeout_success": "✅ {member} is in timeout for {minutes} minutes. Reason: {reason}",
+                "purge_success": "✅ {deleted} messages deleted. Exceptions: {exceptions}",
             }
         )
         self._dashboard_attached = False
@@ -95,6 +96,10 @@ class AdminUtils(commands.Cog):
         return PanelSchema(
             description=tr(ctx, "Erfolgsmeldungen für Kick/Ban/Timeout/Purge.", "Success messages for Kick/Ban/Timeout/Purge."),
             fields=[
+                Field.select("language", L("Sprache", "Language"), [
+                    {"value": "de-DE", "label": "Deutsch"},
+                    {"value": "en-US", "label": "English"},
+                ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
                 Field.textarea("kick_success", "Kick", value=t.get("kick_success", ""),
                                max_length=500, variables=[member, reason]),
                 Field.textarea("ban_success", "Ban", value=t.get("ban_success", ""),
@@ -112,6 +117,8 @@ class AdminUtils(commands.Cog):
 
     @adminutils_templates_panel.on_submit
     async def _save_adminutils_templates(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
         cur = await self.config.guild(ctx.guild).templates()
         for k in ("kick_success", "ban_success", "timeout_success", "purge_success"):
             if k in data:
@@ -246,6 +253,7 @@ class AdminUtils(commands.Cog):
         *,
         except_users: Optional[str] = None
     ):
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         # 0) Defer immediately for slash/hybrid so nothing "hangs"
         deferred = False
         if getattr(ctx, "interaction", None) is not None:
@@ -307,7 +315,7 @@ class AdminUtils(commands.Cog):
 
         async def update_progress():
             nonlocal progress_msg
-            text = f"🧹 Lösche… {total_deleted}/{total_target} erledigt."
+            text = tr_lang(lang, f"🧹 Lösche… {total_deleted}/{total_target} erledigt.", f"🧹 Deleting… {total_deleted}/{total_target} done.")
             if getattr(ctx, "interaction", None) is not None:
                 # For hybrid/slash: follow-up message (ephemeral) or edit
                 if progress_msg is None:
@@ -331,7 +339,7 @@ class AdminUtils(commands.Cog):
                 bulk=True
             )
         except discord.Forbidden:
-            return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Keine Berechtigung zum Löschen.", "❌ No permission to delete."))
         except discord.HTTPException:
             # Fallback: if purge fails, just continue with single deletion
             recent_deleted = []
@@ -374,7 +382,7 @@ class AdminUtils(commands.Cog):
         # 4) Completion
         if progress_msg is not None:
             try:
-                await progress_msg.edit(content=f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}")
+                await progress_msg.edit(content=tr_lang(lang, f"✅ {total_deleted} Nachrichten gelöscht. Ausnahmen: {len(except_ids)}", f"✅ {total_deleted} messages deleted. Exceptions: {len(except_ids)}"))
             except discord.HTTPException:
                 pass
 
@@ -406,6 +414,7 @@ class AdminUtils(commands.Cog):
         *,
         except_users: Optional[str] = None
     ):
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         # Defer slash/hybrid immediately so nothing "hangs"
         if getattr(ctx, "interaction", None) is not None:
             try:
@@ -467,13 +476,13 @@ class AdminUtils(commands.Cog):
                 bulk=True  # -> very fast (but only <= 14 days)
             )
         except discord.Forbidden:
-            return await self._reply(ctx, "❌ Keine Berechtigung zum Löschen.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Keine Berechtigung zum Löschen.", "❌ No permission to delete."))
         except discord.HTTPException as e:
-            return await self._reply(ctx, f"❌ HTTP-Fehler beim Löschen: {e}")
+            return await self._reply(ctx, tr_lang(lang, f"❌ HTTP-Fehler beim Löschen: {e}", f"❌ HTTP error while deleting: {e}"))
 
         await self._reply(
             ctx,
-            f"✅ {len(deleted)} Nachrichten (≤14 Tage) gelöscht. Ausnahmen: {len(except_ids)}"
+            tr_lang(lang, f"✅ {len(deleted)} Nachrichten (≤14 Tage) gelöscht. Ausnahmen: {len(except_ids)}", f"✅ {len(deleted)} messages (≤14 days) deleted. Exceptions: {len(except_ids)}")
         )
         
     # ---- MESSAGE MOVE (copy + optionally delete) ----
@@ -495,22 +504,26 @@ class AdminUtils(commands.Cog):
         destination: discord.TextChannel,
         delete_original: Optional[bool] = True
     ):
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         mid = _parse_message_id(message)
         if mid is None:
-            return await self._reply(ctx, "❌ Ungültige Message-ID oder Message-Link.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Ungültige Message-ID oder Message-Link.", "❌ Invalid message ID or message link."))
 
         # Determine channel from message link (or fallback: current channel)
         channel = ctx.channel
         try:
             msg = await channel.fetch_message(mid)
         except discord.NotFound:
-            return await self._reply(ctx, "❌ Nachricht nicht gefunden (Channel prüfen!).")
+            return await self._reply(ctx, tr_lang(lang, "❌ Nachricht nicht gefunden (Channel prüfen!).", "❌ Message not found (check the channel!)."))
         except discord.Forbidden:
-            return await self._reply(ctx, "❌ Keine Berechtigung, die Nachricht zu lesen.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Keine Berechtigung, die Nachricht zu lesen.", "❌ No permission to read the message."))
 
-        content = (
+        content = tr_lang(
+            lang,
             f"**Nachricht verschoben aus** {channel.mention} "
-            f"von {msg.author.mention}:\n{msg.content or ''}"
+            f"von {msg.author.mention}:\n{msg.content or ''}",
+            f"**Message moved from** {channel.mention} "
+            f"by {msg.author.mention}:\n{msg.content or ''}",
         )
 
         files = []
@@ -523,7 +536,7 @@ class AdminUtils(commands.Cog):
         try:
             await destination.send(content=content, files=files if files else None)
         except discord.Forbidden:
-            return await self._reply(ctx, "❌ Keine Berechtigung im Ziel-Channel.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Keine Berechtigung im Ziel-Channel.", "❌ No permission in the target channel."))
 
         if delete_original:
             try:
@@ -531,13 +544,18 @@ class AdminUtils(commands.Cog):
             except discord.Forbidden:
                 return await self._reply(
                     ctx,
-                    "⚠️ Nachricht kopiert, aber ich darf das Original nicht löschen."
+                    tr_lang(lang, "⚠️ Nachricht kopiert, aber ich darf das Original nicht löschen.", "⚠️ Message copied, but I'm not allowed to delete the original.")
                 )
 
         await self._reply(
             ctx,
-            f"✅ Nachricht nach {destination.mention} kopiert"
-            f"{' und Original gelöscht' if delete_original else ''}."
+            tr_lang(
+                lang,
+                f"✅ Nachricht nach {destination.mention} kopiert"
+                f"{' und Original gelöscht' if delete_original else ''}.",
+                f"✅ Message copied to {destination.mention}"
+                f"{' and original deleted' if delete_original else ''}.",
+            )
         )
 
 
@@ -560,8 +578,9 @@ class AdminUtils(commands.Cog):
         source_channel: discord.VoiceChannel,
         dest_channel: discord.VoiceChannel
     ):
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         if not ctx.interaction:
-            return await self._reply(ctx, "❌ Dieses Kommando nur als Slash möglich.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Dieses Kommando nur als Slash möglich.", "❌ This command is only available as a slash command."))
 
         # defer immediately -> Discord satisfied
         await ctx.interaction.response.defer(ephemeral=True, thinking=True)
@@ -574,9 +593,9 @@ class AdminUtils(commands.Cog):
             except Exception:
                 failed.append(member.display_name)
 
-        msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
+        msg = tr_lang(lang, f"✅ Verschoben: {', '.join(moved)}", f"✅ Moved: {', '.join(moved)}") if moved else tr_lang(lang, "❌ Niemand verschoben.", "❌ Nobody moved.")
         if failed:
-            msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
+            msg += tr_lang(lang, f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}", f"\n⚠️ Failed: {', '.join(failed)}")
 
         await ctx.interaction.followup.send(msg, ephemeral=True)
 
@@ -598,13 +617,14 @@ class AdminUtils(commands.Cog):
         source_channel: discord.VoiceChannel,
         dest_channel: discord.VoiceChannel
     ):
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
         if not ctx.interaction:
-            return await self._reply(ctx, "❌ Dieses Kommando nur als Slash möglich.")
+            return await self._reply(ctx, tr_lang(lang, "❌ Dieses Kommando nur als Slash möglich.", "❌ This command is only available as a slash command."))
 
         members = source_channel.members
         if not members:
             await ctx.interaction.response.defer(ephemeral=True, thinking=True)
-            return await ctx.interaction.followup.send("❌ Im Quellchannel sind keine Mitglieder.", ephemeral=True)
+            return await ctx.interaction.followup.send(tr_lang(lang, "❌ Im Quellchannel sind keine Mitglieder.", "❌ There are no members in the source channel."), ephemeral=True)
 
         # defer immediately
         await ctx.interaction.response.defer(ephemeral=True, thinking=True)
@@ -616,15 +636,16 @@ class AdminUtils(commands.Cog):
         ]
 
         class MemberSelect(discord.ui.View):
-            def __init__(self, ctx, options, timeout=60):
+            def __init__(self, ctx, options, lang, timeout=60):
                 super().__init__(timeout=timeout)
                 self.ctx = ctx
+                self.lang = lang
                 self.selected: list[int] = []
                 self.confirmed = False
 
                 # Add the menu directly here (that's enough!)
                 self.select_menu = discord.ui.Select(
-                    placeholder="Wähle Mitglieder zum Verschieben",
+                    placeholder=tr_lang(lang, "Wähle Mitglieder zum Verschieben", "Select members to move"),
                     options=options,
                     min_values=1,
                     max_values=len(options),
@@ -632,18 +653,21 @@ class AdminUtils(commands.Cog):
                 self.select_menu.callback = self.select_callback
                 self.add_item(self.select_menu)
 
+                self.confirm.label = tr_lang(lang, "Bestätigen", "Confirm")
+                self.cancel.label = tr_lang(lang, "Abbrechen", "Cancel")
+
             async def select_callback(self, interaction: discord.Interaction):
                 if interaction.user.id != self.ctx.author.id:
-                    return await interaction.response.send_message("❌ Nicht dein Kommando.", ephemeral=True)
+                    return await interaction.response.send_message(tr_lang(self.lang, "❌ Nicht dein Kommando.", "❌ Not your command."), ephemeral=True)
                 self.selected = [int(v) for v in self.select_menu.values]
-                await interaction.response.send_message("✅ Auswahl gespeichert. Bitte 'Bestätigen' klicken.", ephemeral=True)
+                await interaction.response.send_message(tr_lang(self.lang, "✅ Auswahl gespeichert. Bitte 'Bestätigen' klicken.", "✅ Selection saved. Please click 'Confirm'."), ephemeral=True)
 
             @discord.ui.button(label="Bestätigen", style=discord.ButtonStyle.success)
             async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
                 if interaction.user.id != self.ctx.author.id:
-                    return await interaction.response.send_message("❌ Nicht für dich.", ephemeral=True)
+                    return await interaction.response.send_message(tr_lang(self.lang, "❌ Nicht für dich.", "❌ Not for you."), ephemeral=True)
                 if not self.selected:
-                    return await interaction.response.send_message("❌ Keine Auswahl getroffen.", ephemeral=True)
+                    return await interaction.response.send_message(tr_lang(self.lang, "❌ Keine Auswahl getroffen.", "❌ No selection made."), ephemeral=True)
                 self.confirmed = True
                 self.stop()
                 for child in self.children:
@@ -654,12 +678,12 @@ class AdminUtils(commands.Cog):
                 except discord.NotFound:
                     pass
 
-                await interaction.response.send_message("✅ Bestätigt, verschiebe Mitglieder…", ephemeral=True)
+                await interaction.response.send_message(tr_lang(self.lang, "✅ Bestätigt, verschiebe Mitglieder…", "✅ Confirmed, moving members…"), ephemeral=True)
 
             @discord.ui.button(label="Abbrechen", style=discord.ButtonStyle.danger)
             async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
                 if interaction.user.id != self.ctx.author.id:
-                    return await interaction.response.send_message("❌ Nicht für dich.", ephemeral=True)
+                    return await interaction.response.send_message(tr_lang(self.lang, "❌ Nicht für dich.", "❌ Not for you."), ephemeral=True)
                 self.confirmed = False
                 self.stop()
                 for child in self.children:
@@ -670,13 +694,13 @@ class AdminUtils(commands.Cog):
                 except discord.NotFound:
                     pass
 
-                await interaction.response.send_message("❌ Abgebrochen.", ephemeral=True)
+                await interaction.response.send_message(tr_lang(self.lang, "❌ Abgebrochen.", "❌ Cancelled."), ephemeral=True)
 
 
         # Send the view via followup (since we already deferred)
-        view = MemberSelect(ctx, options)
+        view = MemberSelect(ctx, options, lang)
         await ctx.interaction.followup.send(
-            "➡️ Wähle die Mitglieder und bestätige oder breche ab:",
+            tr_lang(lang, "➡️ Wähle die Mitglieder und bestätige oder breche ab:", "➡️ Select the members and confirm or cancel:"),
             view=view,
             ephemeral=True
         )
@@ -697,9 +721,9 @@ class AdminUtils(commands.Cog):
                 except Exception:
                     failed.append(member.display_name)
 
-        msg = f"✅ Verschoben: {', '.join(moved)}" if moved else "❌ Niemand verschoben."
+        msg = tr_lang(lang, f"✅ Verschoben: {', '.join(moved)}", f"✅ Moved: {', '.join(moved)}") if moved else tr_lang(lang, "❌ Niemand verschoben.", "❌ Nobody moved.")
         if failed:
-            msg += f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}"
+            msg += tr_lang(lang, f"\n⚠️ Fehlgeschlagen: {', '.join(failed)}", f"\n⚠️ Failed: {', '.join(failed)}")
 
         await ctx.interaction.followup.send(msg, ephemeral=True)
 
@@ -745,11 +769,12 @@ class AdminUtils(commands.Cog):
         dest_role: discord.Role
     ):
         await interaction.response.defer(ephemeral=True)
+        lang = await self.config.guild(interaction.guild).language() if interaction.guild else "en-US"
 
         overwrites = channel.overwrites.get(source_role)
         if overwrites is None:
             return await interaction.followup.send(
-                f"❌ Die Rolle {source_role.mention} hat **keine spezifischen Overwrites** in {channel.mention}.",
+                tr_lang(lang, f"❌ Die Rolle {source_role.mention} hat **keine spezifischen Overwrites** in {channel.mention}.", f"❌ The role {source_role.mention} has **no specific overwrites** in {channel.mention}."),
                 ephemeral=True
             )
 
@@ -757,17 +782,17 @@ class AdminUtils(commands.Cog):
             await channel.set_permissions(dest_role, overwrite=overwrites)
         except discord.Forbidden:
             return await interaction.followup.send(
-                "❌ Ich habe nicht genügend Berechtigungen, um diese Permissions zu setzen.",
+                tr_lang(lang, "❌ Ich habe nicht genügend Berechtigungen, um diese Permissions zu setzen.", "❌ I don't have enough permissions to set these permissions."),
                 ephemeral=True
             )
         except discord.HTTPException as e:
             return await interaction.followup.send(
-                f"❌ Fehler von Discord: `{e}`",
+                tr_lang(lang, f"❌ Fehler von Discord: `{e}`", f"❌ Error from Discord: `{e}`"),
                 ephemeral=True
             )
 
         await interaction.followup.send(
-            f"✅ Rechte von {source_role.mention} wurden für {channel.mention} → {dest_role.mention} kopiert.",
+            tr_lang(lang, f"✅ Rechte von {source_role.mention} wurden für {channel.mention} → {dest_role.mention} kopiert.", f"✅ Permissions of {source_role.mention} were copied for {channel.mention} → {dest_role.mention}."),
             ephemeral=True
         )
 
@@ -791,19 +816,20 @@ class AdminUtils(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
+        lang = await self.config.guild(guild).language() if guild else "en-US"
         if guild is None:
-            return await interaction.followup.send("❌ Nur auf einem Server nutzbar.", ephemeral=True)
+            return await interaction.followup.send(tr_lang(lang, "❌ Nur auf einem Server nutzbar.", "❌ Only usable on a server."), ephemeral=True)
 
         name = target_role_name.strip()
         if not name or len(name) > 100:
             return await interaction.followup.send(
-                "❌ Der Rollenname muss zwischen 1 und 100 Zeichen lang sein.",
+                tr_lang(lang, "❌ Der Rollenname muss zwischen 1 und 100 Zeichen lang sein.", "❌ The role name must be between 1 and 100 characters long."),
                 ephemeral=True
             )
 
         if discord.utils.get(guild.roles, name=name):
             return await interaction.followup.send(
-                f"❌ Eine Rolle mit dem Namen `{name}` existiert bereits.",
+                tr_lang(lang, f"❌ Eine Rolle mit dem Namen `{name}` existiert bereits.", f"❌ A role named `{name}` already exists."),
                 ephemeral=True
             )
 
@@ -825,13 +851,16 @@ class AdminUtils(commands.Cog):
             new_role = await guild.create_role(**create_kwargs)
         except discord.Forbidden:
             return await interaction.followup.send(
-                "❌ Ich habe nicht genügend Berechtigungen, um diese Rolle zu erstellen "
-                "(Rolle des Bots muss über der Quellrolle liegen).",
+                tr_lang(lang,
+                    "❌ Ich habe nicht genügend Berechtigungen, um diese Rolle zu erstellen "
+                    "(Rolle des Bots muss über der Quellrolle liegen).",
+                    "❌ I don't have enough permissions to create this role "
+                    "(the bot's role must be above the source role)."),
                 ephemeral=True
             )
         except discord.HTTPException as e:
             return await interaction.followup.send(
-                f"❌ Fehler von Discord: `{e}`",
+                tr_lang(lang, f"❌ Fehler von Discord: `{e}`", f"❌ Error from Discord: `{e}`"),
                 ephemeral=True
             )
 
@@ -849,20 +878,21 @@ class AdminUtils(commands.Cog):
             except (discord.Forbidden, discord.HTTPException):
                 position_ok = False
 
-        msg = (
-            f"✅ Rolle {new_role.mention} wurde mit den Rechten von {source_role.mention} erstellt."
+        msg = tr_lang(lang,
+            f"✅ Rolle {new_role.mention} wurde mit den Rechten von {source_role.mention} erstellt.",
+            f"✅ Role {new_role.mention} was created with the permissions of {source_role.mention}.",
         )
         if copied_channels:
-            msg += f"\n📁 Channel-Rechte in **{copied_channels}** Channel(s) kopiert."
+            msg += tr_lang(lang, f"\n📁 Channel-Rechte in **{copied_channels}** Channel(s) kopiert.", f"\n📁 Channel permissions copied in **{copied_channels}** channel(s).")
         elif not had_channel_overwrites:
-            msg += "\nℹ️ Keine Channel-spezifischen Rechte zum Kopieren gefunden."
+            msg += tr_lang(lang, "\nℹ️ Keine Channel-spezifischen Rechte zum Kopieren gefunden.", "\nℹ️ No channel-specific permissions found to copy.")
         if failed_channels:
             shown = ", ".join(failed_channels[:15])
             if len(failed_channels) > 15:
-                shown += f" (+{len(failed_channels) - 15} weitere)"
-            msg += f"\n⚠️ Channel-Rechte fehlgeschlagen: {shown}"
+                shown += tr_lang(lang, f" (+{len(failed_channels) - 15} weitere)", f" (+{len(failed_channels) - 15} more)")
+            msg += tr_lang(lang, f"\n⚠️ Channel-Rechte fehlgeschlagen: {shown}", f"\n⚠️ Channel permissions failed: {shown}")
         if not position_ok:
-            msg += "\n⚠️ Rollenposition konnte nicht übernommen werden."
+            msg += tr_lang(lang, "\n⚠️ Rollenposition konnte nicht übernommen werden.", "\n⚠️ Role position could not be applied.")
 
         await interaction.followup.send(msg, ephemeral=True)
 

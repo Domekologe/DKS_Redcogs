@@ -54,7 +54,7 @@ class WarcraftLogsClassic(commands.Cog):
         }
         default_guild = {
             "notification_channel": None,
-            "language": "de-DE",
+            "language": "en-US",
         }
 
         self.config.register_user(**default_user)
@@ -112,7 +112,7 @@ class WarcraftLogsClassic(commands.Cog):
                         {"value": "de-DE", "label": "Deutsch"},
                         {"value": "en-US", "label": "English"},
                     ],
-                    value=str(language or "de-DE"),
+                    value=str(language or "en-US"),
                     reload_on_change=True,
                 ),
                 Field.select(
@@ -125,7 +125,7 @@ class WarcraftLogsClassic(commands.Cog):
     @wcl_guild_panel.on_submit
     async def _save_wcl_guild(self, ctx, data):
         if "language" in data:
-            await self.config.guild(ctx.guild).language.set(str(data["language"]) or "de-DE")
+            await self.config.guild(ctx.guild).language.set(str(data["language"]) or "en-US")
         if "notification_channel" in data:
             v = data["notification_channel"]
             await self.config.guild(ctx.guild).notification_channel.set(int(v) if v else None)
@@ -225,7 +225,7 @@ class WarcraftLogsClassic(commands.Cog):
             # (This is probably a bug in Red, remove this when it's fixed)
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 
-        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "de-DE"
+        lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"
 
         userdata = await self.config.user(ctx.author).all()
 
@@ -677,12 +677,13 @@ class WarcraftLogsClassic(commands.Cog):
         else:
             return str(dps)
 
-    @commands.group()
+    @commands.hybrid_group(description="Commands for setting up WCL settings.")
     async def wclset(self, ctx: commands.Context):
         """Commands for setting up WCL settings."""
         pass
 
-    @wclset.command(name="charname")
+    @wclset.command(name="charname", description="Set your character's name.")
+    @app_commands.describe(charname="Your character's name")
     async def wclset_charname(self, ctx, charname: str):
         """Set your character's name."""
         await self.config.user(ctx.author).charname.set(charname)
@@ -690,14 +691,16 @@ class WarcraftLogsClassic(commands.Cog):
             _("Your character name was set to {charname}.").format(charname=charname.title())
         )
 
-    @wclset.command(name="realm")
+    @wclset.command(name="realm", description="Set your realm.")
+    @app_commands.describe(realm="Your realm name")
     async def wclset_realm(self, ctx, *, realm: str):
         """Set your realm."""
         realmname = realm.replace(" ", "-")
         await self.config.user(ctx.author).realm.set(realmname)
         await ctx.send(_("Your realm was set to {realm}.").format(realm=realm.title()))
 
-    @wclset.command(name="region")
+    @wclset.command(name="region", description="Set your region.")
+    @app_commands.describe(region="Your region (EU or US)")
     async def wclset_region(self, ctx, region: str):
         """Set your region."""
         valid_regions = ["EU", "US"]
@@ -710,9 +713,10 @@ class WarcraftLogsClassic(commands.Cog):
         await self.config.user(ctx.author).region.set(region)
         await ctx.send(_("Your realm's region was set to {region}.").format(region=region.upper()))
 
-    @wclset.command(name="channel", hidden=True)
+    @wclset.command(name="channel", hidden=True, description="Set the channel where WCL updates will be sent.")
     @commands.guild_only()
     @commands.mod_or_permissions(manage_channels=True)
+    @app_commands.describe(channel="The channel where WCL updates will be sent")
     async def wclset_channel(self, ctx, channel: discord.TextChannel):
         """Set the channel where WCL updates will be sent."""
         await self.config.guild(ctx.guild).notification_channel.set(channel.id)
@@ -720,8 +724,9 @@ class WarcraftLogsClassic(commands.Cog):
             _("WCL updates will now be sent to {channel}.").format(channel=channel.mention)
         )
 
-    @wclset.command(name="settings")
+    @wclset.command(name="settings", description="Show your current settings.")
     @commands.guild_only()
+    @app_commands.describe(user="The user whose settings to show (defaults to yourself)")
     async def wclset_settings(self, ctx, user: discord.User = None):
         """Show your current settings."""
         if not user:
@@ -752,7 +757,7 @@ class WarcraftLogsClassic(commands.Cog):
 
         await ctx.send(box(msg, lang="ini"))
 
-    @wclset.command(name="apikey")
+    @wclset.command(name="apikey", description="Instructions for setting the API key.")
     @checks.is_owner()
     async def wclset_apikey(self, ctx):
         """Instructions for setting the api key."""

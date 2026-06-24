@@ -80,8 +80,9 @@ def _menu_view(
     member: discord.Member,
     *,
     actor: Optional[discord.Member] = None,
+    lang: str = "en-US",
 ) -> CharMainMenuView:
-    return CharMainMenuView(cog, guild, member, actor=actor)
+    return CharMainMenuView(cog, guild, member, actor=actor, lang=lang)
 
 
 class CharMainMenuView(discord.ui.View):
@@ -92,12 +93,18 @@ class CharMainMenuView(discord.ui.View):
         member: discord.Member,
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        self.lang = lang
+        self.add_btn.label = tr_lang(lang, "Chars hinzufügen", "Add characters")
+        self.main_btn.label = tr_lang(lang, "Main setzen", "Set main")
+        self.list_btn.label = tr_lang(lang, "Meine Chars", "My characters")
+        self.remove_btn.label = tr_lang(lang, "Chars entfernen", "Remove characters")
         attach_officer_extras_if_needed(self)
 
     @discord.ui.button(label="Chars hinzufügen", style=discord.ButtonStyle.primary, row=0)
@@ -108,7 +115,7 @@ class CharMainMenuView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=tr_lang(glang, "Welches Spiel?", "Which game?"),
-            view=GamePickView(self.cog, self.guild, self.member, mode="add", actor=self.actor),
+            view=GamePickView(self.cog, self.guild, self.member, mode="add", actor=self.actor, lang=glang),
         )
 
     @discord.ui.button(label="Main setzen", style=discord.ButtonStyle.secondary, row=0)
@@ -121,12 +128,12 @@ class CharMainMenuView(discord.ui.View):
         if not linked:
             await interaction.response.edit_message(
                 content=tr_lang(glang, "Noch keine Chars verknüpft.", "No characters linked yet."),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         await interaction.response.edit_message(
             content=tr_lang(glang, "**Main pro Spiel** — zuerst Version wählen:", "**Main per game** — pick the version first:"),
-            view=MainGamePickView(self.cog, self.guild, self.member, actor=self.actor),
+            view=MainGamePickView(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     @discord.ui.button(label="Meine Chars", style=discord.ButtonStyle.secondary, row=1)
@@ -143,7 +150,7 @@ class CharMainMenuView(discord.ui.View):
         except Exception:
             await interaction.edit_original_response(
                 content=tr_lang(glang, "Char-Liste konnte nicht geladen werden. Nutze `/wow-user` → list-my.", "Character list could not be loaded. Use `/wow-user` → list-my."),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         footer = "\n\n—\n" + _panel_intro(glang)
@@ -151,7 +158,7 @@ class CharMainMenuView(discord.ui.View):
         try:
             await interaction.edit_original_response(
                 content=full,
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
         except discord.HTTPException:
             try:
@@ -170,14 +177,14 @@ class CharMainMenuView(discord.ui.View):
         if not linked:
             await interaction.response.edit_message(
                 content=tr_lang(glang, "Nichts zum Entfernen.", "Nothing to remove."),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         ordered = sorted(linked, key=lambda e: (e["game_type"], e["name"].lower()))
         await interaction.response.edit_message(
             content=self._remove_caption(ordered, 0, glang),
             view=LinkedRemovePageView(
-                self.cog, self.guild, self.actor, ordered, page=0, officer_mode=False
+                self.cog, self.guild, self.actor, ordered, page=0, officer_mode=False, lang=glang
             ),
         )
 
@@ -206,6 +213,7 @@ class GamePickView(discord.ui.View):
         *,
         mode: str,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
@@ -213,6 +221,8 @@ class GamePickView(discord.ui.View):
         self.member = member
         self.mode = mode
         self.actor = actor if actor is not None else member
+        self.lang = lang
+        self.back.label = tr_lang(lang, "◀ Menü", "◀ Menu")
 
     @discord.ui.button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -222,7 +232,7 @@ class GamePickView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     @discord.ui.button(label="Retail", style=discord.ButtonStyle.primary, row=0)
@@ -253,7 +263,7 @@ class GamePickView(discord.ui.View):
                         "(web dashboard / `wow guildsettings`)."
                     ),
                 ),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         names = await self.cog.blizzard.roster_character_names(
@@ -265,7 +275,7 @@ class GamePickView(discord.ui.View):
         if not names:
             await interaction.response.edit_message(
                 content=tr_lang(glang, "Gildenroster leer oder API-Fehler. Prüfe Client-ID/Secret und Profil.", "Guild roster empty or API error. Check client ID/secret and profile."),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         total_pages = max(1, (len(names) + LINKED_PAGE_SIZE - 1) // LINKED_PAGE_SIZE)
@@ -282,7 +292,7 @@ class GamePickView(discord.ui.View):
                 ),
             ),
             view=RosterPageView(
-                self.cog, self.guild, self.member, game, names, page=0, actor=self.actor
+                self.cog, self.guild, self.member, game, names, page=0, actor=self.actor, lang=glang
             ),
         )
 
@@ -298,12 +308,14 @@ class RosterPageView(discord.ui.View):
         page: int,
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        self.lang = lang
         self.game_type = game_type
         self.all_names = all_names
         self.page = max(0, page)
@@ -328,22 +340,22 @@ class RosterPageView(discord.ui.View):
                 )
 
             select = discord.ui.Select(
-                placeholder="Charaktere wählen → Auswahl übernimmt",
+                placeholder=tr_lang(self.lang, "Charaktere wählen → Auswahl übernimmt", "Pick characters → selection applies"),
                 min_values=1,
                 max_values=len(options),
                 options=options,
             )
             select.callback = _select_cb
             self.add_item(select)
-        b_back = discord.ui.Button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=2)
+        b_back = discord.ui.Button(label=tr_lang(self.lang, "◀ Menü", "◀ Menu"), style=discord.ButtonStyle.secondary, row=2)
         b_back.callback = self._back_menu
         self.add_item(b_back)
         if self.page > 0:
-            b = discord.ui.Button(label="◀ Seite", style=discord.ButtonStyle.secondary, row=1)
+            b = discord.ui.Button(label=tr_lang(self.lang, "◀ Seite", "◀ Page"), style=discord.ButtonStyle.secondary, row=1)
             b.callback = self._prev_page
             self.add_item(b)
         if start + LINKED_PAGE_SIZE < len(all_names):
-            b2 = discord.ui.Button(label="Seite ▶", style=discord.ButtonStyle.secondary, row=1)
+            b2 = discord.ui.Button(label=tr_lang(self.lang, "Seite ▶", "Page ▶"), style=discord.ButtonStyle.secondary, row=1)
             b2.callback = self._next_page
             self.add_item(b2)
 
@@ -355,7 +367,7 @@ class RosterPageView(discord.ui.View):
         self.stop()
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     async def _prev_page(self, interaction: discord.Interaction) -> None:
@@ -380,6 +392,7 @@ class RosterPageView(discord.ui.View):
                 self.all_names,
                 new_page,
                 actor=self.actor,
+                lang=glang,
             ),
         )
 
@@ -405,6 +418,7 @@ class RosterPageView(discord.ui.View):
                 self.all_names,
                 new_page,
                 actor=self.actor,
+                lang=glang,
             ),
         )
 
@@ -432,7 +446,7 @@ class RosterPageView(discord.ui.View):
         view.stop()
         await interaction.response.edit_message(
             content=f"{msg}\n\n{_panel_intro(glang)}",
-            view=_menu_view(cog, guild, member, actor=actor),
+            view=_menu_view(cog, guild, member, actor=actor, lang=glang),
         )
 
 
@@ -444,12 +458,15 @@ class MainGamePickView(discord.ui.View):
         member: discord.Member,
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        self.lang = lang
+        self.back.label = tr_lang(lang, "◀ Menü", "◀ Menu")
 
     @discord.ui.button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -459,7 +476,7 @@ class MainGamePickView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     @discord.ui.button(label="Retail", style=discord.ButtonStyle.primary, row=0)
@@ -480,7 +497,7 @@ class MainGamePickView(discord.ui.View):
         if not subset:
             await interaction.response.edit_message(
                 content=tr_lang(glang, f"Keine verknüpften Chars für **{game_label(game)}**.", f"No linked characters for **{game_label(game)}**."),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         ordered = sorted(subset, key=lambda e: e["name"].lower())
@@ -498,7 +515,7 @@ class MainGamePickView(discord.ui.View):
                 ),
             ),
             view=LinkedMainPageView(
-                self.cog, self.guild, self.member, game, ordered, page=0, actor=self.actor
+                self.cog, self.guild, self.member, game, ordered, page=0, actor=self.actor, lang=glang
             ),
         )
 
@@ -514,12 +531,14 @@ class LinkedMainPageView(discord.ui.View):
         page: int,
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        self.lang = lang
         self.game_type = game_type
         self.ordered = ordered
         self.page = max(0, page)
@@ -533,22 +552,22 @@ class LinkedMainPageView(discord.ui.View):
             label = f"{e['name']}"[:100]
             opts.append(discord.SelectOption(label=label, value=tok))
         if opts:
-            s = discord.ui.Select(placeholder="Main-Char wählen", min_values=1, max_values=1, options=opts)
+            s = discord.ui.Select(placeholder=tr_lang(self.lang, "Main-Char wählen", "Pick main character"), min_values=1, max_values=1, options=opts)
             s.callback = self._pick
             self.add_item(s)
         row_nav = 1
         if self.page > 0:
-            b = discord.ui.Button(label="◀ Seite", style=discord.ButtonStyle.secondary, row=row_nav)
+            b = discord.ui.Button(label=tr_lang(self.lang, "◀ Seite", "◀ Page"), style=discord.ButtonStyle.secondary, row=row_nav)
             b.callback = self._prev
             self.add_item(b)
         if start + LINKED_PAGE_SIZE < len(ordered):
-            b2 = discord.ui.Button(label="Seite ▶", style=discord.ButtonStyle.secondary, row=row_nav)
+            b2 = discord.ui.Button(label=tr_lang(self.lang, "Seite ▶", "Page ▶"), style=discord.ButtonStyle.secondary, row=row_nav)
             b2.callback = self._next
             self.add_item(b2)
-        b_menu = discord.ui.Button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=2)
+        b_menu = discord.ui.Button(label=tr_lang(self.lang, "◀ Menü", "◀ Menu"), style=discord.ButtonStyle.secondary, row=2)
         b_menu.callback = self._back_menu
         self.add_item(b_menu)
-        b_search = discord.ui.Button(label="Nach Namen suchen", style=discord.ButtonStyle.secondary, row=2)
+        b_search = discord.ui.Button(label=tr_lang(self.lang, "Nach Namen suchen", "Search by name"), style=discord.ButtonStyle.secondary, row=2)
         b_search.callback = self._search
         self.add_item(b_search)
 
@@ -567,7 +586,7 @@ class LinkedMainPageView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     async def _search(self, interaction: discord.Interaction) -> None:
@@ -576,7 +595,7 @@ class LinkedMainPageView(discord.ui.View):
             await interaction.response.send_message(tr_lang(glang, "Nur für dich.", "Only for you."), ephemeral=True)
             return
         await interaction.response.send_modal(
-            MainCharSearchModal(self.cog, self.guild, self.member, self.game_type, actor=self.actor)
+            MainCharSearchModal(self.cog, self.guild, self.member, self.game_type, actor=self.actor, lang=glang)
         )
 
     async def _prev(self, interaction: discord.Interaction) -> None:
@@ -586,7 +605,7 @@ class LinkedMainPageView(discord.ui.View):
             return
         np = self.page - 1
         nv = LinkedMainPageView(
-            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor
+            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor, lang=glang
         )
         await interaction.response.edit_message(content=nv._caption(glang), view=nv)
 
@@ -597,7 +616,7 @@ class LinkedMainPageView(discord.ui.View):
             return
         np = self.page + 1
         nv = LinkedMainPageView(
-            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor
+            self.cog, self.guild, self.member, self.game_type, self.ordered, np, actor=self.actor, lang=glang
         )
         await interaction.response.edit_message(content=nv._caption(glang), view=nv)
 
@@ -626,7 +645,7 @@ class LinkedMainPageView(discord.ui.View):
                 f"Main **{game_label(game)}** gesetzt: **{name.strip()}**.\n\n{_panel_intro(glang)}",
                 f"Main **{game_label(game)}** set: **{name.strip()}**.\n\n{_panel_intro(glang)}",
             ),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
 
@@ -646,13 +665,17 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
         game_type: str,
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
-        super().__init__()
+        super().__init__(title=tr_lang(lang, "Charakter suchen", "Search character"))
         self.cog = cog
         self.guild = guild
         self.member = member
         self.game_type = game_type
         self.actor = actor if actor is not None else member
+        self.lang = lang
+        self.query.label = tr_lang(lang, "Name (Teilstring, Groß/Klein egal)", "Name (substring, case-insensitive)")
+        self.query.placeholder = tr_lang(lang, "z.B. ann", "e.g. ann")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         glang = await self.cog._guild_lang(self.guild)
@@ -669,7 +692,7 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
                     f"Kein Treffer für „{self.query.value}“ in **{game_label(self.game_type)}**.\n\n{_panel_intro(glang)}",
                     f"No match for “{self.query.value}” in **{game_label(self.game_type)}**.\n\n{_panel_intro(glang)}",
                 ),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         if len(subset) == 1:
@@ -687,11 +710,11 @@ class MainCharSearchModal(discord.ui.Modal, title="Charakter suchen"):
                     f"Main **{game_label(e['game_type'])}** gesetzt: **{e['name']}**.\n\n{_panel_intro(glang)}",
                     f"Main **{game_label(e['game_type'])}** set: **{e['name']}**.\n\n{_panel_intro(glang)}",
                 ),
-                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
             )
             return
         ordered = sorted(subset, key=lambda e: e["name"].lower())[:25]
-        view = MainSearchDisambigView(self.cog, self.guild, self.member, ordered, actor=self.actor)
+        view = MainSearchDisambigView(self.cog, self.guild, self.member, ordered, actor=self.actor, lang=glang)
         await interaction.response.edit_message(
             content=tr_lang(glang, "Mehrere Treffer — bitte einen wählen:", "Multiple matches — please pick one:"),
             view=view,
@@ -707,22 +730,24 @@ class MainSearchDisambigView(discord.ui.View):
         entries: List[Dict[str, str]],
         *,
         actor: Optional[discord.Member] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.actor = actor if actor is not None else member
+        self.lang = lang
         self._pick_map: Dict[str, Tuple[str, str]] = {}
         opts: List[discord.SelectOption] = []
         for i, e in enumerate(entries[:25]):
             tok = f"d{i}"
             self._pick_map[tok] = (e["name"], e["game_type"])
             opts.append(discord.SelectOption(label=e["name"][:100], value=tok))
-        s = discord.ui.Select(placeholder="Main wählen", min_values=1, max_values=1, options=opts)
+        s = discord.ui.Select(placeholder=tr_lang(self.lang, "Main wählen", "Pick main"), min_values=1, max_values=1, options=opts)
         s.callback = self._pick
         self.add_item(s)
-        b = discord.ui.Button(label="◀ Menü", style=discord.ButtonStyle.secondary, row=1)
+        b = discord.ui.Button(label=tr_lang(self.lang, "◀ Menü", "◀ Menu"), style=discord.ButtonStyle.secondary, row=1)
         b.callback = self._menu
         self.add_item(b)
 
@@ -733,7 +758,7 @@ class MainSearchDisambigView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
     async def _pick(self, interaction: discord.Interaction) -> None:
@@ -760,7 +785,7 @@ class MainSearchDisambigView(discord.ui.View):
                 f"Main **{game_label(game)}** gesetzt: **{name.strip()}**.\n\n{_panel_intro(glang)}",
                 f"Main **{game_label(game)}** set: **{name.strip()}**.\n\n{_panel_intro(glang)}",
             ),
-            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.member, actor=self.actor, lang=glang),
         )
 
 
@@ -779,11 +804,13 @@ class LinkedRemovePageView(discord.ui.View):
         officer: Optional[discord.Member] = None,
         target: Optional[discord.Member] = None,
         accumulated: Optional[Set[Tuple[str, str]]] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.actor = actor
+        self.lang = lang
         self.ordered = ordered
         self.page = max(0, page)
         self.officer_mode = officer_mode
@@ -801,7 +828,7 @@ class LinkedRemovePageView(discord.ui.View):
             opts.append(discord.SelectOption(label=label, value=tok))
         if opts:
             s = discord.ui.Select(
-                placeholder="Zur Entfernen-Markierung wählen",
+                placeholder=tr_lang(self.lang, "Zur Entfernen-Markierung wählen", "Select to mark for removal"),
                 min_values=1,
                 max_values=len(opts),
                 options=opts,
@@ -809,22 +836,22 @@ class LinkedRemovePageView(discord.ui.View):
             s.callback = self._mark
             self.add_item(s)
         if officer_mode:
-            b_done = discord.ui.Button(label="Grund eingeben …", style=discord.ButtonStyle.danger, row=2)
+            b_done = discord.ui.Button(label=tr_lang(self.lang, "Grund eingeben …", "Enter reason …"), style=discord.ButtonStyle.danger, row=2)
             b_done.callback = self._finish_officer
             self.add_item(b_done)
         else:
-            b_apply = discord.ui.Button(label="Ausgewählte entfernen", style=discord.ButtonStyle.danger, row=2)
+            b_apply = discord.ui.Button(label=tr_lang(self.lang, "Ausgewählte entfernen", "Remove selected"), style=discord.ButtonStyle.danger, row=2)
             b_apply.callback = self._apply_self_btn
             self.add_item(b_apply)
-        b_menu = discord.ui.Button(label="◀ Abbrechen / Menü", style=discord.ButtonStyle.secondary, row=2)
+        b_menu = discord.ui.Button(label=tr_lang(self.lang, "◀ Abbrechen / Menü", "◀ Cancel / Menu"), style=discord.ButtonStyle.secondary, row=2)
         b_menu.callback = self._to_menu
         self.add_item(b_menu)
         if self.page > 0:
-            b = discord.ui.Button(label="◀ Seite", style=discord.ButtonStyle.secondary, row=1)
+            b = discord.ui.Button(label=tr_lang(self.lang, "◀ Seite", "◀ Page"), style=discord.ButtonStyle.secondary, row=1)
             b.callback = self._prev
             self.add_item(b)
         if start + LINKED_PAGE_SIZE < len(ordered):
-            b2 = discord.ui.Button(label="Seite ▶", style=discord.ButtonStyle.secondary, row=1)
+            b2 = discord.ui.Button(label=tr_lang(self.lang, "Seite ▶", "Page ▶"), style=discord.ButtonStyle.secondary, row=1)
             b2.callback = self._next
             self.add_item(b2)
 
@@ -872,7 +899,7 @@ class LinkedRemovePageView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=_panel_intro(glang),
-            view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor),
+            view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor, lang=glang),
         )
 
     async def _prev(self, interaction: discord.Interaction) -> None:
@@ -890,6 +917,7 @@ class LinkedRemovePageView(discord.ui.View):
             officer=self.officer,
             target=self.target,
             accumulated=self.accumulated,
+            lang=glang,
         )
         await interaction.response.edit_message(content=nv._caption(glang), view=nv)
 
@@ -908,6 +936,7 @@ class LinkedRemovePageView(discord.ui.View):
             officer=self.officer,
             target=self.target,
             accumulated=self.accumulated,
+            lang=glang,
         )
         await interaction.response.edit_message(content=nv._caption(glang), view=nv)
 
@@ -945,6 +974,7 @@ class LinkedRemovePageView(discord.ui.View):
             officer=self.officer,
             target=self.target,
             accumulated=self.accumulated,
+            lang=self.lang,
         )
 
     async def _apply_self_removal(self, interaction: discord.Interaction) -> None:
@@ -967,7 +997,7 @@ class LinkedRemovePageView(discord.ui.View):
                     "Ausgewählte Chars entfernt. Keine Chars mehr verknüpft.\n\n" + _panel_intro(glang),
                     "Selected characters removed. No characters linked anymore.\n\n" + _panel_intro(glang),
                 ),
-                view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor),
+                view=_menu_view(self.cog, self.guild, self.actor, actor=self.actor, lang=glang),
             )
             return
         ordered = sorted(linked2, key=lambda e: (e["game_type"], e["name"].lower()))
@@ -975,7 +1005,7 @@ class LinkedRemovePageView(discord.ui.View):
         await interaction.response.edit_message(
             content=CharMainMenuView._remove_caption(ordered, new_page, glang),
             view=LinkedRemovePageView(
-                self.cog, self.guild, self.actor, ordered, new_page, officer_mode=False
+                self.cog, self.guild, self.actor, ordered, new_page, officer_mode=False, lang=glang
             ),
         )
 
@@ -992,7 +1022,7 @@ class LinkedRemovePageView(discord.ui.View):
             return
         keys = [(n, g) for n, g in self.accumulated]
         await interaction.response.send_modal(
-            OfficerRemoveReasonModal(self.cog, self.guild, self.officer or self.actor, self.target, keys)
+            OfficerRemoveReasonModal(self.cog, self.guild, self.officer or self.actor, self.target, keys, lang=glang)
         )
 
 
@@ -1011,13 +1041,17 @@ class OfficerRemoveReasonModal(discord.ui.Modal, title="Begründung"):
         officer: discord.Member,
         target: discord.Member,
         to_remove: List[Tuple[str, str]],
+        *,
+        lang: str = "en-US",
     ) -> None:
-        super().__init__()
+        super().__init__(title=tr_lang(lang, "Begründung", "Reason"))
         self.cog = cog
         self.guild = guild
         self.officer = officer
         self.target = target
         self.to_remove = to_remove
+        self.lang = lang
+        self.reason.label = tr_lang(lang, "Grund (sichtbar für den User)", "Reason (visible to the user)")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         glang = await self.cog._guild_lang(self.guild)
@@ -1065,11 +1099,14 @@ def officer_can_manage_characters(member: discord.Member) -> bool:
 class OfficerListMenuView(discord.ui.View):
     """Officer: list character links — all members or pick users (multi)."""
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member, *, lang: str = "en-US") -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.officer = officer
+        self.lang = lang
+        self.all_btn.label = tr_lang(lang, "Alle mit verknüpften Chars", "All with linked characters")
+        self.pick_btn.label = tr_lang(lang, "Bestimmte Mitglieder wählen", "Pick specific members")
 
     @discord.ui.button(label="Alle mit verknüpften Chars", style=discord.ButtonStyle.primary, row=0)
     async def all_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -1091,7 +1128,7 @@ class OfficerListMenuView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=tr_lang(glang, "Wähle bis zu 25 Mitglieder:", "Pick up to 25 members:"),
-            view=OfficerUserPickView(self.cog, self.guild, self.officer),
+            view=OfficerUserPickView(self.cog, self.guild, self.officer, lang=glang),
         )
 
 
@@ -1104,22 +1141,24 @@ class OfficerUserPickView(discord.ui.View):
         *,
         back_view_factory: Optional[Callable[[], discord.ui.View]] = None,
         back_content: Optional[str] = None,
+        lang: str = "en-US",
     ) -> None:
         super().__init__(timeout=300)
         self.cog = cog
         self.guild = guild
         self.officer = officer
+        self.lang = lang
         self._back_view_factory = back_view_factory
         self._back_content = back_content
         self.user_select = discord.ui.UserSelect(
-            placeholder="Mitglieder (mehrfach)",
+            placeholder=tr_lang(self.lang, "Mitglieder (mehrfach)", "Members (multiple)"),
             min_values=1,
             max_values=25,
             custom_id="officer_user_pick",
         )
         self.user_select.callback = self._on_users
         self.add_item(self.user_select)
-        b = discord.ui.Button(label="◀ Zurück", style=discord.ButtonStyle.secondary, row=1)
+        b = discord.ui.Button(label=tr_lang(self.lang, "◀ Zurück", "◀ Back"), style=discord.ButtonStyle.secondary, row=1)
         b.callback = self._back
         self.add_item(b)
 
@@ -1136,7 +1175,7 @@ class OfficerUserPickView(discord.ui.View):
             return
         await interaction.response.edit_message(
             content=tr_lang(glang, "Wähle eine Option:", "Pick an option:"),
-            view=OfficerListMenuView(self.cog, self.guild, self.officer),
+            view=OfficerListMenuView(self.cog, self.guild, self.officer, lang=glang),
         )
 
     async def _on_users(self, interaction: discord.Interaction) -> None:
@@ -1161,11 +1200,15 @@ class OfficerUserPickView(discord.ui.View):
 class WowAdminCharPanelView(discord.ui.View):
     """One panel: pick a member + lists — replaces several /wow-admin sub-actions."""
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member, *, lang: str = "en-US") -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.guild = guild
         self.officer = officer
+        self.lang = lang
+        self.pick_member.placeholder = tr_lang(lang, "Mitglied zum Bearbeiten wählen", "Pick a member to edit")
+        self.all_linked.label = tr_lang(lang, "Alle mit verknüpften Chars", "All with linked characters")
+        self.pick_list.label = tr_lang(lang, "Bestimmte Mitglieder listen", "List specific members")
 
     @discord.ui.select(
         cls=discord.ui.UserSelect,
@@ -1191,7 +1234,7 @@ class WowAdminCharPanelView(discord.ui.View):
         )
         await interaction.response.edit_message(
             content=header,
-            view=CharMainMenuView(self.cog, self.guild, member, actor=self.officer),
+            view=CharMainMenuView(self.cog, self.guild, member, actor=self.officer, lang=glang),
         )
 
     @discord.ui.button(label="Alle mit verknüpften Chars", style=discord.ButtonStyle.primary, row=1)
@@ -1214,7 +1257,7 @@ class WowAdminCharPanelView(discord.ui.View):
             return
 
         def _back() -> discord.ui.View:
-            return WowAdminCharPanelView(self.cog, self.guild, self.officer)
+            return WowAdminCharPanelView(self.cog, self.guild, self.officer, lang=glang)
 
         await interaction.response.edit_message(
             content=tr_lang(glang, "Wähle bis zu 25 Mitglieder:", "Pick up to 25 members:"),
@@ -1224,6 +1267,7 @@ class WowAdminCharPanelView(discord.ui.View):
                 self.officer,
                 back_view_factory=_back,
                 back_content=_admin_panel_intro(glang),
+                lang=glang,
             ),
         )
 
@@ -1231,16 +1275,17 @@ class WowAdminCharPanelView(discord.ui.View):
 class SlashWowAdminSyncAllConfirmView(discord.ui.View):
     """Dropdown confirmation before bulk rank sync."""
 
-    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member) -> None:
+    def __init__(self, cog: "WowGuildAutomation", guild: discord.Guild, officer: discord.Member, *, lang: str = "en-US") -> None:
         super().__init__(timeout=120)
         self.cog = cog
         self.guild = guild
         self.officer = officer
+        self.lang = lang
         sel = discord.ui.Select(
-            placeholder="Aktion bestätigen",
+            placeholder=tr_lang(self.lang, "Aktion bestätigen", "Confirm action"),
             options=[
                 discord.SelectOption(
-                    label="Jetzt alle (mit Main) synchronisieren — kann dauern",
+                    label=tr_lang(self.lang, "Jetzt alle (mit Main) synchronisieren — kann dauern", "Sync all (with a main) now — may take a while"),
                     value="confirm",
                 ),
             ],
@@ -1265,7 +1310,7 @@ def attach_officer_extras_if_needed(view: CharMainMenuView) -> None:
     if view.actor.id == view.member.id:
         return
 
-    sync_b = discord.ui.Button(label="Rang-Sync", style=discord.ButtonStyle.success, row=2)
+    sync_b = discord.ui.Button(label=tr_lang(view.lang, "Rang-Sync", "Rank sync"), style=discord.ButtonStyle.success, row=2)
 
     async def _sync_cb(interaction: discord.Interaction) -> None:
         glang = await view.cog._guild_lang(view.guild)
@@ -1279,7 +1324,7 @@ def attach_officer_extras_if_needed(view: CharMainMenuView) -> None:
     sync_b.callback = _sync_cb
     view.add_item(sync_b)
 
-    switch_b = discord.ui.Button(label="Anderes Mitglied", style=discord.ButtonStyle.secondary, row=2)
+    switch_b = discord.ui.Button(label=tr_lang(view.lang, "Anderes Mitglied", "Another member"), style=discord.ButtonStyle.secondary, row=2)
 
     async def _switch_cb(interaction: discord.Interaction) -> None:
         glang = await view.cog._guild_lang(view.guild)
@@ -1288,7 +1333,7 @@ def attach_officer_extras_if_needed(view: CharMainMenuView) -> None:
             return
         await interaction.response.edit_message(
             content=_admin_panel_intro(glang),
-            view=WowAdminCharPanelView(view.cog, view.guild, view.actor),
+            view=WowAdminCharPanelView(view.cog, view.guild, view.actor, lang=glang),
         )
 
     switch_b.callback = _switch_cb

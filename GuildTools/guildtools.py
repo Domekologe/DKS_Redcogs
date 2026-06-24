@@ -60,7 +60,7 @@ class GuildTools(commands.Cog):
             last_seen={},
             wow_default_region="eu",
             wow_default_realm="",
-            language="de-DE"
+            language="en-US"
         )
         self.config.register_global(
             blizz_client_id="",
@@ -89,7 +89,7 @@ class GuildTools(commands.Cog):
 
     async def _lang(self, guild) -> str:
         if guild is None:
-            return "de-DE"
+            return "en-US"
         return await self.config.guild(guild).language()
 
     @dashboard_panel(
@@ -118,7 +118,7 @@ class GuildTools(commands.Cog):
 
     @settings_panel.on_submit
     async def _save_settings(self, ctx, data):
-        lang = str(data.get("language", "de-DE")).strip() or "de-DE"
+        lang = str(data.get("language", "en-US")).strip() or "en-US"
         await self.config.guild(ctx.guild).language.set(lang)
         return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
@@ -294,8 +294,9 @@ class GuildTools(commands.Cog):
         await interaction.followup.send(tr_lang(lang, "Hier ist die Abwesenheitsliste (nur für dich sichtbar).", "Here is the absence list (only visible to you)."), file=file, ephemeral=True)
 
     # ---------- Blizzard API: ENV-first Credentials ----------
-    @commands.command(name="setblizzard")
+    @commands.hybrid_command(name="setblizzard", description="Owner-only: set the Blizzard API client ID/secret (ENV fallback).")
     @commands.is_owner()
+    @app_commands.describe(client_id="Blizzard API client ID", client_secret="Blizzard API client secret")
     async def set_blizzard_credentials(self, ctx: commands.Context, client_id: str, client_secret: str):
         """Owner-only: Set the Blizzard API client ID/secret (fallback when ENV is not used)."""
         await self.config.blizz_client_id.set(client_id)
@@ -305,9 +306,9 @@ class GuildTools(commands.Cog):
         # Clear in-memory cache as well
         self._token_mem = ""
         self._token_mem_exp = 0
-        await ctx.tick()
+        await ctx.send(tr_lang(await self._lang(ctx.guild), "Blizzard-Zugangsdaten gespeichert.", "Blizzard credentials saved."), ephemeral=True)
 
-    @commands.command(name="clearblizzard")
+    @commands.hybrid_command(name="clearblizzard", description="Owner-only: remove the Blizzard API credentials from the config.")
     @commands.is_owner()
     async def clear_blizzard_credentials(self, ctx: commands.Context):
         """Owner-only: Remove the Blizzard API credentials from the config."""
@@ -317,7 +318,7 @@ class GuildTools(commands.Cog):
         await self.config.blizz_token_expires_at.set(0)
         self._token_mem = ""
         self._token_mem_exp = 0
-        await ctx.tick()
+        await ctx.send(tr_lang(await self._lang(ctx.guild), "Blizzard-Zugangsdaten entfernt.", "Blizzard credentials cleared."), ephemeral=True)
 
     @app_commands.command(name="set-wow-defaults", description="Set the default region/realm for /whois.")
     @app_commands.describe(region="eu/us/kr/tw", realm="Realm name (e.g. 'Blackmoore')")

@@ -69,14 +69,14 @@ class GuildToolsPollExport(commands.Cog):
     async def _lang(self, guild) -> str:
         """Read the per-guild output language from the GuildTools cog (shared setting)."""
         if guild is None:
-            return "de-DE"
+            return "en-US"
         gt = self.bot.get_cog("GuildTools")
         if gt is None or not hasattr(gt, "config"):
-            return "de-DE"
+            return "en-US"
         try:
             return await gt.config.guild(guild).language()
         except Exception:
-            return "de-DE"
+            return "en-US"
 
     # ---------- helpers within the class ----------
     def _ans_id(self, ans) -> int:
@@ -249,7 +249,7 @@ class GuildToolsPollExport(commands.Cog):
         answers: List[Tuple[int, str]],
         answer_to_voters: Dict[int, List[int]],
         mode: str,
-        lang: str = "de-DE",
+        lang: str = "en-US",
     ) -> Tuple[bytes, str]:
         sep = ";"
 
