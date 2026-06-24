@@ -1,6 +1,7 @@
 import discord
 import aiohttp
-from redbot.core import commands, app_commands, Config
+from discord import app_commands
+from redbot.core import commands, Config
 
 from .dks_dashboard import (
     register_dashboard, unregister_dashboard,

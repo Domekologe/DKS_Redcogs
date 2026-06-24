@@ -241,6 +241,32 @@ def _repo_for_cog(cog_obj: Any, repo_map: Dict[str, str]) -> Optional[str]:
         return None
 
 
+# Cache for Discord's registered (synced) application commands. fetch_commands()
+# is an HTTP call, so the result is cached briefly. Used to surface "ghost"
+# commands still registered with Discord but not backed by any loaded cog.
+_registered_cmd_cache: Dict[str, Any] = {"t": 0.0, "cmds": None}
+
+
+async def _fetch_registered_commands(bot: Any) -> list:
+    """Global application commands as registered with Discord (cached ~60s)."""
+    import time
+
+    now = time.monotonic()
+    if _registered_cmd_cache["cmds"] is not None and now - _registered_cmd_cache["t"] < 60:
+        return _registered_cmd_cache["cmds"]
+    tree = getattr(bot, "tree", None)
+    if tree is None:
+        return []
+    try:
+        cmds = list(await tree.fetch_commands())
+    except Exception:
+        log.debug("fetch_commands failed", exc_info=True)
+        return _registered_cmd_cache["cmds"] or []
+    _registered_cmd_cache["t"] = now
+    _registered_cmd_cache["cmds"] = cmds
+    return cmds
+
+
 def _i18n_desc(value: Any, locale: Any) -> Optional[str]:
     """Resolve a bilingual command description from ``command.extras['i18n_desc']``.
 
@@ -271,6 +297,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     bot = gateway.bot
     repo_map = await _repo_map(bot)
     locale = params.get("locale") or "en-US"
+    include_orphans = bool(params.get("include_orphans"))
 
     # qualified_name -> bilingual i18n_desc dict, collected from the text/hybrid
     # side so the slash list can reuse it (hybrid app-commands don't reliably carry
@@ -332,12 +359,34 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             continue
         seen_s.add(c["name"]); uniq_s.append(c)
 
+    counts = {"prefix": len(uniq_p), "slash": len(uniq_s)}
+
+    # Discord registrations not backed by any loaded cog -> "(Not existent)" ghosts.
+    if include_orphans:
+        try:
+            live_top = {str(c["name"]).split(" ")[0] for c in uniq_s}
+            label = "(Nicht existierend)" if str(locale).lower().startswith("de") else "(Not existent)"
+            for ac in await _fetch_registered_commands(bot):
+                if getattr(getattr(ac, "type", None), "value", 1) != 1:
+                    continue  # chat-input (slash) commands only
+                if ac.name in live_top:
+                    continue
+                uniq_s.append({
+                    "name": ac.name,
+                    "description": (getattr(ac, "description", "") or "").strip(),
+                    "cog": label,
+                    "repo": None,
+                    "orphan": True,
+                })
+        except Exception:
+            log.exception("Fehler beim Abgleich der Discord-Registrierungen")
+
     return {
         "bot": {"name": bot.user.name if bot.user else None,
                 "avatar": str(bot.user.display_avatar.url) if bot.user else None},
         "prefix": uniq_p,
         "slash": uniq_s,
-        "counts": {"prefix": len(uniq_p), "slash": len(uniq_s)},
+        "counts": counts,
     }
 
 

@@ -1,5 +1,6 @@
 import discord
-from redbot.core import Config, app_commands, commands
+from discord import app_commands
+from redbot.core import Config, commands
 from typing import Any, Dict, Optional
 
 from .dks_dashboard import (

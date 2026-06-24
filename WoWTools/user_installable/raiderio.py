@@ -1,8 +1,8 @@
 from typing import List
 
 import discord
+from discord import app_commands
 from discord.app_commands import AppCommandContext, AppInstallationType
-from redbot.core import app_commands
 from redbot.core.commands import Context
 from redbot.core.i18n import Translator
 
