@@ -513,7 +513,7 @@ async def widget_data(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Unbekanntes Widget")
     await _require(gateway, ctx, contrib.meta.permission)
     data = await contrib.handler(ctx)
-    return {"data": data.to_dict() if hasattr(data, "to_dict") else data}
+    return {"data": data.to_dict(getattr(ctx, "locale", None)) if hasattr(data, "to_dict") else data}
 
 
 @dispatcher.method("panel.schema")
@@ -525,7 +525,7 @@ async def panel_schema(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Unbekanntes Panel")
     await _require(gateway, ctx, contrib.meta.permission)
     schema = await contrib.handler(ctx)
-    return {"schema": schema.to_dict() if hasattr(schema, "to_dict") else schema}
+    return {"schema": schema.to_dict(getattr(ctx, "locale", None)) if hasattr(schema, "to_dict") else schema}
 
 
 @dispatcher.method("panel.submit")
@@ -542,7 +542,7 @@ async def panel_submit(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Panel ist schreibgeschützt (kein on_submit)")
     result = await contrib.submit(ctx, data)
     gateway.audit("panel.submit", ctx, {"key": key})
-    return {"result": result.to_dict() if hasattr(result, "to_dict") else result}
+    return {"result": result.to_dict(getattr(ctx, "locale", None)) if hasattr(result, "to_dict") else result}
 
 
 @dispatcher.method("page.schema")
@@ -554,7 +554,7 @@ async def page_schema(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Unbekannte Seite")
     await _require(gateway, ctx, contrib.meta.permission)
     schema = await contrib.handler(ctx)
-    return {"schema": schema.to_dict() if hasattr(schema, "to_dict") else schema}
+    return {"schema": schema.to_dict(getattr(ctx, "locale", None)) if hasattr(schema, "to_dict") else schema}
 
 
 # --------------------------------------------------------------------------- #
@@ -586,7 +586,7 @@ async def list_delete(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Liste ist schreibgeschützt (kein on_delete)")
     result = await contrib.delete(ctx, item_id)
     gateway.audit("list.delete", ctx, {"key": key, "id": item_id})
-    return {"result": result.to_dict() if hasattr(result, "to_dict") else result}
+    return {"result": result.to_dict(getattr(ctx, "locale", None)) if hasattr(result, "to_dict") else result}
 
 
 @dispatcher.method("list.edit_form")
@@ -602,7 +602,7 @@ async def list_edit_form(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]
     if contrib.edit_form is None:
         raise RpcError(INVALID_PARAMS, "Liste ist nicht bearbeitbar (kein edit_form)")
     schema = await contrib.edit_form(ctx, item_id)
-    return {"schema": schema.to_dict() if hasattr(schema, "to_dict") else schema}
+    return {"schema": schema.to_dict(getattr(ctx, "locale", None)) if hasattr(schema, "to_dict") else schema}
 
 
 @dispatcher.method("list.edit")
@@ -620,7 +620,7 @@ async def list_edit(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INVALID_PARAMS, "Liste ist nicht bearbeitbar (kein on_edit)")
     result = await contrib.edit(ctx, item_id, data)
     gateway.audit("list.edit", ctx, {"key": key, "id": item_id})
-    return {"result": result.to_dict() if hasattr(result, "to_dict") else result}
+    return {"result": result.to_dict(getattr(ctx, "locale", None)) if hasattr(result, "to_dict") else result}
 
 
 @dispatcher.method("cogs.list")
@@ -932,6 +932,10 @@ async def slash_sync(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     await _require(gateway, ctx, "bot_owner")
     try:
         synced = await gateway.bot.tree.sync()
+        # Invalidate the registered-commands cache so "not synced" pills clear
+        # immediately on the next read instead of after the cache TTL (~60 s).
+        _registered_cmd_cache["t"] = 0.0
+        _registered_cmd_cache["cmds"] = None
         gateway.audit("slash.sync", ctx, {"count": len(synced)})
         return {"ok": True, "count": len(synced)}
     except Exception as e:
@@ -1322,21 +1326,37 @@ async def _do_cog_uninstall(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> D
                     pkgs.remove(p)
     except Exception:
         pass
-    # 2) Remove files/installation
+    # 2) Remove the installation record (critical part).
     try:
         installed = await _installed_cogs(dl)
         target = [m for m in installed if m.name == cog_name]
         if not target:
-            raise RpcError(INVALID_PARAMS, f"'{cog_name}' ist nicht installiert")
+            raise RpcError(INVALID_PARAMS, f"'{cog_name}' is not installed")
         if hasattr(dl, "_remove_from_installed"):
             await dl._remove_from_installed(target)
-        if hasattr(dl, "_delete_cog"):
-            for m in target:
-                await dl._delete_cog(m.name)
     except RpcError:
         raise
     except Exception as e:
-        raise RpcError(INTERNAL_ERROR, f"Deinstallation fehlgeschlagen: {e}")
+        raise RpcError(INTERNAL_ERROR, f"Uninstall failed: {e}")
+    # Delete the cog files (best effort). In current Red, _delete_cog expects a PATH
+    # (it calls target.exists()); passing m.name (a str) raised
+    # "'str' object has no attribute 'exists'". Build the install path; fall back to
+    # the module / name for other versions. A file-deletion failure must NOT fail the
+    # uninstall — the cog is already removed from the installed list above.
+    if hasattr(dl, "_delete_cog"):
+        base = None
+        try:
+            base = dl.cog_install_path() if hasattr(dl, "cog_install_path") else None
+        except Exception:
+            base = None
+        for m in target:
+            candidates = ([base / m.name] if base is not None else []) + [m, m.name]
+            for arg in candidates:
+                try:
+                    await dl._delete_cog(arg)
+                    break
+                except Exception:
+                    continue
     # 3) Sync the tree (cleanly deregister slash commands)
     try:
         await bot.tree.sync()
@@ -1446,11 +1466,24 @@ def _dashboard_cog(gateway: Any):
 
 @dispatcher.method("dashboard.branding")
 async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Public branding (title/icon/theme) – usable without login."""
+    """Public branding (title/icon/theme) – usable without login.
+
+    Also exposes the bot avatar (used as favicon) and an invite URL. The invite
+    URL is taken from ``ui.invite_url`` if set, otherwise auto-built from the bot's
+    own client id (scope bot+applications.commands, Administrator).
+    """
     cog = _dashboard_cog(gateway)
     ui = (await cog.config.ui()) if cog else {}
     locked = bool(await cog.config.locked()) if cog else False
-    return {"ui": ui, "locked": locked}
+    bot = gateway.bot
+    bot_avatar = str(bot.user.display_avatar.url) if getattr(bot, "user", None) else None
+    invite_url = (ui.get("invite_url") or "").strip() if isinstance(ui, dict) else ""
+    if not invite_url and getattr(bot, "user", None):
+        invite_url = (
+            f"https://discord.com/oauth2/authorize?client_id={bot.user.id}"
+            f"&scope=bot+applications.commands&permissions=8"
+        )
+    return {"ui": ui, "locked": locked, "bot_avatar": bot_avatar, "invite_url": invite_url}
 
 
 @dispatcher.method("dashboard.overview")

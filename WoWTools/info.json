@@ -1,7 +1,8 @@
 {
+    "name": "WoWTools",
     "author": ["Karlo","Domekologe"],
-    "description": "Cog for interacting with World of Warcraft Classic",
-    "short": "Cog for interacting with World of Warcraft Classic",
+    "description": "WoW Retail tools for interacting with various World of Warcraft Retail APIs (Blizzard, Raider.IO).",
+    "short": "WoW Retail tools for interacting with World of Warcraft Retail.",
     "install_msg": "Make sure you check out `[p]help wowset` after loading this cog and set all your settings as most of the commands won't work otherwise.",
     "tags": ["warcraft", "world of warcraft"],
     "requirements": [

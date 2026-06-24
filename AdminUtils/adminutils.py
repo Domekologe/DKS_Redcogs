@@ -96,10 +96,6 @@ class AdminUtils(commands.Cog):
         return PanelSchema(
             description=tr(ctx, "Erfolgsmeldungen für Kick/Ban/Timeout/Purge.", "Success messages for Kick/Ban/Timeout/Purge."),
             fields=[
-                Field.select("language", L("Sprache", "Language"), [
-                    {"value": "de-DE", "label": "Deutsch"},
-                    {"value": "en-US", "label": "English"},
-                ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
                 Field.textarea("kick_success", "Kick", value=t.get("kick_success", ""),
                                max_length=500, variables=[member, reason]),
                 Field.textarea("ban_success", "Ban", value=t.get("ban_success", ""),
@@ -117,14 +113,29 @@ class AdminUtils(commands.Cog):
 
     @adminutils_templates_panel.on_submit
     async def _save_adminutils_templates(self, ctx, data):
-        if "language" in data:
-            await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
         cur = await self.config.guild(ctx.guild).templates()
         for k in ("kick_success", "ban_success", "timeout_success", "purge_success"):
             if k in data:
                 cur[k] = str(data[k])[:500]
         await self.config.guild(ctx.guild).templates.set(cur)
         return SubmitResult.ok("Vorlagen gespeichert.")
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     @commands.Cog.listener()
     async def on_dashboard_cog_add(self, dashboard_cog: commands.Cog) -> None:

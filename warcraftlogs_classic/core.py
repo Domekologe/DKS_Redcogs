@@ -100,21 +100,11 @@ class WarcraftLogsClassic(commands.Cog):
     @dashboard_panel("wcl_guild", "WarcraftLogs", mount="guild_settings", permission="guild_admin")
     async def wcl_guild_panel(self, ctx):
         current = await self.config.guild(ctx.guild).notification_channel()
-        language = await self.config.guild(ctx.guild).language()
         ch_opts = [{"value": "", "label": "— no channel —"}] + [
             {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
         ]
         return PanelSchema(
             fields=[
-                Field.select(
-                    "language", L("Sprache", "Language"),
-                    [
-                        {"value": "de-DE", "label": "Deutsch"},
-                        {"value": "en-US", "label": "English"},
-                    ],
-                    value=str(language or "en-US"),
-                    reload_on_change=True,
-                ),
                 Field.select(
                     "notification_channel", "Notification channel", ch_opts,
                     value=str(current or ""),
@@ -124,12 +114,27 @@ class WarcraftLogsClassic(commands.Cog):
 
     @wcl_guild_panel.on_submit
     async def _save_wcl_guild(self, ctx, data):
-        if "language" in data:
-            await self.config.guild(ctx.guild).language.set(str(data["language"]) or "en-US")
         if "notification_channel" in data:
             v = data["notification_channel"]
             await self.config.guild(ctx.guild).notification_channel.set(int(v) if v else None)
         return SubmitResult.ok("Gespeichert.")
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # --- Guild panel (per user): WCL character --------------------------- #
     @dashboard_panel("wcl_char", L("Mein WCL-Charakter", "My WCL Character"), mount="guild_settings", permission="guild_member")
@@ -161,26 +166,30 @@ class WarcraftLogsClassic(commands.Cog):
             await u.region.set(v or None)
         return SubmitResult.ok("Gespeichert.")
 
-    # --- Global panel (bot owner): WarcraftLogs API ---------------------- #
-    @dashboard_panel("wcl_api", "WarcraftLogs API", scope="global", mount="bot_settings", permission="bot_owner")
-    async def wcl_api_panel(self, ctx):
-        tokens = await self.bot.get_shared_api_tokens("warcraftlogs")
+    # --- Global panel (bot owner): shared Warcraft Logs API key ---------- #
+    # GLOBAL scope (scope="global" + mount="bot_settings") -> appears under the
+    # dashboard's global owner-only settings. The SAME panel is registered by
+    # the retail cog; both read/write the SHARED "warcraftlogs" tokens, so
+    # setting it in either cog applies to both.
+    @dashboard_panel("wcl_apikey", L("Warcraft Logs API", "Warcraft Logs API"), scope="global", mount="bot_settings", permission="bot_owner")
+    async def wcl_apikey_panel(self, ctx):
+        tok = await self.bot.get_shared_api_tokens("warcraftlogs")
         return PanelSchema(
-            description=tr(ctx, "Geteilte API-Tokens (WarcraftLogs V2 Client).", "Shared API tokens (WarcraftLogs V2 Client)."),
+            description=tr(ctx, "API-Zugang (gilt für Classic UND Retail). Erstelle einen Client unter https://www.warcraftlogs.com/api/clients/", "API access (applies to Classic AND Retail). Create a client at https://www.warcraftlogs.com/api/clients/"),
             fields=[
-                Field.text("client_id", "Client ID", value=tokens.get("client_id", "")),
-                Field.text("client_secret", "Client Secret", value=tokens.get("client_secret", "")),
+                Field.text("client_id", L("Client ID", "Client ID"), value=tok.get("client_id", "")),
+                Field.text("client_secret", L("Client Secret", "Client Secret"), value=tok.get("client_secret", "")),
             ],
         )
 
-    @wcl_api_panel.on_submit
-    async def _save_wcl_api(self, ctx, data):
+    @wcl_apikey_panel.on_submit
+    async def _wcl_apikey_save(self, ctx, data):
         await self.bot.set_shared_api_tokens(
             "warcraftlogs",
             client_id=str(data.get("client_id", "")).strip(),
             client_secret=str(data.get("client_secret", "")).strip(),
         )
-        return SubmitResult.ok("API-Tokens gespeichert.")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     def cog_unload(self) -> None:
         unregister_dashboard(self)
@@ -198,7 +207,8 @@ class WarcraftLogsClassic(commands.Cog):
         await self.config.user_from_id(user_id).clear()
 
     @commands.hybrid_group(
-        aliases=["wcl"],
+        name="warcraftlogs-classic",
+        aliases=["wcl-classic"],
         description="Retrieve World of Warcraft character information from WarcraftLogs.",
         extras={"i18n_desc": {
             "de-DE": "World-of-Warcraft-Charakterinformationen von WarcraftLogs abrufen.",
@@ -697,6 +707,7 @@ class WarcraftLogsClassic(commands.Cog):
             return str(dps)
 
     @commands.hybrid_group(
+        name="wclset-classic",
         description="Commands for setting up WCL settings.",
         extras={"i18n_desc": {
             "de-DE": "Befehle zum Einrichten der WCL-Einstellungen.",

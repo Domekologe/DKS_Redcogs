@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List
+from typing import List, Literal
 
 import discord
 from discord import app_commands
@@ -95,8 +95,8 @@ async def _fetch_token_price(self, region: str, game: str = "classic", locale: s
 
 
 class Token:
-    @commands.hybrid_command()
-    async def wowtoken(self, ctx: commands.Context, region: str = "eu"):
+    @commands.hybrid_command(name="wowt-wowtoken")
+    async def wowtoken(self, ctx: commands.Context, region: Literal["eu", "us", "kr", "tw"] = "eu"):
         """Check price of WoW token in a region"""
         if ctx.interaction:
             # Workaround for Red locale on interactions

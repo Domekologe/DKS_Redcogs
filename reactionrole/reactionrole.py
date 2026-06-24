@@ -99,15 +99,9 @@ class ReactionRole(commands.Cog):
             {"token": "{emoji}", "desc": "Emoji"},
             {"token": "{role}", "desc": "Role"},
         ]
-        lang = await self.config.guild(ctx.guild).language()
         return PanelSchema(
-            description=tr(ctx, "Sprache und Antworten beim Erstellen/Entfernen von ReactionRoles.", "Language and responses when creating/removing ReactionRoles."),
+            description=tr(ctx, "Antworten beim Erstellen/Entfernen von ReactionRoles.", "Responses when creating/removing ReactionRoles."),
             fields=[
-                Field.select(
-                    "language", L("Sprache", "Language"),
-                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
-                    value=str(lang), reload_on_change=True,
-                ),
                 Field.textarea("set_success", "Created", value=t.get("set_success", ""),
                                max_length=500, variables=variables),
                 Field.textarea("remove_success", "Removed", value=t.get("remove_success", ""),
@@ -117,15 +111,28 @@ class ReactionRole(commands.Cog):
 
     @reactionrole_templates_panel.on_submit
     async def _save_reactionrole_templates(self, ctx, data):
-        if "language" in data:
-            await self.config.guild(ctx.guild).language.set(
-                "en-US" if data["language"] == "en-US" else "de-DE"
-            )
         cur = await self.config.guild(ctx.guild).templates()
         for k in ("set_success", "remove_success"):
             if k in data:
                 cur[k] = str(data[k])[:500]
         await self.config.guild(ctx.guild).templates.set(cur)
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
         return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # --- Guild panel: create ReactionRole directly ----------------------- #

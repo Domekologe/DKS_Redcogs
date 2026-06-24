@@ -72,17 +72,10 @@ class DashboardExample(commands.Cog):
     )
     async def greeting_panel(self, ctx):
         cfg = await self.config.guild(ctx.guild).greeting()
-        lang = await self.config.guild(ctx.guild).language()
         return PanelSchema(
             description=tr(ctx, "Begrüßungsnachricht für neue Mitglieder.",
                            "Greeting message for new members."),
             fields=[
-                # Per-guild output language (drives tr_lang in Discord output).
-                Field.select(
-                    "language", L("Sprache", "Language"),
-                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
-                    value=str(lang), reload_on_change=True,
-                ),
                 Field.switch("enabled", "Enabled", value=cfg["enabled"]),
                 Field.textarea("message", "Message", value=cfg["message"], max_length=1000),
                 Field.channel("channel", "Channel", value=cfg["channel"]),
@@ -91,10 +84,6 @@ class DashboardExample(commands.Cog):
 
     @greeting_panel.on_submit
     async def save_greeting(self, ctx, data):
-        if "language" in data:
-            await self.config.guild(ctx.guild).language.set(
-                "en-US" if data["language"] == "en-US" else "de-DE"
-            )
         await self.config.guild(ctx.guild).greeting.set(
             {
                 "enabled": bool(data.get("enabled")),
@@ -103,6 +92,23 @@ class DashboardExample(commands.Cog):
             }
         )
         return SubmitResult.ok(tr(ctx, "Begrüßung gespeichert.", "Greeting saved."))
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # ------------------------------------------------------------------ #
     # Owner command for a quick check

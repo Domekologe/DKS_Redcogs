@@ -74,8 +74,12 @@ class WidgetData:
     kind: WidgetKind
     payload: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"kind": self.kind.value, "payload": self.payload}
+    def to_dict(self, locale=None) -> Dict[str, Any]:
+        p = dict(self.payload)
+        for k in ("label", "detail", "title"):
+            if k in p:
+                p[k] = resolve_locale(p[k], locale)
+        return {"kind": self.kind.value, "payload": p}
 
     # --- convenience constructors ---------------------------------------- #
     @classmethod
@@ -151,20 +155,34 @@ class Field:
     # (e.g. switch profile -> fields reload).
     reload_on_change: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, locale=None) -> Dict[str, Any]:
+        # Resolve any localizable (L(...) dict) labels to a plain string for the
+        # requested locale; resolve_locale leaves plain strings untouched.
+        opts = self.options
+        if opts:
+            opts = [
+                ({**o, "label": resolve_locale(o.get("label"), locale)} if isinstance(o, dict) and "label" in o else o)
+                for o in opts
+            ]
+        vars_ = self.variables
+        if vars_:
+            vars_ = [
+                ({**v, "desc": resolve_locale(v.get("desc"), locale)} if isinstance(v, dict) and "desc" in v else v)
+                for v in vars_
+            ]
         d = {
             "key": self.key,
             "type": self.type.value,
-            "label": self.label,
+            "label": resolve_locale(self.label, locale),
             "value": self.value,
-            "description": self.description,
+            "description": resolve_locale(self.description, locale),
             "required": self.required,
-            "options": self.options,
+            "options": opts,
             "min": self.min,
             "max": self.max,
             "max_length": self.max_length,
-            "placeholder": self.placeholder,
-            "variables": self.variables,
+            "placeholder": resolve_locale(self.placeholder, locale),
+            "variables": vars_,
             "reload_on_change": self.reload_on_change or None,
         }
         return {k: v for k, v in d.items() if v is not None}
@@ -209,11 +227,11 @@ class PanelSchema:
     description: Optional[str] = None
     submit_label: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, locale=None) -> Dict[str, Any]:
         return {
-            "fields": [f.to_dict() for f in self.fields],
-            "description": self.description,
-            "submit_label": self.submit_label,
+            "fields": [f.to_dict(locale) for f in self.fields],
+            "description": resolve_locale(self.description, locale),
+            "submit_label": resolve_locale(self.submit_label, locale),
         }
 
 
@@ -226,10 +244,10 @@ class SubmitResult:
     # switching the active profile, so the edit panel and list reflect the change).
     reload: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, locale=None) -> Dict[str, Any]:
         return {
             "success": self.success,
-            "message": self.message,
+            "message": resolve_locale(self.message, locale),
             "errors": self.errors,
             "reload": self.reload,
         }
@@ -254,11 +272,15 @@ class Component:
     props: Dict[str, Any] = field(default_factory=dict)
     children: List["Component"] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, locale=None) -> Dict[str, Any]:
+        props = dict(self.props)
+        for k in ("title", "text", "label", "heading"):
+            if k in props:
+                props[k] = resolve_locale(props[k], locale)
         return {
             "type": self.type,
-            "props": self.props,
-            "children": [c.to_dict() for c in self.children],
+            "props": props,
+            "children": [c.to_dict(locale) for c in self.children],
         }
 
 
@@ -266,5 +288,5 @@ class Component:
 class PageSchema:
     components: List[Component] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"components": [c.to_dict() for c in self.components]}
+    def to_dict(self, locale=None) -> Dict[str, Any]:
+        return {"components": [c.to_dict(locale) for c in self.components]}

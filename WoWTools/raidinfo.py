@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 import re
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Literal, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -297,32 +297,25 @@ class RaidInfo(commands.Cog):
     def __init__(self, bot: Red) -> None:
         self.bot = bot
 
-    @commands.hybrid_command(name="raidinfo")
+    @commands.hybrid_command(name="wowt-raidinfo")
     @app_commands.describe(
         region="Region (eu/us/kr/tw)",
         realm="Realm (use a hyphen instead of spaces)",
         character="Character name",
-        game="Classic (MoP Classic) or Retail",
         locale="Locale (e.g. de or de_DE, en or en_US)",
         extension="Optional filter (raid name, e.g. 'Mogu'shan Vaults'). Empty = all MoP raids.",
-    )
-    @app_commands.choices(
-        game=[
-            app_commands.Choice(name="Classic", value="classic"),
-            app_commands.Choice(name="Retail", value="retail"),
-        ]
     )
     async def raidinfo(
         self,
         ctx: commands.Context,
-        region: str,
+        region: Literal["eu", "us", "kr", "tw"],
         realm: str,
         character: str,
-        game: str,
         locale: str = "en_US",
         extension: Optional[str] = None,
         private: bool = True,
     ):
+        game = "retail"
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 

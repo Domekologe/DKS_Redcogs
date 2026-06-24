@@ -50,8 +50,8 @@ class Neko(commands.Cog):
     # Dashboard: per-guild output language
     # ------------------------------------------------------------------
     @dashboard_panel(
-        "settings", L("Neko-Einstellungen", "Neko settings"),
-        mount="guild_settings", permission="guild_admin",
+        "language", L("Sprache", "Language"),
+        mount="guild_settings", permission="guild_admin", order=99,
     )
     async def settings_panel(self, ctx):
         return PanelSchema(

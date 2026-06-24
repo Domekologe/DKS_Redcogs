@@ -19,6 +19,7 @@ log = logging.getLogger("red.karlo-cogs.wowtools")
 
 class GuildManage:
     @commands.hybrid_group(
+        name="wowt-gmset",
         description="Configure guild management.",
         extras={"i18n_desc": {
             "de-DE": "Gildenverwaltung konfigurieren.",
@@ -484,6 +485,7 @@ class GuildManage:
         return rank_strings.get(str(rank), f"Rank {rank}")
 
     @commands.hybrid_group(
+        name="wowt-gmanage",
         description="Guild management commands.",
         extras={"i18n_desc": {
             "de-DE": "Befehle zur Gildenverwaltung.",

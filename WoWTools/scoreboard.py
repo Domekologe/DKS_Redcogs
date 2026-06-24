@@ -24,7 +24,7 @@ DEV_GUILDS = [362298824854863882, 133049272517001216]
 
 class Scoreboard:
     @commands.cooldown(rate=1, per=10, type=commands.BucketType.user)
-    @commands.hybrid_group(name="wowscoreboard", aliases=["sb"])
+    @commands.hybrid_group(name="wowt-wowscoreboard", aliases=["sb"])
     @commands.guild_only()
     async def wowscoreboard(self, ctx: commands.Context):
         """Show various scoreboards for your guild."""
@@ -79,7 +79,7 @@ class Scoreboard:
     #         # TODO: In dpy2, make this a list of embeds to send in a single message
     #         await ctx.send(embed=embed)
 
-    @commands.hybrid_group()
+    @commands.hybrid_group(name="wowt-sbset")
     @commands.admin()
     @commands.guild_only()
     async def sbset(self, ctx):

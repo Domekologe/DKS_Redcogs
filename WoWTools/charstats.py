@@ -111,7 +111,7 @@ class CharStats(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(
-        name="charstats",
+        name="wowt-charstats",
         description="Show achievement statistics highlights (kills, deaths, quests, instances, records).",
         extras={"i18n_desc": {
             "de-DE": "Zeigt Highlights der Erfolgs-Statistiken (Kills, Tode, Quests, Instanzen, Rekorde).",
@@ -122,25 +122,18 @@ class CharStats(commands.Cog):
         region="Region (eu/us/kr/tw)",
         realm="Realm (use a hyphen instead of spaces)",
         character="Character name",
-        game="Classic (MoP Classic) or Retail",
         #locale="Locale (e.g. de or de_DE, en or en_US)",
-    )
-    @app_commands.choices(
-        game=[
-            app_commands.Choice(name="Classic", value="classic"),
-            app_commands.Choice(name="Retail", value="retail"),
-        ]
     )
     async def charstats(
         self,
         ctx: commands.Context,
-        region: str,
+        region: Literal["eu", "us", "kr", "tw"],
         realm: str,
         character: str,
-        game: str,
         #locale: str = "en",
         private: bool = True,
     ):
+        game = "retail"
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
         lang = await self.config.guild(ctx.guild).language() if ctx.guild else "en-US"

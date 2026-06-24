@@ -137,10 +137,6 @@ class EventMessages(commands.Cog):
             self._selected_event[(guild_id, user_id)] = "0"
 
         fields = [
-            Field.select("language", L("Sprache", "Language"), [
-                {"value": "de-DE", "label": "Deutsch"},
-                {"value": "en-US", "label": "English"},
-            ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
             Field.select("event_id", "Event", event_choices, value=selection, reload_on_change=True)
         ]
 
@@ -179,9 +175,6 @@ class EventMessages(commands.Cog):
         guild_id = ctx.guild.id
         user_id = ctx.user.id
 
-        if "language" in data:
-            await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
-
         event_id = str(data.get("event_id", "0")).strip()
         prev_sel = self._selected_event.get((guild_id, user_id), "0")
 
@@ -218,6 +211,23 @@ class EventMessages(commands.Cog):
         await self.config.guild(ctx.guild).events.set(events)
         await self.config.guild(ctx.guild).templates.set(templates)
         return SubmitResult.ok(f"Einstellungen für '{labels.get(event_id, event_id)}' gespeichert.")
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # ------------------------------------------------------------
     # Autocomplete

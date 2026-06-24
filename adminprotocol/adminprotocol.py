@@ -28,35 +28,37 @@ except Exception:
                 return func
             return decorator
 
+# Bilingual event names: (de, en). Resolve with tr(ctx, de, en) in the
+# dashboard panel, or [0]/[1] for per-guild language elsewhere.
 EVENTS = {
-    "message_edit": "Nachricht bearbeitet",
-    "user_ban": "Benutzer gebannt",
-    "user_timeout": "Timeout (gegeben / entfernt)",
-    "channel_create": "Kanal erstellt",
-    "thread_create": "Thread erstellt",
-    "role_create": "Rolle angelegt",
-    "channel_delete": "Kanal gelöscht",
-    "thread_delete": "Thread gelöscht",
-    "message_delete": "Nachricht gelöscht",
-    "role_delete": "Rolle gelöscht",
-    "user_kick": "Benutzer gekickt",
-    "voice_move": "Benutzer verschoben (Sprachkanal)",
-    "voice_disconnect": "Sprachkanal-Verbindung getrennt",
-    "user_join": "Benutzer beigetreten",
-    "nickname_change_other": "Nickname verändert (Fremd)",
-    "user_leave": "Benutzer ausgetreten",
-    "nickname_change_self": "Nickname geändert (Selbst)",
-    "mod_command": "Moderationsbefehl verwendet",
-    "role_add": "Rolle vergeben",
-    "role_remove": "Rolle entfernt",
-    "invite_create": "Server-Einladung erstellt",
-    "user_unban": "Benutzer entbannt",
-    "channel_update": "Kanal aktualisiert/modifiziert",
-    "thread_update": "Thread aktualisiert/modifiziert",
-    "voice_join": "Sprachkanal beigetreten",
-    "voice_leave": "Sprachkanal verlassen",
-    "voice_status": "Sprachstatus geändert",
-    "voice_switch": "Sprachkanal gewechselt"
+    "message_edit": ("Nachricht bearbeitet", "Message edited"),
+    "user_ban": ("Benutzer gebannt", "User banned"),
+    "user_timeout": ("Timeout (gegeben / entfernt)", "Timeout (given / removed)"),
+    "channel_create": ("Kanal erstellt", "Channel created"),
+    "thread_create": ("Thread erstellt", "Thread created"),
+    "role_create": ("Rolle angelegt", "Role created"),
+    "channel_delete": ("Kanal gelöscht", "Channel deleted"),
+    "thread_delete": ("Thread gelöscht", "Thread deleted"),
+    "message_delete": ("Nachricht gelöscht", "Message deleted"),
+    "role_delete": ("Rolle gelöscht", "Role deleted"),
+    "user_kick": ("Benutzer gekickt", "User kicked"),
+    "voice_move": ("Benutzer verschoben (Sprachkanal)", "User moved (voice channel)"),
+    "voice_disconnect": ("Sprachkanal-Verbindung getrennt", "Voice channel disconnected"),
+    "user_join": ("Benutzer beigetreten", "User joined"),
+    "nickname_change_other": ("Nickname verändert (Fremd)", "Nickname changed (other)"),
+    "user_leave": ("Benutzer ausgetreten", "User left"),
+    "nickname_change_self": ("Nickname geändert (Selbst)", "Nickname changed (self)"),
+    "mod_command": ("Moderationsbefehl verwendet", "Moderation command used"),
+    "role_add": ("Rolle vergeben", "Role added"),
+    "role_remove": ("Rolle entfernt", "Role removed"),
+    "invite_create": ("Server-Einladung erstellt", "Server invite created"),
+    "user_unban": ("Benutzer entbannt", "User unbanned"),
+    "channel_update": ("Kanal aktualisiert/modifiziert", "Channel updated/modified"),
+    "thread_update": ("Thread aktualisiert/modifiziert", "Thread updated/modified"),
+    "voice_join": ("Sprachkanal beigetreten", "Voice channel joined"),
+    "voice_leave": ("Sprachkanal verlassen", "Voice channel left"),
+    "voice_status": ("Sprachstatus geändert", "Voice status changed"),
+    "voice_switch": ("Sprachkanal gewechselt", "Voice channel switched"),
 }
 
 # Grouping of events into categories (for clear tabs in the dashboard).
@@ -144,10 +146,16 @@ class AdminProtocol(commands.Cog):
         self._selected_event.setdefault(guild_id, {}).setdefault(user_id, {})
         sel_ev = self._selected_event[guild_id][user_id].get(category, "0")
 
+        def _ev_label(ev):
+            name = EVENTS.get(ev, ev)
+            if isinstance(name, (tuple, list)):
+                return tr(ctx, name[0], name[1])
+            return name
+
         # Build dropdown choices
-        event_choices = [{"value": "0", "label": "-- Ereignis wählen --"}]
+        event_choices = [{"value": "0", "label": tr(ctx, "-- Ereignis wählen --", "-- Select event --")}]
         for ev in keys:
-            event_choices.append({"value": ev, "label": EVENTS.get(ev, ev)})
+            event_choices.append({"value": ev, "label": _ev_label(ev)})
 
         # Ensure selection is still valid
         choice_vals = {v["value"] for v in event_choices}
@@ -156,13 +164,8 @@ class AdminProtocol(commands.Cog):
             self._selected_event[guild_id][user_id][category] = "0"
 
         fields = []
-        if with_language:
-            fields.append(Field.select("language", L("Sprache", "Language"), [
-                {"value": "de-DE", "label": "Deutsch"},
-                {"value": "en-US", "label": "English"},
-            ], value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True))
         fields.append(
-            Field.select("event_id", "Ereignis", event_choices, value=sel_ev, reload_on_change=True)
+            Field.select("event_id", tr(ctx, "Ereignis", "Event"), event_choices, value=sel_ev, reload_on_change=True)
         )
 
         if sel_ev != "0":
@@ -171,7 +174,7 @@ class AdminProtocol(commands.Cog):
                 events = {}
             cfg = events.get(sel_ev, {}) if isinstance(events.get(sel_ev), dict) else {}
 
-            channel_options = [{"value": "", "label": "— kein Kanal —"}] + [
+            channel_options = [{"value": "", "label": tr(ctx, "— kein Kanal —", "— no channel —")}] + [
                 {"value": str(c.id), "label": "#" + c.name} for c in ctx.guild.text_channels
             ]
             role_opts = [
@@ -180,11 +183,11 @@ class AdminProtocol(commands.Cog):
             ]
 
             fields.extend([
-                Field.switch("enabled", "Aktiviert", value=bool(cfg.get("enabled", False))),
-                Field.select("channel", "Log-Kanal", channel_options, value=str(cfg.get("channel") or "")),
-                Field.multiselect("ignored_channels", "Ignorierte Kanäle", channel_options[1:], value=[str(x) for x in cfg.get("ignored_channels", [])]),
-                Field.multiselect("ignored_roles", "Ignorierte Rollen", role_opts, value=[str(x) for x in cfg.get("ignored_roles", [])]),
-                Field.text("ignored_users", "Ignorierte User-IDs (mit Komma getrennt)", value=", ".join(str(x) for x in cfg.get("ignored_users", [])), placeholder="z. B. 123, 456")
+                Field.switch("enabled", tr(ctx, "Aktiviert", "Enabled"), value=bool(cfg.get("enabled", False))),
+                Field.select("channel", tr(ctx, "Log-Kanal", "Log channel"), channel_options, value=str(cfg.get("channel") or "")),
+                Field.multiselect("ignored_channels", tr(ctx, "Ignorierte Kanäle", "Ignored channels"), channel_options[1:], value=[str(x) for x in cfg.get("ignored_channels", [])]),
+                Field.multiselect("ignored_roles", tr(ctx, "Ignorierte Rollen", "Ignored roles"), role_opts, value=[str(x) for x in cfg.get("ignored_roles", [])]),
+                Field.text("ignored_users", tr(ctx, "Ignorierte User-IDs (mit Komma getrennt)", "Ignored user IDs (comma-separated)"), value=", ".join(str(x) for x in cfg.get("ignored_users", [])), placeholder=tr(ctx, "z. B. 123, 456", "e.g. 123, 456"))
             ])
 
         return PanelSchema(description=tr(ctx, "Pro Ereignis aktivieren, Ziel-Kanal und Ausnahmen wählen.", "Per event: enable, choose the target channel and exceptions."), fields=fields)
@@ -195,7 +198,9 @@ class AdminProtocol(commands.Cog):
         self._selected_event.setdefault(guild_id, {}).setdefault(user_id, {})
         current_sel = self._selected_event[guild_id][user_id].get(category, "0")
 
-        if with_language and "language" in data:
+        # Tolerate a stray language field (the language selector now lives in its
+        # own dedicated panel, but keep this harmless for safety).
+        if "language" in data:
             await self.config.guild(ctx.guild).language.set("en-US" if data["language"] == "en-US" else "de-DE")
 
         submitted_ev = str(data.get("event_id", "0")).strip()
@@ -205,7 +210,7 @@ class AdminProtocol(commands.Cog):
             return SubmitResult.ok()
 
         if submitted_ev == "0":
-            return SubmitResult.fail("Bitte wähle ein Ereignis aus.")
+            return SubmitResult.fail(tr(ctx, "Bitte wähle ein Ereignis aus.", "Please select an event."))
 
         events = await self.config.guild(ctx.guild).events()
         if not isinstance(events, dict):
@@ -230,15 +235,18 @@ class AdminProtocol(commands.Cog):
 
         events[submitted_ev] = cfg
         await self.config.guild(ctx.guild).events.set(events)
-        return SubmitResult.ok(f"Einstellungen für '{EVENTS.get(submitted_ev, submitted_ev)}' gespeichert.")
+        _name = EVENTS.get(submitted_ev, submitted_ev)
+        ev_de = _name[0] if isinstance(_name, (tuple, list)) else _name
+        ev_en = _name[1] if isinstance(_name, (tuple, list)) else _name
+        return SubmitResult.ok(tr(ctx, f"Einstellungen für '{ev_de}' gespeichert.", f"Settings for '{ev_en}' saved."))
 
     @dashboard_panel("events_messages", L("Nachrichten & Kanäle", "Messages & Channels"), mount="guild_settings", permission="guild_admin", order=1)
     async def ap_panel_messages(self, ctx):
-        return await self._ap_events_schema(ctx, "messages", EVENT_CATEGORIES["messages"][1], with_language=True)
+        return await self._ap_events_schema(ctx, "messages", EVENT_CATEGORIES["messages"][1], with_language=False)
 
     @ap_panel_messages.on_submit
     async def _ap_save_messages(self, ctx, data):
-        return await self._ap_events_save(ctx, "messages", EVENT_CATEGORIES["messages"][1], data, with_language=True)
+        return await self._ap_events_save(ctx, "messages", EVENT_CATEGORIES["messages"][1], data, with_language=False)
 
     @dashboard_panel("events_members", L("Mitglieder & Rollen", "Members & Roles"), mount="guild_settings", permission="guild_admin", order=2)
     async def ap_panel_members(self, ctx):
@@ -263,6 +271,24 @@ class AdminProtocol(commands.Cog):
     @ap_panel_voice.on_submit
     async def _ap_save_voice(self, ctx, data):
         return await self._ap_events_save(ctx, "voice", EVENT_CATEGORIES["voice"][1], data)
+
+    # --- Dedicated language tab ---- #
+    @dashboard_panel("ap_language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def ap_language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @ap_language_panel.on_submit
+    async def _ap_language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     async def cog_unload(self) -> None:
         unregister_dashboard(self)
@@ -1221,7 +1247,7 @@ class AdminProtocol(commands.Cog):
                 
                 return {
                     "status": 0,
-                    "notifications": [{"message": f"Einstellungen für '{EVENTS[ev]}' erfolgreich gespeichert.", "category": "success"}],
+                    "notifications": [{"message": f"Einstellungen für '{EVENTS[ev][0]}' erfolgreich gespeichert.", "category": "success"}],
                     "redirect_url": kwargs.get("request_url"),
                 }
 
@@ -1267,7 +1293,7 @@ class AdminProtocol(commands.Cog):
         rows = []
         for cat, ev_list in categories.items():
             for ev in ev_list:
-                ev_name = EVENTS[ev]
+                ev_name = EVENTS[ev][0]
                 ev_data = events.get(ev, {})
                 enabled_checked = "checked" if ev_data.get("enabled", False) else ""
                 

@@ -186,12 +186,12 @@ class WoWTools(
         self.blizzard["us"] = WowApi(client_id=cid, client_secret=secret, client_region="us")
         self.blizzard["kr"] = WowApi(client_id=cid, client_secret=secret, client_region="kr")
 
-    @commands.group()
+    @commands.group(name="wowt-wowset")
     async def wowset(self, ctx):
         """Change WoWTools settings."""
         pass
 
-    @commands.hybrid_group()
+    @commands.hybrid_group(name="wowt-serverset")
     async def serverset(self, ctx):
         """Change WoW guild-related settings"""
         pass
@@ -550,13 +550,8 @@ class WoWTools(
             {"token": "{region}", "desc": "Region"},
             {"token": "{realm}", "desc": "Realm"},
         ]
-        lang_opts = [
-            {"value": "de-DE", "label": "Deutsch"},
-            {"value": "en-US", "label": "English"},
-        ]
         return PanelSchema(
             fields=[
-                Field.select("language", L("Sprache", "Language"), lang_opts, value=str(await g.language() or "en-US"), reload_on_change=True),
                 Field.switch("on_message", "Auto-reply to WoW terms", value=bool(await g.on_message())),
                 Field.select("region", "Region", region_opts, value=str(await g.region() or "")),
                 Field.text("realm", "Realm", value=str(await g.realm() or "")),
@@ -572,9 +567,6 @@ class WoWTools(
     @wowtools_guild_panel.on_submit
     async def _save_wowtools_guild(self, ctx, data):
         g = self.config.guild(ctx.guild)
-        if "language" in data:
-            v = str(data["language"]).strip()
-            await g.language.set(v if v.lower().startswith("en") else "de-DE")
         if "on_message" in data:
             await g.on_message.set(bool(data["on_message"]))
         if "region" in data:
@@ -604,6 +596,23 @@ class WoWTools(
         if "countdown_channel" in data:
             v = data["countdown_channel"]
             await g.countdown_channel.set(int(v) if v else None)
+        return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
+
+    @dashboard_panel("language", L("Sprache", "Language"), mount="guild_settings", permission="guild_admin", order=99)
+    async def language_panel(self, ctx):
+        return PanelSchema(
+            description=tr(ctx, "Sprache der Bot-Ausgaben für diesen Server.", "Output language for this server."),
+            fields=[
+                Field.select("language", L("Sprache", "Language"),
+                    [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
+                    value=str(await self.config.guild(ctx.guild).language()), reload_on_change=True),
+            ],
+        )
+
+    @language_panel.on_submit
+    async def _language_save(self, ctx, data):
+        if "language" in data:
+            await self.config.guild(ctx.guild).language.set("en-US" if data.get("language") == "en-US" else "de-DE")
         return SubmitResult.ok(tr(ctx, "Gespeichert.", "Saved."))
 
     # --- Global panel (bot owner): API tokens ---------------------------- #

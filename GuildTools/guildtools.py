@@ -93,8 +93,8 @@ class GuildTools(commands.Cog):
         return await self.config.guild(guild).language()
 
     @dashboard_panel(
-        "settings", L("GuildTools-Einstellungen", "GuildTools settings"),
-        mount="guild_settings", permission="guild_admin", order=5,
+        "language", L("Sprache", "Language"),
+        mount="guild_settings", permission="guild_admin", order=99,
     )
     async def settings_panel(self, ctx):
         return PanelSchema(

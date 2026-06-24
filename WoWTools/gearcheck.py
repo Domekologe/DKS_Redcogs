@@ -225,7 +225,7 @@ class GearCheck(commands.Cog):
 
     # --------------- Command ---------------
     @commands.hybrid_command(
-        name="gearcheck",
+        name="wowt-gearcheck",
         description="Show a character's equipped gear with item level, sockets and enchants.",
         extras={"i18n_desc": {
             "de-DE": "Zeigt die angelegte Ausrüstung eines Charakters mit Itemlevel, Sockeln und Verzauberungen.",
@@ -233,21 +233,15 @@ class GearCheck(commands.Cog):
         }},
     )
     @app_commands.describe(
-        region="Region (eu/us/kr)",
+        region="Region (eu/us/kr/tw)",
         realm="Realm (use a hyphen instead of spaces)",
         character="Character name",
-        game="Classic (MoP Classic) or Retail",
         locale="Locale (e.g. de or de_DE, en or en_US)",
     )
-    @app_commands.choices(
-        game=[
-            app_commands.Choice(name="Classic", value="classic"),
-            app_commands.Choice(name="Retail", value="retail"),
-        ]
-    )
-    async def gearcheck(self, ctx, region: Literal["eu", "us", "kr"], realm: str, character: str,
-                    game: Literal["classic", "retail"] = "classic", locale: str = "en", private: bool = True):
+    async def gearcheck(self, ctx, region: Literal["eu", "us", "kr", "tw"], realm: str, character: str,
+                    locale: str = "en", private: bool = True):
         """Show a character's currently equipped gear (incl. iLvl fetch & socket/enchant labels)."""
+        game = "retail"
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 

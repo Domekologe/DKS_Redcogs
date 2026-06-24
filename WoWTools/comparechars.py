@@ -2,7 +2,7 @@
 import aiohttp
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Literal, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -349,7 +349,7 @@ class CompareChars(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(
-        name="comparechars",
+        name="wowt-comparechars",
         description="Compare two characters by gear (item level per slot), info or statistics.",
         extras={"i18n_desc": {
             "de-DE": "Vergleicht zwei Charaktere nach Ausrüstung (Itemlevel pro Slot), Werten oder Statistiken.",
@@ -367,10 +367,6 @@ class CompareChars(commands.Cog):
         private="Show the response only to you (ephemeral)",
     )
     @app_commands.choices(
-        game=[
-            app_commands.Choice(name="Classic", value="classic"),
-            app_commands.Choice(name="Retail", value="retail"),
-        ],
         type=[
             app_commands.Choice(name="Gear", value="gear"),
             app_commands.Choice(name="Info", value="info"),
@@ -380,16 +376,16 @@ class CompareChars(commands.Cog):
     async def comparechars(
         self,
         ctx: commands.Context,
-        region: str,
+        region: Literal["eu", "us", "kr", "tw"],
         server_char1: str,
         server_char2: str,
         name_char1: str,
         name_char2: str,
         type: str,
-        game: str,
         locale: str = "en",
         private: bool = True,
     ):
+        game = "retail"
         if ctx.interaction:
             await set_contextual_locales_from_guild(self.bot, ctx.guild)
 

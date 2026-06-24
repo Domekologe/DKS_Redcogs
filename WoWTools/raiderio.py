@@ -17,7 +17,7 @@ class Raiderio:
     """Cog for interaction with the classic.raider.io API"""
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
-    @commands.group(aliases=["rio"])
+    @commands.group(name="wowt-raiderio", aliases=["wowt-rio"])
     async def raiderio(self, ctx: commands.Context):
         """Commands for interacting with classic.raider.io"""
         pass
