@@ -1,8 +1,8 @@
 """Drop-in hook for the DKS web dashboard integration (no hard dependency).
 
 This file can be copied unchanged into every cog. It also works when the
-``webdashboard`` cog is not installed or is mid-reload (the decorators then
-become no-ops) and can be used alongside the AAA3A dashboard.
+``webdashboard`` cog is not installed (the decorators then become no-ops) and can
+be used alongside the AAA3A dashboard.
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ try:
             return func
 
         return _wrap
-except Exception:  # webdashboard not installed or mid-reload
+except Exception:  # webdashboard not installed
     DASHBOARD_AVAILABLE = False
 
     def _noop_decorator(*_args, **_kwargs):
@@ -99,3 +99,13 @@ def register_dashboard(cog) -> bool:
         return False
     dashboard.register_third_party(cog)
     return True
+
+
+def unregister_dashboard(cog) -> None:
+    """Call in ``cog_unload`` (always safe)."""
+    dashboard = cog.bot.get_cog("WebDashboard")
+    if dashboard is not None:
+        try:
+            dashboard.unregister_third_party(cog)
+        except Exception:
+            pass

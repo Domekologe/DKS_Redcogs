@@ -1070,7 +1070,16 @@ async def downloader_repos(gateway: Any, params: Dict[str, Any]) -> Dict[str, An
     try:
         async with _downloader_lock:
             installed = await _installed_cogs(dl)
-            update_names = await _cogs_with_updates(dl, installed)
+            # Update detection can shell out to git per repo and occasionally
+            # stalls (network, locked index). It is a non-essential adornment, so
+            # cap it: if it does not finish quickly we still return the repo list
+            # (without update flags) instead of letting the RPC hit the 15s 504.
+            try:
+                update_names = await asyncio.wait_for(
+                    _cogs_with_updates(dl, installed), timeout=8
+                )
+            except (asyncio.TimeoutError, Exception):
+                update_names = set()
             by_repo: Dict[str, list] = {}
             for m in installed:
                 by_repo.setdefault(getattr(m, "repo_name", "?"), []).append({
