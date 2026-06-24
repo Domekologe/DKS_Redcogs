@@ -79,8 +79,8 @@ _API_HOST = {
 _AUTH_HOST = {
     "eu": "eu.battle.net",
     "us": "us.battle.net",
-    "kr": "apac.battle.net", 
-    "tw": "apac.battle.net", 
+    "kr": "apac.battle.net",
+    "tw": "apac.battle.net",
 }
 
 _LANG_CODES = {

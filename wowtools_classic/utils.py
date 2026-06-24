@@ -75,6 +75,3 @@ async def get_realms(current):
                 for region in REALMS[realm]
             )
     return realms
-
-
-

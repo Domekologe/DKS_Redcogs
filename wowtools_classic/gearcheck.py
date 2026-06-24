@@ -374,4 +374,18 @@ class GearCheck(commands.Cog):
             label_base = display_map.get(short, short)
             # full locale
             pairs.append((f"{label_base} ({full})", full))
-            # sh
+            # short code
+            pairs.append((f"{label_base} ({short})", short))
+
+        # filter
+        out = [
+            app_commands.Choice(name=label, value=val)
+            for (label, val) in pairs
+            if cur in label.lower() or cur in val.lower()
+        ][:25]
+        return out
+
+
+
+async def setup(bot: Red):
+    await bot.add_cog(GearCheck(bot))

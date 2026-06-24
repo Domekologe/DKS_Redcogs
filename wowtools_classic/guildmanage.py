@@ -518,4 +518,73 @@ class GuildManage:
         try:
             ingame_members, rank = await self.guess_ingame_member(ctx.guild, member_name)
         except ValueError:
-          
+            ingame_members, rank = (None, None)
+        except AttributeError:
+            await ctx.send(
+                _("Please use `{prefix}gmset` and set the name and realm of your guild.").format(
+                    prefix=ctx.prefix
+                )
+            )
+            return
+        except InvalidBlizzardAPI:
+            await ctx.send(
+                _(
+                    "The Blizzard API is not properly set up.\n"
+                    "Create a client on https://develop.battle.net/ and then type in "
+                    "`{prefix}set api blizzard client_id,whoops client_secret,whoops` "
+                    "filling in `whoops` with your client's ID and secret."
+                ).format(prefix=ctx.prefix)
+            )
+            return
+        if ingame_members:
+            msg += f"In-game: {humanize_list([member.split(':')[0] for member in ingame_members], style='or')}\nRank: {rank}\n"
+
+            most_likely_member: str = ingame_members[0]
+            rio_url: str = self.get_raiderio_url(
+                realm=most_likely_member.split(":")[1],
+                region=await self.config.guild(ctx.guild).region(),
+                name=most_likely_member.split(":")[0],
+            )
+            wcl_url: str = self.get_warcraftlogs_url(
+                realm=most_likely_member.split(":")[1],
+                region=await self.config.guild(ctx.guild).region(),
+                name=most_likely_member.split(":")[0],
+            )
+            msg += f"{rio_url} | {wcl_url}"
+
+        if ctx.channel.permissions_for(ctx.guild.me).embed_links:
+            embed = discord.Embed(
+                description=msg or _("Nothing found."),
+                color=await ctx.embed_color(),
+            )
+            await ctx.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=False),
+            )
+        else:
+            await ctx.send(content=msg or _("Nothing found."))
+
+    async def guess_ingame_member(
+        self, guild: discord.Guild, member_name: str
+    ) -> tuple[list[str], str]:
+        roster = await self.get_guild_roster(guild)
+        name_mapping: dict[str, str] = {name.split(":")[0]: name for name in roster.keys()}
+        extract = process.extract(
+            member_name,
+            set(name_mapping.keys()),
+            scorer=fuzz.WRatio,
+            limit=10,
+            score_cutoff=80,
+            processor=self.custom_processor,
+        )
+        extract.sort(key=lambda member: roster[name_mapping[member[0]]])
+        ranks: list[int] = [roster[name_mapping[member[0]]] for member in extract]
+        ingame_rank = await self.get_rank_string(guild, min(ranks))
+        return [name_mapping[member[0]] for member in extract], ingame_rank
+
+    def custom_processor(self, string: str) -> str:
+        return "".join(
+            string
+            for string in unicodedata.normalize("NFD", string)
+            if unicodedata.category(string) != "Mn"
+        )

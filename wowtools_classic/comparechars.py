@@ -151,7 +151,7 @@ async def _fetch_achv_statistics(self, *, region: str, realm_slug: str, char_slu
             if resp.status != 200:
                 raise RuntimeError(f"{resp.status}: {js}")
             return js
-            
+
 # ----------------- Compare Logic -----------------
 def _avg_ilvl(ilvls: List[Optional[int]]) -> Optional[float]:
     vals = [x for x in ilvls if isinstance(x, int)]
@@ -429,7 +429,7 @@ class CompareChars(commands.Cog):
                 )
                 lines = _build_info_compare_lines(js1, js2)
                 title_mid = "Info"
-            
+
             else:  # "charstats"
                 # Always use en_US for achievement statistics comparisons, regardless of requested locale.
                 js1_en, js2_en = await asyncio.gather(
@@ -500,4 +500,11 @@ class CompareChars(commands.Cog):
         cur = (current or "").lower()
         display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
         pairs = []
-        for short, full in AC_LANG_C
+        for short, full in AC_LANG_CODES.items():
+            label = display.get(short, short)
+            pairs.append((f"{label} ({full})", full))
+            pairs.append((f"{label} ({short})", short))
+        return [app_commands.Choice(name=l, value=v) for l, v in pairs if not cur or cur in l.lower() or cur in v.lower()][:25]
+
+async def setup(bot: Red):
+    await bot.add_cog(CompareChars(bot))

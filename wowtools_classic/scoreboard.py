@@ -24,7 +24,7 @@ DEV_GUILDS = [362298824854863882, 133049272517001216]
 
 class Scoreboard:
     @commands.cooldown(rate=1, per=10, type=commands.BucketType.user)
-    @commands.hybrid_group(name="wowtc-wowscoreboard", aliases=["wowtc-sb"])
+    @commands.hybrid_group(name="wowtc-wowscoreboard", aliases=["sb"])
     @commands.guild_only()
     async def wowscoreboard(self, ctx: commands.Context):
         """Show various scoreboards for your guild."""

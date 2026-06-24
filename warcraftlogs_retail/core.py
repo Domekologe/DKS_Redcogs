@@ -1081,4 +1081,6 @@ class WarcraftLogsRetail(commands.Cog):
             else:
                 realms.extend(
                     app_commands.Choice(name=f"{realm} ({region})", value=f"{realm}:{region}")
-             
+                    for region in REALMS[realm]
+                )
+        return realms

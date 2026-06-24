@@ -399,7 +399,7 @@ class RaidInfo(commands.Cog):
             pairs.append((f"{label} ({full})", full))
             pairs.append((f"{label} ({short})", short))
         return [app_commands.Choice(name=l, value=v) for l, v in pairs if cur in l.lower() or cur in v.lower()][:25]
-        
+
     @raidinfo.autocomplete("extension")
     async def ac_extension(self, interaction: discord.Interaction, current: str):
         # This is an expansion filter (substring). Offer common expansion labels.

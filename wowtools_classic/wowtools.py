@@ -84,7 +84,9 @@ class WoWToolsClassic(
     def __init__(self, bot):
         self.on_message_cache: dict = {}
         self.bot: Red = bot
-        self.config = Config.get_conf(self, identifier=42069, cog_name="WoWTools")
+        # Own config namespace (class name WoWToolsClassic) -> retail and classic keep
+        # SEPARATE per-guild settings (Classic realms differ from Retail realms).
+        self.config = Config.get_conf(self, identifier=42069)
         default_global = {
             "wowaudit_key": None,
             "emotes": {
@@ -199,7 +201,7 @@ class WoWToolsClassic(
     @serverset.command(name="region")
     @commands.guild_only()
     @commands.admin()
-    async def serverset_region(self, ctx: commands.GuildContext, region: Literal["eu", "us", "kr", "tw"]):
+    async def serverset_region(self, ctx: commands.GuildContext, region: str):
         """Set the region where characters and guilds will be searched for."""
         regions = ("us", "eu", "kr")
         try:
@@ -312,7 +314,7 @@ class WoWToolsClassic(
         await ctx.send(_("Character realm set."))
 
     @wowset_character.command(name="region")
-    async def wowset_character_region(self, ctx, region: Literal["eu", "us", "kr", "tw"]):
+    async def wowset_character_region(self, ctx, region: str):
         """Set your character's region."""
         regions = ("us", "eu", "kr")
         if region.lower() not in regions:
@@ -470,7 +472,7 @@ class WoWToolsClassic(
         ctx: commands.Context,
         guild_name: str,
         realm: str,
-        region: Literal["eu", "us", "kr", "tw"],
+        region: str,
         emoji: Optional[discord.Emoji] = None,
     ):
         """Set the guild whose raid progression is shown as the bot's status."""
@@ -800,4 +802,18 @@ class WoWToolsClassic(
 <label>Guild Name</label><input name='guild_name' value='{(gname or '').replace("'", "&#39;")}'><br><br>
 <label><input type='checkbox' name='on_message' {'checked' if on_message else ''}> Enable on_message feature</label><br><br>
 <label>Welcome note template</label><textarea rows='2' name='welcome_note'>{texts.get('welcome_note','')}</textarea><br><br>
-<label>Status note template</l
+<label>Status note template</label><textarea rows='2' name='status_note'>{texts.get('status_note','')}</textarea><br><br>
+<button type='submit'>Save</button>
+</form>
+</div>
+</div>
+"""
+        return {"status": 0, "web_content": {"source": source, "standalone": True}}
+
+    async def red_delete_data_for_user(
+        self,
+        *,
+        requester: Literal["discord_deleted_user", "owner", "user", "user_strict"],
+        user_id: int,
+    ):
+        await self.config.user_from_id(user_id).clear()

@@ -249,4 +249,11 @@ class CharStats(commands.Cog):
     #    cur = (current or "").lower()
     #    display = {"de":"Deutsch","en":"English","fr":"Français","es":"Español","it":"Italiano","pt":"Português","ru":"Русский"}
     #    pairs = []
-    #    for s
+    #    for short, full in AC_LANG_CODES.items():
+    #        label = display.get(short, short)
+    #        pairs.append((f"{label} ({full})", full))
+    #        pairs.append((f"{label} ({short})", short))
+    #    return [app_commands.Choice(name=l, value=v) for l, v in pairs if cur in l.lower() or cur in v.lower()][:25]
+
+async def setup(bot: Red):
+    await bot.add_cog(CharStats(bot))
