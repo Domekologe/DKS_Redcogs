@@ -14,12 +14,12 @@ _ = Translator("WoWTools", __file__)
 
 
 class Raiderio:
-    """Cog for interaction with the classic.raider.io API"""
+    """Cog for interaction with the raider.io API"""
 
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
     @commands.group(name="wowt-raiderio", aliases=["wowt-rio"])
     async def raiderio(self, ctx: commands.Context):
-        """Commands for interacting with classic.raider.io"""
+        """Commands for interacting with raider.io"""
         pass
 
     @raiderio.command(name="profile")
@@ -30,7 +30,7 @@ class Raiderio:
         realm="The character's realm",
     )
     async def raiderio_profile(self, ctx, character: str, *, realm: str) -> None:
-        """Display the classic.raider.io profile of a character.
+        """Display the raider.io profile of a character.
 
         **Example:**
         [p]raiderio profile Karlo Ragnaros
@@ -97,7 +97,7 @@ class Raiderio:
             f"https://cdnassets.raider.io/images/profile/masthead_backdrops/v2/{banner}.jpg"
         )
         armory_url = f"https://worldofwarcraft.com/en-gb/character/{region}/{realm}/{char_name}"
-        wcl_url = f"https://classic.warcraftlogs.com/character/{region}/{realm}/{char_name}"
+        wcl_url = f"https://www.warcraftlogs.com/character/{region}/{realm}/{char_name}"
         raidbots_url = (
             f"https://www.raidbots.com/simbot/quick?region={region}&realm={realm}&name={char_name}"
         )
@@ -110,7 +110,7 @@ class Raiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("classic.raider.io profile"),
+            name=_("raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)
@@ -160,7 +160,7 @@ class Raiderio:
         #         color=char_score_color,
         #     )
         #     embed.set_author(
-        #         name=_("classic.raider.io profile"),
+        #         name=_("raider.io profile"),
         #         icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         #     )
         #     embed.set_thumbnail(url=char_image)
@@ -190,10 +190,10 @@ class Raiderio:
     #
     # @staticmethod
     # def get_all_runs(profile_data: dict) -> dict[str, dict[str, list[str]]]:
-    #     """Extracts info about a player's Mythic+ dungeon runs from their classic.raider.io profile data.
+    #     """Extracts info about a player's Mythic+ dungeon runs from their raider.io profile data.
 
     #     Args:
-    #         profile_data (dict): A dictionary containing the player's classic.raider.io profile data.
+    #         profile_data (dict): A dictionary containing the player's raider.io profile data.
 
     #     Returns:
     #         dict: A dictionary containing information about the player's runs in each dungeon.
@@ -235,7 +235,7 @@ class Raiderio:
     @commands.bot_has_permissions(embed_links=True)
     @app_commands.describe(guild="The name of the guild", realm="The guild's realm")
     async def raiderio_guild(self, ctx: commands.Context, guild: str, *, realm: str) -> None:
-        """Display the classic.raider.io profile of a guild.
+        """Display the raider.io profile of a guild.
 
         If the guild or realm name have spaces in them, they need to be enclosed in quotes.
 
@@ -432,7 +432,7 @@ class Raiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("classic.raider.io profile"),
+            name=_("raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)
@@ -471,7 +471,7 @@ class Raiderio:
         :param item_id: ID of the item
         :return: Wowhead URL
         """
-        return f"https://www.wowhead.com/mop-classic/item={item_id}"
+        return f"https://www.wowhead.com/item={item_id}"
 
 
 class ProfileMenu(SimpleMenu):
@@ -506,7 +506,7 @@ class ProfileMenu(SimpleMenu):
         self.add_item(talents_button)
 
     def get_talent_calc_url(self):
-        return f"https://www.wowhead.com/mop-classic/talent-calc/blizzard/{self.talents}"
+        return f"https://www.wowhead.com/talent-calc/blizzard/{self.talents}"
 
     async def on_timeout(self):
         if self.delete_after_timeout and not self.message.flags.ephemeral:

@@ -28,7 +28,7 @@ class UserInstallableRaiderio:
     async def user_install_raiderio_profile(
         self, interaction: discord.Interaction, character: str, realm: str
     ) -> None:
-        """Display the classic.raider.io profile of a character.
+        """Display the raider.io profile of a character.
 
         **Example:**
         [p]raiderio profile Karlo Ragnaros
@@ -78,7 +78,7 @@ class UserInstallableRaiderio:
             f"https://cdnassets.raider.io/images/profile/masthead_backdrops/v2/{banner}.jpg"
         )
         armory_url = f"https://worldofwarcraft.com/en-gb/character/{region}/{realm}/{char_name}"
-        wcl_url = f"https://classic.warcraftlogs.com/character/{region}/{realm}/{char_name}"
+        wcl_url = f"https://www.warcraftlogs.com/character/{region}/{realm}/{char_name}"
         raidbots_url = (
             f"https://www.raidbots.com/simbot/quick?region={region}&realm={realm}&name={char_name}"
         )
@@ -91,7 +91,7 @@ class UserInstallableRaiderio:
             color=char_score_color,
         )
         embed.set_author(
-            name=_("classic.raider.io profile"),
+            name=_("raider.io profile"),
             icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         )
         embed.set_thumbnail(url=char_image)
@@ -141,7 +141,7 @@ class UserInstallableRaiderio:
         #         color=char_score_color,
         #     )
         #     embed.set_author(
-        #         name=_("classic.raider.io profile"),
+        #         name=_("raider.io profile"),
         #         icon_url="https://cdnassets.raider.io/images/fb_app_image.jpg",
         #     )
         #     embed.set_thumbnail(url=char_image)

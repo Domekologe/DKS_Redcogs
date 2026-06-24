@@ -77,9 +77,9 @@ async def _get_access_token_cached(self, region: str) -> str:
 
 
 async def _fetch_token_price(self, region: str, game: str = "classic", locale: str = "en_US") -> dict:
-    """Queries the token price from the Blizzard API"""
+    """Queries the token price from the Blizzard API (classic only)."""
     host = _API_HOST.get(region, "eu.api.blizzard.com")
-    namespace = f"dynamic-{region}" if game == "retail" else f"dynamic-classic-{region}"
+    namespace = f"dynamic-classic-{region}"
     url = f"https://{host}/data/wow/token/index"
     token = await _get_access_token_cached(self, region)
 

@@ -83,7 +83,7 @@ async def _get_access_token(self, region: str) -> str:
 async def _fetch_equipment(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}
@@ -97,7 +97,7 @@ async def _fetch_equipment(self, *, region: str, realm_slug: str, char_slug: str
 async def _fetch_item_levels(self, *, region: str, game: str, locale: str, item_ids: List[int], concurrency: int = 5) -> Dict[int, Optional[int]]:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"static-{region}" if game == "retail" else f"static-classic-{region}"
+    namespace = f"static-{region}"
 
     sem = asyncio.Semaphore(concurrency)
     results: Dict[int, Optional[int]] = {}
@@ -126,7 +126,7 @@ async def _fetch_item_levels(self, *, region: str, game: str, locale: str, item_
 async def _fetch_statistics(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/statistics"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}
@@ -141,7 +141,7 @@ async def _fetch_statistics(self, *, region: str, realm_slug: str, char_slug: st
 async def _fetch_achv_statistics(self, *, region: str, realm_slug: str, char_slug: str, game: str, locale: str) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/achievements/statistics"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}

@@ -29,7 +29,7 @@ def _resolve_locale(lang_or_locale: str) -> str:
     return AC_LANG_CODES.get(key, lang_or_locale)
 
 def _wowhead_spell(spell_id: int) -> str:
-    return f"https://www.wowhead.com/mop-classic/spell={spell_id}"
+    return f"https://www.wowhead.com/spell={spell_id}"
 
 # -------- OAuth Cache (lokal) --------
 def _ensure_oauth_state(self):
@@ -71,12 +71,12 @@ async def _fetch_specializations(
     region: Literal["eu", "us", "kr", "tw"],
     realm: str,
     character: str,
-    game: Literal["classic", "retail"] = "classic",
+    game: Literal["classic", "retail"] = "retail",
     locale: str = "en_US",
 ) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm}/{character}/specializations"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}

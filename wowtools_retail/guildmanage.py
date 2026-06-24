@@ -465,15 +465,15 @@ class GuildManage:
     @staticmethod
     def get_raiderio_url(realm: str, region: str, name: str) -> str:
         return (
-            f"[classic.raider.io]"
-            f"(https://classic.classic.raider.io/characters/{region.lower()}/{realm.lower()}/{name})"
+            f"[raider.io]"
+            f"(https://raider.io/characters/{region.lower()}/{realm.lower()}/{name})"
         )
 
     @staticmethod
     def get_warcraftlogs_url(realm: str, region: str, name: str) -> str:
         return (
             f"[WarcraftLogs]"
-            f"(https://classic.warcraftlogs.com/character/{region.lower()}/{realm.lower()}/{name})"
+            f"(https://www.warcraftlogs.com/character/{region.lower()}/{realm.lower()}/{name})"
         )
 
     @guild_log.error

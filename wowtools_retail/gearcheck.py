@@ -22,7 +22,7 @@ def _resolve_locale(lang_or_locale: str) -> str:
 
 def _wowhead_url(item_id: int, game: Literal["classic", "retail"]) -> str:
     # MoP Classic has its own path
-    return f"https://wowhead.com/mop-classic/item={item_id}" if game == "classic" else f"https://wowhead.com/item={item_id}"
+    return f"https://wowhead.com/item={item_id}"
 
 def _quality_emoji(quality_type: str) -> str:
     q = (quality_type or "").upper()
@@ -90,12 +90,12 @@ async def _get_access_token_cached_gear(self, region: str) -> str:
         return token
 
 async def _fetch_equipment_blizzard(self, *, region: str, realm: str, character: str,
-                                    game: str = "classic", locale: str = "en_US") -> dict:
+                                    game: str = "retail", locale: str = "en_US") -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token_cached_gear(self, region)
     realm_slug = realm.lower().replace(" ", "-")
     char_slug = character.lower()
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}
@@ -160,7 +160,7 @@ class GearCheck(commands.Cog):
         region: Literal["eu", "us", "kr"],
         realm: str,
         character: str,
-        game: Literal["classic", "retail"] = "classic",
+        game: Literal["classic", "retail"] = "retail",
         locale: str = "en_US",
         private: bool = True,
     ) -> dict:
@@ -169,7 +169,7 @@ class GearCheck(commands.Cog):
         realm_slug = realm.lower().replace(" ", "-")
         char_slug = character.lower()
 
-        namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+        namespace = f"profile-{region}"
         url = f"https://{host}/profile/wow/character/{realm_slug}/{char_slug}/equipment"
         params = {"namespace": namespace, "locale": locale}
         headers = {"Authorization": f"Bearer {token}"}
@@ -197,7 +197,7 @@ class GearCheck(commands.Cog):
         """
         host = _API_HOST.get(region, "eu.api.blizzard.com")
         token = await _get_access_token_cached_gear(self, region)
-        namespace = f"static-{region}" if game == "retail" else f"static-classic-{region}"
+        namespace = f"static-{region}"
 
         sem = asyncio.Semaphore(concurrency)
         results: Dict[int, Optional[int]] = {}

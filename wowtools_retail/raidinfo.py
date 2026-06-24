@@ -68,12 +68,12 @@ async def _fetch_achv_statistics(
     region: str,
     realm: str,
     character: str,
-    game: str = "classic",
+    game: str = "retail",
     locale: str = "en_US",
 ) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-{region}"
     url = f"https://{host}/profile/wow/character/{realm}/{character}/achievements/statistics"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}

@@ -142,7 +142,7 @@ class OnMessage:
         embed = discord.Embed(
             title=result["data"]["name"]["en_US"],
             description=self.generate_description(result_description, obj_type),
-            url=f"https://www.wowhead.com/mop-classic/{obj_type}={result['data']['id']}",
+            url=f"https://www.wowhead.com/{obj_type}={result['data']['id']}",
             colour=(
                 await self.get_spell_colour(result_icon["assets"][0]["value"])
                 if obj_type == "spell"

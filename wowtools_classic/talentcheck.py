@@ -76,7 +76,7 @@ async def _fetch_specializations(
 ) -> dict:
     host = _API_HOST.get(region, "eu.api.blizzard.com")
     token = await _get_access_token(self, region)
-    namespace = f"profile-{region}" if game == "retail" else f"profile-classic-{region}"
+    namespace = f"profile-classic-{region}"
     url = f"https://{host}/profile/wow/character/{realm}/{character}/specializations"
     params = {"namespace": namespace, "locale": locale}
     headers = {"Authorization": f"Bearer {token}"}

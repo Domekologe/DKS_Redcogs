@@ -76,10 +76,10 @@ async def _get_access_token_cached(self, region: str) -> str:
         return token
 
 
-async def _fetch_token_price(self, region: str, game: str = "classic", locale: str = "en_US") -> dict:
-    """Queries the token price from the Blizzard API"""
+async def _fetch_token_price(self, region: str, game: str = "retail", locale: str = "en_US") -> dict:
+    """Queries the token price from the Blizzard API (retail only)."""
     host = _API_HOST.get(region, "eu.api.blizzard.com")
-    namespace = f"dynamic-{region}" if game == "retail" else f"dynamic-classic-{region}"
+    namespace = f"dynamic-{region}"
     url = f"https://{host}/data/wow/token/index"
     token = await _get_access_token_cached(self, region)
 
@@ -117,8 +117,7 @@ class Token:
                 )
                 return
 
-            # Classic as default (as before in your file)
-            data = await _fetch_token_price(self, region=region, game="classic", locale="en_US")
+            data = await _fetch_token_price(self, region=region, game="retail", locale="en_US")
             price_copper = int(data.get("price", 0))
 
             gold_emotes = await self.config.emotes()
@@ -160,7 +159,7 @@ class Token:
         embed = discord.Embed(title=_("WoW Token prices"), colour=await ctx.embed_colour())
         for region in VALID_REGIONS:
             try:
-                data = await _fetch_token_price(self, region=region, game="classic", locale="en_US")
+                data = await _fetch_token_price(self, region=region, game="retail", locale="en_US")
                 price_copper = int(data.get("price", 0))
                 gold_emotes = await self.config.emotes()
                 embed.add_field(
