@@ -324,26 +324,80 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         log.exception("Fehler beim Sammeln der Text-Commands")
 
+    # Discord-registered (synced) chat-input command names, for the "synced" flag.
+    registered_names = set()
+    try:
+        for ac in await _fetch_registered_commands(bot):
+            if getattr(getattr(ac, "type", None), "value", 1) == 1:
+                registered_names.add(ac.name)
+    except Exception:
+        pass
+
+    def _synced(name) -> bool:
+        return str(name).split(" ")[0] in registered_names
+
     slash: list = []
+    slash_names: set = set()
     try:
         from discord import app_commands  # local, to avoid a hard import dependency
 
+        def _add_slash(c, binding, cog_name=None):
+            name = getattr(c, "qualified_name", None) or getattr(c, "name", None)
+            if not name or name in slash_names:
+                return
+            slash_names.add(name)
+            bi = (getattr(c, "extras", None) or {}).get("i18n_desc") or i18n_by_name.get(name)
+            desc = _i18n_desc(bi, locale)
+            if desc is None:
+                desc = (getattr(c, "description", "") or "").strip()
+            if cog_name is None:
+                cog_name = type(binding).__name__ if binding is not None else "—"
+            slash.append({
+                "name": name,
+                "description": desc,
+                "cog": cog_name,
+                "repo": _repo_for_cog(binding, repo_map),
+                "synced": _synced(name),
+            })
+
+        # 1) Commands actually in the tree.
         tree = getattr(bot, "tree", None)
         if tree is not None:
             for c in tree.walk_commands():
-                if not isinstance(c, app_commands.Command):
-                    continue  # skip groups without their own callback
-                binding = getattr(c, "binding", None)
-                bi = (getattr(c, "extras", None) or {}).get("i18n_desc") or i18n_by_name.get(c.qualified_name)
-                desc = _i18n_desc(bi, locale)
-                if desc is None:
-                    desc = (getattr(c, "description", "") or "").strip()
-                slash.append({
-                    "name": c.qualified_name,
-                    "description": desc,
-                    "cog": type(binding).__name__ if binding is not None else "—",
-                    "repo": _repo_for_cog(binding, repo_map),
-                })
+                if isinstance(c, app_commands.Command):
+                    _add_slash(c, getattr(c, "binding", None))
+
+        # 2) Enabled app/hybrid commands that Red keeps OUTSIDE the tree until a sync
+        #    (e.g. a freshly enabled /ban). Read Red's enabled config and pull the
+        #    matching app command off each cog (hybrids store it on the text command).
+        enabled_top: set = set()
+        try:
+            res = bot.list_enabled_app_commands()
+            if hasattr(res, "__await__"):
+                res = await res
+            if isinstance(res, dict):
+                enabled_top = set((res.get("slash") or {}).keys())
+        except Exception:
+            enabled_top = set()
+        if enabled_top:
+            for cog_name, cog in list(bot.cogs.items()):
+                try:
+                    cands = []
+                    if hasattr(cog, "get_app_commands"):
+                        cands += [a for a in cog.get_app_commands() if isinstance(a, app_commands.Command)]
+                    for tc in (cog.get_commands() if hasattr(cog, "get_commands") else []):
+                        ac = getattr(tc, "app_command", None)
+                        if ac is not None:
+                            cands.append(ac)
+                except Exception:
+                    continue
+                for ac in cands:
+                    name = getattr(ac, "qualified_name", None) or getattr(ac, "name", None)
+                    if not name or name in slash_names:
+                        continue
+                    if str(name).split(" ")[0] not in enabled_top:
+                        continue
+                    _add_slash(ac, cog, cog_name)
     except Exception:
         log.exception("Fehler beim Sammeln der Slash-Commands")
 
@@ -766,6 +820,15 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # SYNCED status: name is actually registered with Discord (cached fetch). An
+    # enabled-but-not-yet-synced command is flagged so the UI can show a hint.
+    registered_names = set()
+    try:
+        for ac in await _fetch_registered_commands(bot):
+            registered_names.add(getattr(ac, "name", None))
+    except Exception:
+        pass
+
     # Determine the cog for a tree command – binding first, otherwise via the module.
     def _cog_for(c) -> str:
         b = getattr(c, "binding", None)
@@ -797,6 +860,7 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 "type": ctype,
                 "cog": cog_name,
                 "enabled": key in enabled_keys,
+                "synced": name in registered_names,
             })
         except Exception:
             return
@@ -852,6 +916,7 @@ async def slash_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 "cog": ghost_label,
                 "enabled": True,
                 "orphan": True,
+                "synced": True,
             })
     except Exception:
         log.exception("Fehler beim Abgleich der Discord-Registrierungen (slash.list)")
