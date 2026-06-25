@@ -1,0 +1,13 @@
+{
+  "name": "Leveling",
+  "short": "XP / leveling system with rank cards and role rewards.",
+  "description": "Award XP for chatting, with levels, a leaderboard, rank cards (image, with embed fallback) and optional level-up role rewards. Opt-in per guild, bilingual (DE/EN), with web dashboard integration.",
+  "author": ["Domekologe"],
+  "required_cogs": {},
+  "requirements": [],
+  "tags": ["leveling", "xp", "ranks", "engagement", "dashboard"],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG"
+}

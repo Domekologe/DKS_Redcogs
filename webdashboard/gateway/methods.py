@@ -1398,11 +1398,17 @@ async def _do_cog_uninstall(gateway: Any, dl: Any, cog_name: str, ctx: Any) -> D
                     break
                 except Exception:
                     continue
-    # 3) Sync the tree (cleanly deregister slash commands)
-    try:
-        await bot.tree.sync()
-    except Exception:
-        pass
+    # 3) Deregister slash commands in the BACKGROUND. A full bot.tree.sync() is
+    #    slow and heavily rate-limited by Discord; awaiting it here is what made
+    #    the uninstall occasionally hit the 15s gateway timeout. Fire-and-forget
+    #    so the RPC returns immediately — the sync still completes shortly after.
+    async def _bg_sync() -> None:
+        try:
+            await bot.tree.sync()
+        except Exception:
+            pass
+
+    asyncio.ensure_future(_bg_sync())
     gateway.audit("downloader.cog_uninstall", ctx, {"cog": cog_name})
     return {"ok": True, "cog": cog_name}
 
@@ -1527,6 +1533,23 @@ async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, 
     return {"ui": ui, "locked": locked, "bot_avatar": bot_avatar, "invite_url": invite_url}
 
 
+@dispatcher.method("logs.list")
+async def logs_list(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Recent in-memory bot log records for the dashboard Log-Viewer (owner only)."""
+    ctx = await _build_context(gateway, params)
+    await _require(gateway, ctx, "bot_owner")
+    from .logbuffer import level_value, snapshot
+    args = params.get("args") or {}
+    min_level = level_value(str(args.get("level", "") or ""))
+    query = str(args.get("query", "") or "")
+    try:
+        limit = int(args.get("limit", 300) or 300)
+    except Exception:
+        limit = 300
+    limit = max(1, min(limit, 1000))
+    return {"logs": snapshot(min_level=min_level, query=query, limit=limit)}
+
+
 @dispatcher.method("dashboard.overview")
 async def dashboard_overview(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     ctx = await _build_context(gateway, params)  # authenticated is sufficient
@@ -1583,23 +1606,10 @@ async def dashboard_settings_set(gateway: Any, params: Dict[str, Any]) -> Dict[s
     return {"ok": True, "ui": ui}
 
 
-@dispatcher.method("dashboard.branding")
-async def dashboard_branding(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Public branding (title/icon/description/support/color/theme) for the UI.
-
-    No auth required: these values are shown to every visitor (header title, icon,
-    landing description, support link). Only the safe public subset is returned.
-    """
-    cog = _dashboard_cog(gateway)
-    ui = dict(await cog.config.ui()) if cog else {}
-    return {
-        "title": ui.get("title") or "",
-        "icon": ui.get("icon") or "",
-        "description": ui.get("description") or "",
-        "support_url": ui.get("support_url") or "",
-        "color": ui.get("color") or "indigo",
-        "theme": ui.get("theme") or "dark",
-    }
+# NOTE: a second, legacy ``dashboard.branding`` used to live here and returned a
+# *flat* payload without the ``ui`` wrapper / bot_avatar / invite_url. Because
+# rpc registration is last-wins, it silently shadowed the correct handler above
+# and broke the site title (and favicon/invite) on the web UI. Removed.
 
 
 @dispatcher.method("dashboard.lock")

@@ -65,6 +65,9 @@ class WebDashboard(commands.Cog):
     # Lifecycle
     # ------------------------------------------------------------------ #
     async def cog_load(self) -> None:
+        # Capture recent log records in memory for the dashboard Log-Viewer.
+        from .gateway.logbuffer import install as _install_logbuffer
+        _install_logbuffer()
         # Collect already-loaded third-party cogs – regardless of whether they use
         # the DashboardIntegration mixin or merely decorated methods and would have
         # registered later. This way any load order works.
@@ -76,6 +79,8 @@ class WebDashboard(commands.Cog):
             await self._start_gateway()
 
     async def cog_unload(self) -> None:
+        from .gateway.logbuffer import uninstall as _uninstall_logbuffer
+        _uninstall_logbuffer()
         await self._stop_gateway()
 
     async def _start_gateway(self) -> None:
