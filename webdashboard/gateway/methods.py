@@ -286,6 +286,38 @@ def _i18n_desc(value: Any, locale: Any) -> Optional[str]:
     return next(iter(value.values()), None)
 
 
+def _category_from_name(name: str) -> str:
+    """Name-only heuristic fallback when no privilege level is available."""
+    n = (name or "").lower()
+    first = n.split(" ")[0]
+    if first.endswith("set") or n.endswith("set") or any(k in n for k in ("config", "setup", "settings")):
+        return "Setup"
+    if any(k in n for k in ("ban", "kick", "timeout", "mute", "purge", "warn")):
+        return "Moderator"
+    return "User"
+
+
+def _command_category(cmd) -> str:
+    """Categorise a Red command into Admin / Moderator / Setup / User.
+
+    Primary signal is Red's privilege level; ``Setup`` is the configuration subset
+    of admin-level commands (names like ``*set``, ``config``, ``setup``).
+    """
+    name = getattr(cmd, "qualified_name", "") or ""
+    setupish = _category_from_name(name) == "Setup"
+    try:
+        from redbot.core.commands import PrivilegeLevel as _PL  # type: ignore
+        pl = getattr(getattr(cmd, "requires", None), "privilege_level", None)
+        if pl is not None:
+            if pl >= _PL.ADMIN:
+                return "Setup" if setupish else "Admin"
+            if pl >= _PL.MOD:
+                return "Moderator"
+    except Exception:
+        pass
+    return _category_from_name(name)
+
+
 @dispatcher.method("core.commands")
 async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     """List of active text and slash commands. Public (without user context).
@@ -303,6 +335,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
     # side so the slash list can reuse it (hybrid app-commands don't reliably carry
     # the parent's extras).
     i18n_by_name: Dict[str, Any] = {}
+    category_by_name: Dict[str, str] = {}
 
     prefix: list = []
     try:
@@ -315,11 +348,14 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             desc = _i18n_desc(bi, locale)
             if desc is None:
                 desc = (getattr(c, "short_doc", "") or "").strip()
+            cat = _command_category(c)
+            category_by_name[c.qualified_name] = cat
             prefix.append({
                 "name": c.qualified_name,
                 "description": desc,
                 "cog": c.cog_name or "—",
                 "repo": _repo_for_cog(getattr(c, "cog", None), repo_map),
+                "category": cat,
             })
     except Exception:
         log.exception("Fehler beim Sammeln der Text-Commands")
@@ -358,6 +394,7 @@ async def core_commands(gateway: Any, params: Dict[str, Any]) -> Dict[str, Any]:
                 "cog": cog_name,
                 "repo": _repo_for_cog(binding, repo_map),
                 "synced": _synced(name),
+                "category": category_by_name.get(name) or _category_from_name(name),
             })
 
         # 1) Commands actually in the tree.

@@ -1,0 +1,13 @@
+{
+  "name": "ActivityShop",
+  "short": "Earn virtual currency by activity and spend it in a shop.",
+  "description": "Members earn currency (Red's bank) for chatting; spend it in a per-guild shop on roles or items. Shop items are managed from the web dashboard. Opt-in per guild, bilingual (DE/EN).",
+  "author": ["Domekologe"],
+  "required_cogs": {},
+  "requirements": [],
+  "tags": ["economy", "shop", "currency", "engagement", "dashboard"],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG"
+}

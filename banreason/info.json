@@ -1,0 +1,13 @@
+{
+  "name": "BanReason",
+  "short": "Ban command with a preset, queried reason list.",
+  "description": "Ban members by picking from a preset list of reasons (slash autocomplete), with an optional DM to the user and a mod-log channel. Reasons are managed from the web dashboard. Bilingual (DE/EN).",
+  "author": ["Domekologe"],
+  "required_cogs": {},
+  "requirements": [],
+  "tags": ["moderation", "ban", "dashboard"],
+  "min_bot_version": "3.5.0",
+  "hidden": false,
+  "disabled": false,
+  "type": "COG"
+}

@@ -272,19 +272,20 @@ class Birthday(commands.Cog):
     # ------------------------------------------------------------------ #
     @dashboard_panel("birthday", L("Geburtstage", "Birthdays"), mount="guild_settings", permission="guild_admin", order=50)
     async def settings_panel(self, ctx):
-        guild = ctx.guild
-        conf = self.config.guild(guild)
-        channels = [{"value": str(c.id), "label": f"#{c.name}"} for c in guild.text_channels]
-        roles = [{"value": "", "label": "—"}] + [
-            {"value": str(r.id), "label": r.name} for r in guild.roles if not r.is_default()
-        ]
+        conf = self.config.guild(ctx.guild)
         lang = await conf.language()
         return PanelSchema(
             description=tr_lang(lang, "Geburtstags-Ankündigungen für diesen Server.", "Birthday announcements for this server."),
             fields=[
                 Field.switch("enabled", L("Aktiviert", "Enabled"), value=bool(await conf.enabled())),
-                Field.select("channel", L("Kanal", "Channel"), channels, value=str(await conf.channel() or "")),
-                Field.select("role", L("Geburtstagsrolle", "Birthday role"), roles, value=str(await conf.role() or "")),
+                Field.channel("channel", L("Ankündigungs-Kanal", "Announcement channel"), value=str(await conf.channel() or "")),
+                Field.role("role", L("Geburtstagsrolle (optional)", "Birthday role (optional)"), value=str(await conf.role() or "")),
+                Field.number("hour", L("Ankündigung um (Stunde, UTC)", "Announce at (hour, UTC)"), value=int(await conf.hour())),
+                Field.textarea(
+                    "message",
+                    L("Nachricht — {mention} und {name} werden ersetzt", "Message — {mention} and {name} are replaced"),
+                    value=str(await conf.message() or ""),
+                ),
                 Field.select(
                     "language", L("Sprache", "Language"),
                     [{"value": "de-DE", "label": "Deutsch"}, {"value": "en-US", "label": "English"}],
@@ -301,6 +302,14 @@ class Birthday(commands.Cog):
         await (conf.channel.set(int(ch)) if ch.isdigit() else conf.channel.clear())
         role = str(data.get("role") or "").strip()
         await (conf.role.set(int(role)) if role.isdigit() else conf.role.clear())
+        try:
+            hour = int(data.get("hour", 9))
+        except (TypeError, ValueError):
+            hour = 9
+        await conf.hour.set(max(0, min(23, hour)))
+        msg = str(data.get("message", "")).strip()
+        if msg:
+            await conf.message.set(msg)
         lang = str(data.get("language", "en-US")).strip() or "en-US"
         await conf.language.set(lang)
         return SubmitResult.ok(tr_lang(lang, "Gespeichert.", "Saved."))
