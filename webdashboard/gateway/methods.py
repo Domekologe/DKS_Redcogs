@@ -292,16 +292,49 @@ def _category_from_name(name: str) -> str:
     first = n.split(" ")[0]
     if first.endswith("set") or n.endswith("set") or any(k in n for k in ("config", "setup", "settings")):
         return "Setup"
-    if any(k in n for k in ("ban", "kick", "timeout", "mute", "purge", "warn")):
+    if any(k in n for k in (
+        "ban", "kick", "timeout", "mute", "purge", "warn", "clean", "clear",
+        "lock", "slowmode", "move", "copy-role", "copy-channelrole", "modlog",
+    )):
         return "Moderator"
     return "User"
+
+
+# Discord permissions that imply a server-management (admin) command.
+_ADMIN_PERMS = ("administrator", "manage_guild")
+# Discord permissions that imply a moderator-level command.
+_MOD_PERMS = (
+    "manage_roles", "manage_channels", "manage_messages", "kick_members",
+    "ban_members", "manage_nicknames", "moderate_members", "mute_members",
+    "deafen_members", "move_members", "manage_threads", "manage_webhooks",
+)
+
+
+def _category_from_perms(cmd) -> Optional[str]:
+    """Categorise from the Discord permissions a command's checks require.
+
+    Reads ``cmd.requires.user_perms`` (a ``discord.Permissions`` set by checks like
+    ``has_permissions``/``mod_or_permissions``). Returns Admin/Moderator or None.
+    """
+    try:
+        perms = getattr(getattr(cmd, "requires", None), "user_perms", None)
+        if perms is None:
+            return None
+        if any(getattr(perms, p, False) for p in _ADMIN_PERMS):
+            return "Admin"
+        if any(getattr(perms, p, False) for p in _MOD_PERMS):
+            return "Moderator"
+    except Exception:
+        pass
+    return None
 
 
 def _command_category(cmd) -> str:
     """Categorise a Red command into Admin / Moderator / Setup / User.
 
-    Primary signal is Red's privilege level; ``Setup`` is the configuration subset
-    of admin-level commands (names like ``*set``, ``config``, ``setup``).
+    Signals, in order: Red's privilege level, the Discord permissions required by
+    the command's checks, then a name heuristic. ``Setup`` is the configuration
+    subset of admin-level commands (names like ``*set``, ``config``, ``setup``).
     """
     name = getattr(cmd, "qualified_name", "") or ""
     setupish = _category_from_name(name) == "Setup"
@@ -315,6 +348,11 @@ def _command_category(cmd) -> str:
                 return "Moderator"
     except Exception:
         pass
+    by_perms = _category_from_perms(cmd)
+    if by_perms == "Admin":
+        return "Setup" if setupish else "Admin"
+    if by_perms == "Moderator":
+        return "Moderator"
     return _category_from_name(name)
 
 
