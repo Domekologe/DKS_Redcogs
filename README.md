@@ -1,3 +1,11 @@
+> [!WARNING]
+> **This repository is no longer maintained.**
+> The cogs have moved and been split into two new repositories:
+> - **[PD-Codes/PDC_Redbot_Cogs](https://github.com/PD-Codes/PDC_Redbot_Cogs)** – general cogs
+> - **[PD-Codes/PDC_Redbot_Game_Cogs](https://github.com/PD-Codes/PDC_Redbot_Game_Cogs)** – game-related cogs
+>
+> Please re-add the new repos in Red's Downloader (`[p]repo add ...`) and update from there. This repo will not receive further updates.
+
 ## DKS\_Redcogs
 
 This are my Cogs for Redbot. This Cogs will be used for my private Discord and can be used from you too. Please aware that the Cogs are 95% in german!
